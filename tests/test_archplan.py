@@ -1161,6 +1161,19 @@ class VocabTest(TempProject):
                          [("shop", "invoice", "avoid")])
         self.assertFalse(enrich(self.p))  # a model with a vocabulary is left alone
 
+    def test_glossary_kinds(self):
+        from archplan.vocab import enrich, parse_glossary
+        g = parse_glossary("---\nowns:\n  Invoice: []\n  Stripe: []\n  Webhook: []\nvendor: [Stripe]\n"
+                           "technical:\n  - Webhook\n---\n")
+        self.assertEqual((g["vendor"], g["technical"]), (["Stripe"], ["Webhook"]))
+        write(self.root, {"lib/billing/GLOSSARY.md": "---\nowns:\n  Invoice: []\n  Stripe: []\n  Webhook: []\n"
+                                                     "vendor: [Stripe]\ntechnical: [Webhook, Ghost]\n---\n"})
+        self.assertTrue(enrich(self.p))
+        v = json.loads(self.p.model_path.read_text())["vocabulary"]
+        self.assertEqual({k: v["concepts"][k]["kind"] for k in ("invoice", "stripe", "webhook")},
+                         {"invoice": "domain", "stripe": "vendor", "webhook": "technical"})
+        self.assertNotIn("ghost", v["concepts"])  # a kind for a concept the file does not own adds nothing
+
     def test_propose_glossary(self):
         a = Agent(self.p)
         draft = {"billing": {"concepts": [{"name": "Invoice", "terms": ["invoice", "bill"],
@@ -2379,6 +2392,29 @@ class GlossaryRoundTripTest(unittest.TestCase):
             capture_output=True, text=True, timeout=30)
         self.assertEqual(out.returncode, 0, out.stderr)
         return json.loads(out.stdout)
+
+    def glossary_md(self, model, component):
+        src = (ROOT / "src/archplan/static/index.html").read_text()
+        lookup = src[src.index("const vcomp = "):src.index("\n", src.index("const conceptName = "))]
+        writer = src[src.index("const yamlStr = "):src.index("const plural = ")]
+        out = subprocess.run(["node", "-e", "const toBe = {}, asIs = {};\n" + lookup + "\n" + writer + f"""
+            process.stdout.write(glossaryMD({json.dumps(model)}, {json.dumps(component)}));"""],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return out.stdout
+
+    def test_kinds_survive_the_glossary_file(self):
+        from archplan.vocab import parse_glossary
+        concepts = {"invoice": {"name": "Invoice", "owner": "billing", "terms": ["invoice"], "kind": "domain"},
+                    "opp": {"name": "OPP", "owner": "billing", "terms": ["opp"], "kind": "vendor"},
+                    "payment-webhook": {"name": "Payment webhook", "owner": "billing",
+                                        "terms": ["webhook"], "kind": "technical"}}
+        text = self.glossary_md({"vocabulary": {"concepts": concepts, "components": {}}}, "billing")
+        g = parse_glossary(text)
+        self.assertEqual((g["vendor"], g["technical"]), (["OPP"], ["Payment webhook"]))
+        plain = self.glossary_md({"vocabulary": {"concepts": {"invoice": concepts["invoice"]}}}, "billing")
+        self.assertNotIn("vendor:", plain)  # an all-domain glossary keeps its old shape
+        self.assertNotIn("technical:", plain)
 
     def test_terms_read_back_from_glossary_match_the_proposal(self):
         proposed = {"name": "Consent agreement", "terms": ["consent", "agreement", "consent agreement"]}

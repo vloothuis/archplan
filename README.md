@@ -338,11 +338,15 @@ editor shows these uses as leaks.
 ---
 owns:
   Cart item: [cart item, basket]
+  Payment webhook: [webhook]
 uses: [product]
 avoid: [stripe]
+technical: [Payment webhook]
 ---
 **Cart item**: one product line in a cart.
 ```
+
+Owned concepts are domain concepts unless `vendor` or `technical` lists them.
 
 archplan helps you write the first glossaries. It counts the words in the
 identifiers, strings and comments of each component's files. Words that are

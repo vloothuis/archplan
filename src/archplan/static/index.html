@@ -816,8 +816,11 @@ function glossaryMD(m, c) {
   const owned = Object.entries(V.concepts || {}).filter(([, k]) => k.owner === c);
   const extra = k => (k.terms || []).filter(t => t.toLowerCase() !== (k.name || '').toLowerCase());
   const names = ids => '[' + ids.map(id => yamlStr(conceptName(m, id))).join(', ') + ']';
+  // Only non-domain concepts are listed by kind, so an all-domain glossary keeps its old shape.
+  const kinds = ['vendor', 'technical'].map(kind => [kind, owned.filter(([, k]) => k.kind === kind).map(([id]) => id)])
+    .filter(([, ids]) => ids.length).map(([kind, ids]) => `${kind}: ${names(ids)}`);
   const L = ['---', owned.length ? 'owns:' : 'owns: {}', ...owned.map(([, k]) => `  ${yamlStr(k.name)}: [${extra(k).map(yamlStr).join(', ')}]`),
-    `uses: ${names(cv.uses || [])}`, `avoid: ${names(cv.avoid || [])}`, '---', ''];
+    `uses: ${names(cv.uses || [])}`, `avoid: ${names(cv.avoid || [])}`, ...kinds, '---', ''];
   owned.forEach(([, k]) => L.push(`**${k.name}**: ${k.definition || '(no definition yet)'}`, ''));
   return L.join('\n').trimEnd() + '\n';
 }
