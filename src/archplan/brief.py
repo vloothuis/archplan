@@ -213,6 +213,10 @@ def group(findings: list) -> list:
 
 
 def severity(f: dict) -> float:
+    """A finding's weight on a 0 to 5 scale. The weight already counts spread,
+    centrality and churn; a pseudo-finding without one gets its kind's share."""
+    if isinstance(f.get("weight"), (int, float)):
+        return f["weight"] / 20
     return SEVERITY.get(f.get("strength"), 1.0) * KIND_WEIGHT.get(f["kind"], 0.6)
 
 
@@ -435,8 +439,11 @@ def opportunities(p: Project, store: Store | None = None) -> dict:
         fi = max((len(fan.get(c, ())) for c in comps), default=0)
         cf = 1 + (math.log1p(ch) / math.log1p(max_churn) if max_churn else 0)
         ff = 1 + (math.log1p(fi) / math.log1p(max_fan) if max_fan else 0)
+        if "weight" in main:  # the weight counts churn and fan-in already
+            cf = ff = 1
         o = {"id": oid, "kind": main["kind"], "title": main["title"] + (f" (+{len(fs) - 1} related)" if len(fs) > 1 else ""),
              "score": round(sev * cf * ff, 2), "components": comps[:6],
+             **({"weight": main["weight"]} if "weight" in main else {}),
              "findings": [i for i in ids if not i.startswith(("hotspot-", "vocabulary.misplaced-"))],
              "facts": facts(main, model),
              "related": [{"id": f["id"], "kind": f["kind"], "title": f["title"]} for f in fs[1:4]],

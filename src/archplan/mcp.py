@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import sys
 
-from . import __version__, architecture, hotspots
+from . import __version__, architecture, hotspots, reload
 from .model import ANCHORS, EDIT_OPS, dumps, find_items, get_item, violations
 from .project import Project, ProjectError, counts, read_json, write_json
 from .handover import Handovers, progress
@@ -558,9 +558,35 @@ def record(p: Project, store: Store, tool: str, args: dict, done: bool = False) 
         pass
 
 
+class UpdateNotice:
+    """A line for one tool result when newer archplan code is on disk. The MCP
+    server does not restart itself: Claude Code owns its stdio pipe and the
+    session state (initialize, the tool list), and a new process cannot take
+    those over safely. Claude Code starts the new code on its next start."""
+
+    def __init__(self, every: float = 10.0):
+        self.every, self.checked, self.told = every, 0.0, None
+
+    def __call__(self) -> str | None:
+        import time
+        if reload.disabled() or time.monotonic() - self.checked < self.every:
+            return None
+        self.checked = time.monotonic()
+        try:
+            v = reload.newer_on_disk()
+        except OSError:
+            return None
+        if not v or v == self.told:
+            return None
+        self.told = v
+        return (f"archplan was updated to {v} (this MCP server runs {reload.BUILD}). "
+                "Restart Claude Code to load it.")
+
+
 def serve(p: Project) -> None:
     agent = Agent(p)
     names = {t["name"] for t in TOOLS}
+    notice = UpdateNotice()
 
     def send(obj):
         sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
@@ -603,6 +629,8 @@ def serve(p: Project) -> None:
                 result = {"content": [{"type": "text", "text": dumps(out)}]}
             except (KeyError, TypeError, ValueError, ProjectError) as e:
                 result = {"content": [{"type": "text", "text": f"error: {e}"}], "isError": True}
+            if note := notice():
+                result["content"].append({"type": "text", "text": note})
         else:
             send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": f"no method {method}"}})
             continue

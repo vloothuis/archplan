@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from itertools import combinations
 
-from .common import EXAMPLES, finding, plural
-from .data_common import name, owner, plain_columns, tables
+from .common import EXAMPLES, Weight, finding, plural
+from .data_common import name, owner, plain_columns, table_focus, tables
 
 ID = "data.repeated_columns"
 NAME = "Repeated column group"
@@ -63,5 +63,9 @@ def run(ctx, params) -> list:
             f"{plural(len(cols), 'column')} in {plural(len(tbls), 'table')}", owners, [],
             {"columns": cols, "tables": tbls[:EXAMPLES], "owners": owners,
              "moves": ["Give the group one type in the code (a value object or embedded schema) and reuse it.",
-                       "If the rows are the same thing, keep them in one table that the others reference."]}))
+                       "If the rows are the same thing, keep them in one table that the others reference."]},
+            focus=table_focus(ctx, {t: cols for t in tbls}, owners),
+            weight=Weight(25, "repeated columns").spread(len(tbls), "tables", per=12, cap=20, free=2)
+            .spread(len(owners), "owners", per=12, cap=20)
+            .spread(len(cols), "columns", per=4, cap=8, free=3)))
     return out

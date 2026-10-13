@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict, deque
 
-from .common import EXAMPLES, comp_name, evidence_file, finding, graph, namer, plural
+from .common import EXAMPLES, Weight, comp_name, evidence_file, finding, focus, graph, namer, plural
 
 MAX_CYCLES = 40          # cycles reported; each one found after cutting the cheaper ones before it
 TANGLE = 4               # an SCC of this many components or more is one tangle finding
@@ -238,7 +238,10 @@ def tangle_finding(model: dict, g: dict, members: list) -> dict:
          "cut_count": len(cuts), "cut_weight": total, "cycles": n_cycles,
          "sample_cycles": [r for r in cycles if len(r) == 3][:3] or cycles[:3],
          "two_cycles": [{"a": a, "b": b, "weights": [w[(a, b)], w[(b, a)]]}
-                        for a, b in sorted(two, key=lambda r: (min(w[(r[0], r[1])], w[(r[1], r[0])]), r))][:10]})
+                        for a, b in sorted(two, key=lambda r: (min(w[(r[0], r[1])], w[(r[1], r[0])]), r))][:10]},
+        focus=[focus("components", [hub] + [c for c in members if c != hub], cuts[:TANGLE_CUTS])],
+        weight=Weight(65, "tangle").spread(len(members), per=5, cap=15, free=4)
+        .repetition(len(cuts), "cuts needed", per=2, cap=8, single=0))
 
 
 def cycle_findings(model: dict) -> list:
@@ -300,7 +303,10 @@ def small_cycle_findings(model: dict, size: int = TANGLE, max_cycles: int = MAX_
                 {"cycle": ring, "edges": [{"from": a, "to": b, "weight": g[(a, b)]["weight"]}
                                           for a, b in zip(ring, ring[1:] + ring[:1])],
                  "cut": {"from": cut[0], "to": cut[1], "weight": w, "evidence": ev},
-                 "tangle": size.get(ring[0], len(ring))}))
+                 "tangle": size.get(ring[0], len(ring))},
+                focus=[focus("components", ring, list(zip(ring, ring[1:] + ring[:1])))],
+                weight=Weight(60, "cycle").spread(len(ring), per=4, free=2)
+                .repetition(w, "references on the cheapest cut", per=4, cap=12, single=-4)))
             if len(out) - n_tangles >= max_cycles:
                 break
     return out

@@ -18,6 +18,9 @@ token do not start workflows, so a release does not release itself again.
 Runs wait for each other, and a run with nothing new since the last release
 does nothing.
 
+Running editor servers and editor tabs pick up a release by themselves; see
+"Updates" in the README. MCP servers need a restart of Claude Code.
+
 ## Versions (CalVer)
 
 Versions follow rela's scheme: `vYY.M.BUILD`.

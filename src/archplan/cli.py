@@ -57,18 +57,48 @@ def project(a) -> Project:
         die(str(e))
 
 
-def running(p: Project) -> str | None:
-    """The URL of this project's editor server when it answers."""
+def server_status(p: Project) -> dict | None:
+    """This project's editor server as it answers: url, pid, build; or None."""
     info = read_json(p.path("server.json"))
     if not info:
         return None
     try:
         with urllib.request.urlopen(info["url"] + "api/info", timeout=1.5) as r:
-            if json.load(r).get("root") == str(p.root):
-                return info["url"]
-    except (OSError, ValueError):
-        pass
-    return None
+            d = json.load(r)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if d.get("root") != str(p.root) or d.get("pid", info.get("pid")) != info.get("pid"):
+        return None
+    return {"url": info["url"], "port": info.get("port"), "pid": info.get("pid"),
+            "build": d.get("build"), "archplan_version": d.get("archplan_version")}
+
+
+def running(p: Project) -> str | None:
+    """The URL of this project's editor server when it answers."""
+    s = server_status(p)
+    return s and s["url"]
+
+
+def stop_server(pid, wait: float = 5.0) -> bool:
+    """SIGTERM an archplan process and wait for it to end. Refuses other processes."""
+    try:
+        cmd = subprocess.run(["ps", "-p", str(int(pid)), "-o", "command="], capture_output=True, text=True).stdout
+    except (TypeError, ValueError):
+        return False
+    if "archplan" not in cmd:
+        return False
+    try:
+        os.kill(int(pid), signal.SIGTERM)
+    except ProcessLookupError:
+        return False
+    end = time.monotonic() + wait
+    while time.monotonic() < end:
+        try:
+            os.kill(int(pid), 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    return True
 
 
 # ---------- commands ----------
@@ -159,18 +189,28 @@ def cmd_serve(a):
 
 
 def cmd_up(a):
+    from .reload import BUILD
     p = project(a)
-    url = running(p)
+    srv = server_status(p)
+    url = srv and srv["url"]
+    port = a.port
+    if srv and srv["build"] != BUILD and srv["pid"] != os.getpid():
+        # A server with other code (an older plugin version, or a checkout before
+        # a pull): stop it and start this code on the same port.
+        print(f"replacing the editor server {srv['build'] or 'of an older archplan'} with {BUILD}", file=sys.stderr)
+        if stop_server(srv["pid"]):
+            p.path("server.json").unlink(missing_ok=True)
+            url, port = None, port or srv["port"]
     if not url:
         if not p.model_path.exists() and p.export_command():
             print("no model yet; exporting first", file=sys.stderr)
             cmd_export(a)
-        log = open(p.path("server.log"), "a")
         args = [sys.executable, "-m", "archplan", "serve", "--dir", str(p.root)]
-        if a.port:
-            args += ["--port", str(a.port)]
-        subprocess.Popen(args, stdout=log, stderr=log, stdin=subprocess.DEVNULL,
-                         start_new_session=True, cwd=p.root, env=os.environ.copy())
+        if port:
+            args += ["--port", str(port)]
+        with open(p.path("server.log"), "a") as log:
+            subprocess.Popen(args, stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                             start_new_session=True, cwd=p.root, env=os.environ.copy())
         for _ in range(50):
             time.sleep(0.1)
             if url := running(p):
@@ -187,14 +227,9 @@ def cmd_down(a):
     info = read_json(p.path("server.json"))
     if not info:
         return print("not running")
-    pid = info.get("pid")
-    try:
-        cmd = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True).stdout
-        if "archplan" not in cmd:
-            raise ProcessLookupError
-        os.kill(pid, signal.SIGTERM)
+    if stop_server(info.get("pid")):
         print(f"stopped {info['url']}")
-    except (ProcessLookupError, TypeError):
+    else:
         print("not running")
     p.path("server.json").unlink(missing_ok=True)
 
@@ -379,7 +414,9 @@ def cmd_check(a):
             r = f.update_baseline()
             print(f"baseline: {r['added']} accepted, {r['removed']} removed, {r['total']} in "
                   f"{f.baseline.path.relative_to(p.root)}", file=sys.stderr)
-        lst = f.listing()
+        if a.min_weight is not None and not 0 <= a.min_weight <= 100:
+            die("--min-weight must be 0 to 100", 2)
+        lst = findings.above(f.listing(), findings.min_weight(p, a.min_weight))
     except ProjectError as e:
         die(str(e), 2)
     new = lst["counts"]["new"]
@@ -680,6 +717,9 @@ def main(argv=None):
     s.add_argument("--update-baseline", action="store_true",
                    help="accept every current finding into .archplan/baseline.json (reason: baseline)")
     s.add_argument("--export", action="store_true", help="run the export command first")
+    s.add_argument("--min-weight", type=int, metavar="N", default=None,
+                   help='leave out new findings that weigh less than N (0 to 100); default: "check": '
+                        '{"min_weight": N} in config.json, else 0')
     s = add("detectors", cmd_detectors, "list the detectors; enable, disable, trust or run one")
     s.add_argument("action", nargs="?", choices=["list", "enable", "disable", "trust", "run"], default="list")
     s.add_argument("id", nargs="?", help="a detector id, such as concepts.data_clump")

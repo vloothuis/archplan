@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from .common import COMMON_FIELDS, EXAMPLES, comp_name, finding
+from .common import COMMON_FIELDS, EXAMPLES, Weight, comp_name, finding, types_focus
 
 ID = "types.synonyms"
 NAME = "Synonym types"
@@ -72,5 +72,9 @@ def synonym_findings(model: dict, share: float = SYNONYM, min_fields: int = SYNO
             f"{round(low * 100)}% or more of field names in common",
             [types[m]["component"] for m in members], [types[m].get("file") for m in members],
             {"types": members, "shared": sorted(common)[:EXAMPLES],
-             "pairs": [{"a": a, "b": b, "jaccard": round(j, 2)} for (a, b), j in sorted(best.items()) if a in members]}))
+             "pairs": [{"a": a, "b": b, "jaccard": round(j, 2)} for (a, b), j in sorted(best.items()) if a in members]},
+            focus=types_focus({m: sorted(common) for m in members}, [types[m]["component"] for m in members]),
+            weight=Weight(35, "synonym types").add("shared fields", f"{round(low * 100)}%", 100 * (low - share))
+            .spread(len({types[m]["component"] for m in members}), per=6, cap=12, free=2)
+            .spread(len(common), "shared fields", per=3, cap=6, free=min_fields)))
     return out

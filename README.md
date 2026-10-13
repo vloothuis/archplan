@@ -41,6 +41,28 @@ To give a Claude Code session the MCP tools without the plugin:
 claude mcp add archplan -- archplan mcp
 ```
 
+### Updates
+
+Every push to `develop` is a release, so archplan changes often. Each running
+process knows its build id: the version plus a hash of the package's code
+files. The editor server reports it at `/api/status`.
+
+- **The editor server** restarts itself when its own code changes on disk, for
+  example after a `git pull` in a checkout. It waits until the files have been
+  unchanged for about 2 seconds and the new code imports without errors. A
+  broken or half-written checkout does not stop the running server. It keeps
+  its port, and it lets running requests finish first.
+- **`archplan up`** replaces a running server for the same project when that
+  server runs other code, for example after a plugin update. It keeps the
+  port.
+- **The editor tab** reloads itself when the server runs new code. When you
+  are typing, it shows a bar with a Reload button instead.
+- **The MCP server** does not restart itself. Claude Code owns its connection,
+  and a new process cannot take over that session safely. When newer code is
+  on disk, the next tool result says so once. Restart Claude Code to load it.
+
+Set `ARCHPLAN_NO_RELOAD=1` to turn off the restart and the MCP notice.
+
 ## Start
 
 In Claude Code, run `/archplan` in a repository. The skill sets up the project,
@@ -114,7 +136,7 @@ In a message, `@[Label](anchor)` mentions a model item, for example
 | `archplan hotspots [--since DAYS] [--json]` | components that change most, and pairs that change together without a dependency |
 | `archplan profile [infer\|show] [--json]` | propose an architecture profile, or show how the code conforms to it |
 | `archplan profile list`, `archplan profile use NAME` | the framework profiles that match, with their fit; propose one of them |
-| `archplan check [--format github] [--all] [--update-baseline] [--export] [--json]` | new findings; exit 1 when there are any, 2 on errors |
+| `archplan check [--format github] [--all] [--update-baseline] [--export] [--min-weight N] [--json]` | new findings; exit 1 when there are any, 2 on errors |
 | `archplan detectors [--json]` | each detector: group, needs, whether it is on, missing data and its finding count |
 | `archplan detectors enable\|disable\|trust\|run ID [--json]` | switch a detector on or off, approve an external one, or run one |
 | `archplan schema [show\|tables] [--json] [--refresh]` | the database tables, their owner components, and foreign keys across components |
@@ -198,13 +220,46 @@ follow it".
 | `boundaries.unused_public` | files with public types in a component others depend on, which only that component uses (needs `files`) |
 | `evolution.ownership` | components with many active authors and no clear owner, and authors spread over many components (cached hotspots) |
 
+Each finding has a weight from 0 to 100: how much it matters. A detector
+starts from a base for its kind and adds factors: how many components,
+files and sites are involved, one occurrence or a series, where a term
+occurs, how many components depend on the ones involved, how often they
+change (from the cached `archplan hotspots`) and whether a dependency points
+up the layers. `weight_basis` lists each factor with its effect. The
+strength follows from the weight: strong from 65, medium from 40, else weak.
+For a vocabulary leak, a term that only shows up in comments weighs least,
+then strings, local names, field names, function names, type names, and the
+public API (exported declarations and routes) most. Findings are listed by
+weight. The weight is not part of the finding's id, so a dismissed or
+accepted finding stays so when its weight changes.
+
+Each finding also says where the editor shows it, in `focus`: a list of
+views, the first one the default.
+
+```json
+"focus": [{"view": "types", "nodes": ["shop.Order", "billing.Invoice"],
+           "fields": {"shop.Order": ["street", "city"]}},
+          {"view": "components", "nodes": ["shop", "billing"], "edges": [["shop", "billing"]]}]
+```
+
+`view` is `types`, `components`, `roles`, `sequences` or `glossary`.
+`nodes` are the model's ids of that view's elements: type, component,
+unit, sequence or concept ids. `edges` are pairs of node ids, `fields`
+marks fields per type, `files` marks files in the Roles view, and `label`
+names the link. A data clump opens the Types view with its types selected
+and the shared fields marked; a cycle opens the Components view with its
+edges. When a finding has more than one entry, its card has "Show in"
+links.
+
 In the editor you discuss a finding, dismiss it with a reason, or accept it
 as is. Accepted and dismissed findings go into `.archplan/baseline.json`.
 Commit that file. From then on only new findings show.
 
 `archplan check` lists the new findings. It exits with 1 when there are any,
 0 when there are none, and 2 on errors. `--update-baseline` accepts all
-current findings, for a first run on an existing codebase. A GitHub Actions
+current findings, for a first run on an existing codebase. `--min-weight N`
+leaves out new findings that weigh less than N; set a default with
+`"check": {"min_weight": 40}` in `.archplan/config.json`. A GitHub Actions
 step for a Python project:
 
 ```yaml
@@ -251,9 +306,12 @@ An external detector is a command. Put a JSON file in
 archplan writes the model, the settings and the files per component to a
 temporary JSON file and puts its path in place of `{ctx}`. The command
 prints `{"findings": [{"key", "title", "detail", "strength", "basis",
-"components", "files", "evidence"}]}`. archplan keeps at most 200 findings,
-shortens long text, drops paths outside the repository and makes each id
-from the detector id and the key. The command comes from the repository, so
+"components", "files", "evidence", "focus", "weight", "weight_basis"}]}`.
+Only `key` and `title` are required. archplan keeps at most 200 findings,
+shortens long text, drops paths outside the repository and focus entries
+with an unknown view, keeps at most 5 focus entries and 12 weight factors,
+limits the weight to 0 to 100, and makes each id from the detector id and
+the key. Without a weight, the strength sets it. The command comes from the repository, so
 it runs only after a person approves it: `archplan detectors trust ID` in a
 terminal. `archplan check` and `archplan detectors run ID` run it; the
 editor shows the last result.

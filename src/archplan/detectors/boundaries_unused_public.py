@@ -12,7 +12,7 @@ import re
 from collections import defaultdict
 
 from ..hotspots import Mapper
-from .common import EXAMPLES, plural
+from .common import EXAMPLES, Weight, plural, types_focus
 
 ID = "boundaries.unused_public"
 NAME = "Public code nobody else uses"
@@ -88,5 +88,10 @@ def run(ctx, params) -> list:
              "files": total, "dependents": sorted(dependents[c])[:EXAMPLES],
              "moves": [f"Make what only {ctx.name(c)} uses internal (private modules, no export), so its "
                        "interface shows what others may use.",
-                       "Remove the code that nothing uses at all."]}))
+                       "Remove the code that nothing uses at all."]},
+            focus=types_focus({}, [c], [t for _, ts in unused for t in ts]),
+            weight=Weight(20, "unused public code").add("share", f"{round(len(unused) / total * 100)}%",
+                                                         20 * (len(unused) / total - params["min_share"]))
+            .spread(len(unused), "files", per=4, cap=10, free=params["min_files"] - 1)
+            .spread(len(dependents[c]), "dependents", per=3, cap=6)))
     return out

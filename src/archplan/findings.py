@@ -36,7 +36,13 @@ Only git-free data is read: history findings come from .archplan/hotspots.json
 as `archplan hotspots` left it.
 
 For a tangle the baseline keeps its size. When the tangle grows beyond it,
-the finding is new again."""
+the finding is new again.
+
+Each finding has a weight from 0 to 100 and the factors behind it
+(weight_basis; see detectors.common.Weight). Findings are listed by weight
+within a state. A weight change does not reopen a baselined finding.
+`archplan check --min-weight N`, or "check": {"min_weight": N} in
+config.json, leaves out new findings below N."""
 
 from __future__ import annotations
 
@@ -57,7 +63,7 @@ from .detectors.profile_rule import profile_findings  # noqa: F401
 from .detectors.types_fields import field_findings  # noqa: F401
 from .detectors.types_synonyms import names_of, synonym_findings  # noqa: F401
 from .detectors.vocabulary_leak import leak_findings  # noqa: F401
-from .project import Project, etag, write_json
+from .project import Project, etag, read_json, write_json
 from .store import JsonStore, NotFound, Store, stamp
 
 STATES = ("new", "accepted", "dismissed")
@@ -185,6 +191,7 @@ class Findings:
             if f["id"] in threads:
                 f["thread"] = threads[f["id"]]
             out.append(f)
+        out.sort(key=lambda f: (STATES.index(f["state"]), -f.get("weight", 0)))  # stable: ties keep their order
         now = {f["id"] for f in fs}
         by_group, by_kind = Counter(), Counter()
         for f in out:
@@ -271,12 +278,35 @@ class Findings:
         return self.baseline.update(fn)
 
 
+def min_weight(p: Project, given=None) -> int:
+    """The weight below which `archplan check` leaves new findings out: the
+    given value, else "check": {"min_weight": N} in config.json, else 0."""
+    if given is None:
+        c = (read_json(p.path("config.json"), {}) or {}).get("check")
+        given = c.get("min_weight") if isinstance(c, dict) else None
+    ok = isinstance(given, (int, float)) and not isinstance(given, bool) and 0 <= given <= 100
+    return int(given) if ok else 0
+
+
+def above(listing: dict, n: int) -> dict:
+    """The listing without the new findings that weigh less than n; counts["new"]
+    and counts["below_min_weight"] say how many are left and left out."""
+    if n <= 0:
+        return listing
+    keep = [f for f in listing["findings"] if f["state"] != "new" or f.get("weight", 0) >= n]
+    new = sum(1 for f in keep if f["state"] == "new")
+    return {**listing, "findings": keep,
+            "counts": {**listing["counts"], "new": new, "below_min_weight": listing["counts"]["new"] - new}}
+
+
 def compact(f: dict) -> dict:
     """A finding in a few lines, for an agent."""
     out = {k: f[k] for k in ("id", "kind", "title", "detail", "strength", "basis", "state") if f.get(k) is not None}
     out["components"] = f["components"][:6]
     if f["files"]:
         out["files"] = f["files"][:4]
+    if f.get("weight") is not None:
+        out["weight"] = f["weight"]
     for k in ("unit", "reason", "label", "thread"):
         if f.get(k):
             out[k] = f[k]
@@ -306,8 +336,11 @@ def line_of(f: dict) -> int | None:
 def text(listing: dict, show_all: bool = False) -> str:
     c = listing["counts"]
     fs = [f for f in listing["findings"] if show_all or f["state"] == "new"]
+    fs.sort(key=lambda f: (GROUPS.index(f["group"]) if f["group"] in GROUPS else len(GROUPS),
+                           STATES.index(f["state"]) if f["state"] in STATES else 0, -f.get("weight", 0)))
     lines = [f"{c['new']} new, {c['accepted']} accepted, {c['dismissed']} dismissed"
-             + (f", {c['fixed']} baselined findings fixed" if c["fixed"] else "") + "."]
+             + (f", {c['fixed']} baselined findings fixed" if c["fixed"] else "")
+             + (f", {c['below_min_weight']} new below the minimum weight" if c.get("below_min_weight") else "") + "."]
     group = None
     for f in fs:
         if f["group"] != group:
@@ -317,7 +350,7 @@ def text(listing: dict, show_all: bool = False) -> str:
         lab = f" (Claude: {f['label']})" if f.get("label") else ""
         lines.append(f"  {f['strength']:<6}  {f['title']}{lab}{st}")
         lines.append(f"          {f['basis']}. {f['detail']}"[:300])
-        lines.append(f"          id {f['id']}" + (f", {f['files'][0]}" if f["files"] else ""))
+        lines.append(f"          id {f['id']}, weight {f.get('weight', '?')}" + (f", {f['files'][0]}" if f["files"] else ""))
     for m in listing.get("missing") or []:
         lines += ["", f"Not checked, {m['kind']}: {m['reason']}."] if m is listing["missing"][0] else \
             [f"Not checked, {m['kind']}: {m['reason']}."]

@@ -13,7 +13,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import unquote
 
-from . import brief, detectors, handover, hotspots
+from . import __version__, brief, detectors, handover, hotspots, reload
 from .architecture import Architecture, ArchitectureError
 from .findings import Findings
 from .vocab import Vocab
@@ -38,10 +38,11 @@ def changes(p: Project, store: Store) -> dict:
          "suggestions_version": Suggestions(p.dir).version(), "handover_version": Handovers(p.dir).version(),
          "architecture_etag": etag(p.path("architecture.json")), "findings_etag": etag(p.path("baseline.json")),
          "vocabulary_etag": etag(p.path("vocabulary.json")), "suggest_etag": etag(p.path("config.json")),
-         "activity_etag": etag(p.path("activity.json")), "detectors_version": detectors.version(p)}
+         "activity_etag": etag(p.path("activity.json")), "detectors_version": detectors.version(p),
+         "build": reload.BUILD}
     c["key"] = ".".join(str(c[k]) for k in ("version", "model_etag", "target_rev", "suggestions_version",
                                             "handover_version", "architecture_etag", "findings_etag", "vocabulary_etag",
-                                            "suggest_etag", "activity_etag", "detectors_version"))
+                                            "suggest_etag", "activity_etag", "detectors_version", "build"))
     return c
 
 
@@ -53,6 +54,8 @@ def make_handler(p: Project, store: Store):
     arch = Architecture(p)
     arch_lock = threading.Lock()
     findings = Findings(p)
+    status = lambda: {"name": p.name, "root": str(p.root), "pid": os.getpid(), "archplan_version": __version__,
+                      "build": reload.BUILD}
     findings.arch = arch  # share the profile analysis cache
     vocab = Vocab(p)
     vocab_lock = threading.Lock()
@@ -131,9 +134,11 @@ def make_handler(p: Project, store: Store):
                 return
             path, _, query = self.path.partition("?")
             params = dict(x.split("=", 1) for x in query.split("&") if "=" in x)
+            if path == "/api/status":
+                return self.send_json(status())
             if path == "/api/info":
                 st = p.state()
-                return self.send_json({"collab": True, "name": p.name, "root": str(p.root), "dir": str(p.dir),
+                return self.send_json({**status(), "collab": True, "dir": str(p.dir),
                                        "model": "/api/model" if p.model_path.exists() else None,
                                        "can_export": bool(p.export_command()),
                                        "git": hotspots.info(p.root),
@@ -151,7 +156,9 @@ def make_handler(p: Project, store: Store):
             if path == "/api/threads":
                 since = params.get("since", "-1")
                 if since == changes(p, store)["key"]:
-                    wait(lambda: changes(p, store)["key"], since, LONG_POLL)
+                    # A server about to restart answers at once, so it need not wait for this request.
+                    draining = getattr(self.server, "draining", None) or threading.Event()
+                    wait(lambda: "restart" if draining.is_set() else changes(p, store)["key"], since, LONG_POLL)
                 return self.send_json({**store.read(), **changes(p, store)})
             if path == "/api/activity":
                 return self.send_json(read_json(p.path("activity.json"), {}) or {})
@@ -421,16 +428,57 @@ def free_port(host: str, start: int, tries: int = 20) -> int:
     raise ProjectError(f"no free port in {start}..{start + tries - 1}")
 
 
+class Server(ThreadingHTTPServer):
+    """Counts the requests in flight, so a restart can wait for them."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.draining = threading.Event()
+        self.busy = 0
+        self.busy_lock = threading.Lock()
+
+    def process_request_thread(self, request, client_address):
+        with self.busy_lock:
+            self.busy += 1
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            with self.busy_lock:
+                self.busy -= 1
+
+    def drain(self, timeout: float = 30.0) -> None:
+        """Stop taking requests, end long polls early, and wait for the rest."""
+        import time
+        self.draining.set()
+        self.shutdown()
+        end = time.monotonic() + timeout
+        while self.busy and time.monotonic() < end:
+            time.sleep(0.05)
+        self.server_close()
+
+
 def serve(p: Project, host: str = "127.0.0.1", port: int | None = None) -> None:
     store = Store(p.dir)
     port = free_port(host, port or p.port)
-    srv = ThreadingHTTPServer((host, port), make_handler(p, store))
+    srv = Server((host, port), make_handler(p, store))
     url = f"http://{host}:{port}/"
     threading.Thread(target=auto_loop, args=(p, store), daemon=True).start()
-    write_json(p.path("server.json"), {"url": url, "pid": os.getpid(), "port": port})
-    print(f"archplan: {url}  ({p.root})", file=sys.stderr, flush=True)
+    write_json(p.path("server.json"), {"url": url, "pid": os.getpid(), "port": port,
+                                       "archplan_version": __version__, "build": reload.BUILD})
+    print(f"archplan: {url}  ({p.root}, {reload.BUILD})", file=sys.stderr, flush=True)
+    changed = []
+    if not reload.disabled():
+        # Restart with the new code when it changes on disk (a git pull in a checkout).
+        threading.Thread(target=reload.watch, args=(lambda fp: (changed.append(fp), srv.shutdown()),),
+                         daemon=True).start()
     try:
         srv.serve_forever()
+        if changed:
+            srv.drain()
+            argv = reload.restart_argv(port)
+            print(f"archplan: the code changed on disk; restarting ({reload.disk_version() or '?'}+{changed[0]})",
+                  file=sys.stderr, flush=True)
+            os.execv(argv[0], argv)
     finally:
         info = read_json(p.path("server.json"), {}) or {}
         if info.get("pid") == os.getpid():

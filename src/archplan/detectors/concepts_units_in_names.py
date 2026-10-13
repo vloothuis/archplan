@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from .common import EXAMPLES, plural
+from .common import EXAMPLES, Weight, focus, plural, types_focus
 from .fields import words
 
 ID = "concepts.units_in_names"
@@ -35,27 +35,31 @@ def split(name: str):
 
 
 def names(ctx):
-    """(name, component, where) for every field and, when present, every parameter."""
+    """(name, component, where, type id or None) for every field and, when
+    present, every parameter."""
     for tid, t in ctx.types.items():
         c = t.get("component")
         if c in ctx.internal:
             for f in t.get("fields") or []:
                 if f.get("name"):
-                    yield f["name"], c, f"{t.get('name') or tid}.{f['name']}"
+                    yield f["name"], c, f"{t.get('name') or tid}.{f['name']}", tid
     for s in ctx.signatures:
         c = s.get("component")
         if c in ctx.internal:
             for p in s.get("params") or []:
                 if isinstance(p, dict) and isinstance(p.get("name"), str):
-                    yield p["name"], c, f"{s.get('id')}({p['name']})"
+                    yield p["name"], c, f"{s.get('id')}({p['name']})", None
 
 
 def run(ctx, params) -> list:
     seen = defaultdict(lambda: defaultdict(dict))  # base -> unit -> {component: example}
-    for n, c, where in names(ctx):
+    fields = defaultdict(lambda: defaultdict(list))  # base -> {type id: [field names]}
+    for n, c, where, tid in names(ctx):
         base, unit = split(n)
         if base and not base.isdigit():
             seen[base][unit or NONE].setdefault(c, where)
+            if tid:
+                fields[base][tid].append(n)
     rows = []
     for base, units in seen.items():
         if len(units) < 2 or set(units) == {NONE}:
@@ -83,5 +87,9 @@ def run(ctx, params) -> list:
              "examples": [w for u in units for w in list(units[u].values())[:3]][:EXAMPLES],
              "moves": [f"Pick one unit for {base} and convert at the edges, or use a type that carries its unit "
                        "(a Duration or Money value).",
-                       "Name the unit in every field and parameter that keeps a plain number."]}))
+                       "Name the unit in every field and parameter that keeps a plain number."]},
+            focus=types_focus(dict(fields[base]), sorted(comps)) if fields[base] else
+            [focus("components", sorted(comps))],
+            weight=Weight(20, "units in names").spread(len(explicit), "explicit units", per=10, cap=15)
+            .spread(len(comps), per=5, cap=12, free=params["min_components"] - 1)))
     return out

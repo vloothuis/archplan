@@ -18,7 +18,9 @@ file size and modification time. Terms to leave out live in the committed
 After an export without a vocabulary section, enrich() adds one: concepts
 from GLOSSARY.md files (the same format the Go exporter reads), vendor
 concepts for external components, the top candidates per component as
-`suggested`, and `usage` where code names a concept it does not own."""
+`suggested`, and `usage` where code names a concept it does not own. Each
+usage row counts its occurrences by context (see occurrence()): comment,
+string, local, field, function, type or public."""
 
 from __future__ import annotations
 
@@ -182,6 +184,56 @@ def channels(text: str, lang: str):
         pos = m.end()
     for x in IDENT.finditer(text, pos):
         yield 0, x.start(), x.group()
+
+
+# ---------- occurrence contexts ----------
+#
+# Where a term occurs, from least to most weight: a comment or docstring, a
+# string literal or log message, a local name or parameter, a field,
+# attribute or key, a function name, a type or module name, and the public
+# API (an exported or public declaration, or a route). Simple patterns on the
+# text before the occurrence on its line; no parser.
+
+CONTEXTS = ("comment", "string", "local", "field", "function", "type", "public")
+_DECL_TYPE = re.compile(r"(?:^|[\s(])(?:class|defmodule|defprotocol|defimpl|interface|struct|enum|type|record|trait|"
+                        r"protocol|module|object|typedef|data|newtype)\s+(?:[\w.]*\.)?$")
+_DECL_FUNC = re.compile(r"(?:^|\s)(?:def|defp|defmacro|defmacrop|defdelegate|func|function|fn|fun|sub|method)\s+"
+                        r"(?:\([^)]*\)\s*)?(?:[\w.]*\.)?$")
+_PUBLIC = re.compile(r"^\s*(?:export\b|pub\b|public\b|def\s|defmodule\s|defprotocol\s|defmacro\s|defdelegate\s)")
+_DOC = re.compile(r"@(?:doc|moduledoc|typedoc|shortdoc)\s*$")
+_ROUTE = re.compile(r"^\s*(?:get|post|put|patch|delete|live|scope|forward|resources|match|options|head)\s*\(?\s*$"
+                    r"|\b(?:route|path|re_path|url)\s*\(\s*$|\.(?:get|post|put|patch|delete|route|use)\s*\(\s*$"
+                    r"|@\w*(?:Get|Post|Put|Patch|Delete|Request)Mapping\s*\(\s*(?:value\s*=\s*)?$", re.I)
+
+
+def occurrence(text: str, off: int, chunk: str, ch: int, lang: str) -> str:
+    """The context of one occurrence: chunk at off in channel ch (0
+    identifier, 1 string, 2 comment)."""
+    if ch == 2:
+        return "comment"
+    start = text.rfind("\n", max(0, off - 200), off) + 1
+    before = text[max(start, off - 200):off]  # a bounded window: minified lines can be long
+    if ch == 1:
+        if _DOC.search(before) or (chunk[:3] in ('"""', "'''") and not before.strip()):
+            return "comment"  # a docstring, @doc or @moduledoc
+        return "public" if _ROUTE.search(before) else "string"
+    after = text[off + len(chunk):off + len(chunk) + 3]
+    decl = "type" if _DECL_TYPE.search(before) else "function" if _DECL_FUNC.search(before) else None
+    if decl:
+        indent = len(before) - len(before.lstrip())
+        public = (_PUBLIC.search(before) and not re.match(r"\s*defp\s", before)) \
+            or (lang == "python" and indent == 0 and not chunk.startswith("_")) \
+            or (lang == "go" and chunk[:1].isupper())
+        return "public" if public else decl
+    if chunk[:1].isupper():
+        return "type"
+    if after.lstrip(" ")[:1] == "(":
+        return "function"
+    b = before.rstrip(" ")
+    if b.endswith((".", "@", "->")) or (b.endswith(":") and not b.endswith("::")) \
+            or (after[:1] == ":" and after[:2] != "::") or after.lstrip(" ")[:2] == "=>":
+        return "field"
+    return "local"
 
 
 def raw_words(name: str) -> list:
@@ -763,7 +815,8 @@ def usage(p: Project, model: dict, concepts: dict, by_key: dict, v: Vocab) -> li
             if len(text) > MAX_FILE:
                 continue
             nl = None
-            for ch, off, chunk in channels(text, lang_of(f)):
+            lang = lang_of(f)
+            for ch, off, chunk in channels(text, lang):
                 ws = words(chunk)
                 found = set()
                 for i in range(len(ws)):
@@ -777,8 +830,10 @@ def usage(p: Project, model: dict, concepts: dict, by_key: dict, v: Vocab) -> li
                     r = rows.get((c, cid))
                     if r is None:
                         r = rows[(c, cid)] = {"component": c, "concept": cid, "idents": 0, "strings": 0,
-                                              "comments": 0, "evidence": []}
+                                              "comments": 0, "contexts": {}, "evidence": []}
                     r[("idents", "strings", "comments")[ch]] += 1
+                    cx = occurrence(text, off, chunk, ch, lang)
+                    r["contexts"][cx] = r["contexts"].get(cx, 0) + 1
                     if len(r["evidence"]) < EVIDENCE:
                         if nl is None:
                             nl = [i for i, x in enumerate(text) if x == "\n"]

@@ -9,14 +9,23 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from .common import EXAMPLES, finding, plural
-from .data_common import layer_rank, name, owner, tables
+from .common import EXAMPLES, Weight, finding, plural
+from .data_common import layer_rank, name, owner, table_focus, tables
 
 ID = "data.cross_fk"
 NAME = "Foreign key across components"
 GROUP = "data"
 NEEDS = {"schema"}
 PARAMS = {"min_keys": 1, "include_coded": False}
+
+
+def cross_focus(ctx, a: str, b: str, keys: list) -> list:
+    """The ORM types with the key fields, then the edge a -> b in Components."""
+    tbls = {}
+    for k in keys:
+        tbls.setdefault(k["table"], []).extend(k["columns"])
+        tbls.setdefault(k["to"], [])
+    return table_focus(ctx, tbls, [a, b], [(a, b)])
 
 
 def run(ctx, params) -> list:
@@ -65,5 +74,12 @@ def run(ctx, params) -> list:
             {"from": a, "to": b, "keys": keys[:EXAMPLES], "direction": direction, "code_dependency": coded,
              **({"from_layer": rank[a][1], "to_layer": rank[b][1]} if direction else {}),
              "moves": ["Keep the id as a plain value and ask the other component for the record.",
-                       "Or move the table to the component that owns the data it points at."]}))
+                       "Or move the table to the component that owns the data it points at."]},
+            focus=cross_focus(ctx, a, b, keys),
+            weight=Weight(35, "foreign key across components")
+            .add("layers", direction, {"up": 25, "down": -5}.get(direction or "", 0))
+            .add("code dependency", "none" if not coded else "yes", 0 if coded else 8)
+            .add("cycle", "the code depends back", 10 if (b, a) in deps and not coded else 0)
+            .add("cascade", len(cascade), 5 if cascade else 0)
+            .repetition(len(keys), "keys", per=3, cap=9, single=0)))
     return out

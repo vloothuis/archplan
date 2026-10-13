@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from .common import EXAMPLES, plural
+from .common import EXAMPLES, Weight, focus, plural
 from .fields import is_flag
 
 ID = "concepts.bool_params"
@@ -50,5 +50,8 @@ def run(ctx, params) -> list:
              "moves": ["Split each function with a flag into two named functions, or pass an enum or an options "
                        "type that names the choice.",
                        f"Start with the flag used most: {names.most_common(1)[0][0]}." if names else
-                       "Start with the functions called from other components."]}))
+                       "Start with the functions called from other components."]},
+            focus=[focus("components", [c])],
+            weight=Weight(25, "flag parameters").repetition(len(rows), "functions", per=4, cap=12, single=-4)
+            .spread(len(many), "functions with several flags", per=8, cap=12, free=0.5)))
     return out

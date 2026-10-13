@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..model import allowed
-from .common import EXAMPLES, comp_name, evidence_file, finding, graph, plural
+from .common import EXAMPLES, Weight, comp_name, evidence_file, finding, focus, graph, plural
 
 ID = "layers.policy"
 NAME = "Policy violations"
@@ -32,5 +32,8 @@ def policy_findings(model: dict, target: dict) -> list:
             f"{plural(e['weight'], 'reference')}: " + ", ".join(e["evidence"][:3]),
             "strong", "an explicit rule in the target's policy" if rules else "the policy's default is deny",
             [a, b], [evidence_file(x) for x in e["evidence"]],
-            {"from": a, "to": b, "weight": e["weight"], "evidence": e["evidence"][:EXAMPLES], "rules": rules}))
+            {"from": a, "to": b, "weight": e["weight"], "evidence": e["evidence"][:EXAMPLES], "rules": rules},
+            focus=[focus("components", [a, b], [(a, b)])],
+            weight=Weight(50, "policy break").add("rule", "explicit" if rules else "default deny", 8 if rules else 0)
+            .repetition(e["weight"], "references", per=3, cap=12, single=-6)))
     return out

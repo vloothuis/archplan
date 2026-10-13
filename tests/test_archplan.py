@@ -7,8 +7,9 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -2159,6 +2160,264 @@ class NewDetectorsTest(TempProject):
         self.assertEqual(res["owners"], {"core": {"a@x": 1, "b@x": 1}, "orders": {"a@x": 1}})
 
 
+class FocusTest(TempProject):
+    """Each finding says where the editor shows it: a view, its nodes, edges and fields."""
+
+    FIRST = {"concepts.data_clump": "types", "concepts.state_flags": "types", "concepts.untyped_bag": "types",
+             "concepts.raw_ids": "types", "concepts.units_in_names": "types", "types.fields": "types",
+             "types.synonyms": "types", "boundaries.unused_public": "types", "concepts.string_enum": "components",
+             "concepts.bool_params": "components", "boundaries.stability": "components",
+             "structure.cycle": "components", "structure.tangle": "components"}
+
+    def setUp(self):
+        super().setUp()
+        self.p = project.init(self.root)
+
+    def run_all(self, model):
+        from archplan import detectors
+        self.p.model_path.write_text(json.dumps(model))
+        os.utime(self.p.model_path, None)
+        detectors.configure(self.p, "boundaries.stability", params={"pain_dependents": 3})
+        return detectors.run(self.p)["findings"]
+
+    def check(self, f):
+        from archplan.detectors.common import clean_focus
+        self.assertTrue(f.get("focus"), f["kind"])
+        self.assertEqual(clean_focus(f["focus"]), f["focus"])
+        return f["focus"]
+
+    def test_every_family_has_a_focus(self):
+        fs = self.run_all(concept_model()) + self.run_all(findings_model())
+        kinds = set()
+        for f in fs:
+            fc = self.check(f)
+            kinds.add(f["kind"])
+            if f["kind"] in self.FIRST:
+                self.assertEqual(fc[0]["view"], self.FIRST[f["kind"]], f["kind"])
+        self.assertTrue(set(self.FIRST) - {"structure.tangle"} <= kinds, set(self.FIRST) - kinds)
+        clump = next(f for f in fs if f["kind"] == "concepts.data_clump")["focus"]
+        self.assertEqual(set(clump[0]["nodes"]), {"orders.Order", "billing.Invoice", "shipping.Parcel"})
+        self.assertEqual(sorted(clump[0]["fields"]["orders.Order"]), ["city", "street", "zip_code"])
+        self.assertEqual(clump[1]["view"], "components")
+        cyc = next(f for f in fs if f["kind"] == "structure.cycle" and len(f["evidence"]["cycle"]) == 2)["focus"][0]
+        self.assertEqual((cyc["nodes"], cyc["edges"]), (["D", "E"], [["D", "E"], ["E", "D"]]))
+        unused = next(f for f in fs if f["kind"] == "boundaries.unused_public")["focus"][0]
+        self.assertEqual(set(unused["nodes"]), {"core.Cache", "core.Clock", "core.Util"})
+
+    def test_tangle_profile_and_leak(self):
+        from archplan.detectors.cycles import tangle_findings
+        from archplan.detectors.profile_rule import profile_findings
+        from archplan.detectors.vocabulary_leak import leak_findings
+        comps = {c: {"name": c} for c in "HMNO"}
+        ring = [("H", "M"), ("M", "N"), ("N", "O"), ("O", "H"), ("H", "N")]
+        (t,) = tangle_findings({"components": comps, "dependencies": [{"from": a, "to": b} for a, b in ring]})
+        fc = self.check(t)[0]
+        self.assertEqual((fc["view"], fc["nodes"][0]), ("components", "H"))
+        self.assertTrue(fc["edges"])
+        (r,) = profile_findings({"rules": [{"id": "r"}]},
+                                {"units": [{"id": "u1", "component": "H"}],
+                                 "rules": [{"id": "r", "text": "views do not call repos",
+                                            "breaks": [{"unit": "u1", "from": "a.py", "to": "b.py", "detail": "x"}]}]},
+                                {"components": comps})
+        fc = self.check(r)
+        self.assertEqual((fc[0]["view"], fc[0]["nodes"], fc[0]["files"]), ("roles", ["u1"], ["a.py", "b.py"]))
+        (k,) = leak_findings(leak_model({"local": 2}))
+        fc = self.check(k)
+        self.assertEqual((fc[0]["view"], fc[0]["nodes"], fc[0]["edges"]), ("glossary", ["payment"], [["web", "payment"]]))
+        self.assertEqual(fc[1]["nodes"], ["web", "pay"])
+
+    def test_bad_focus_from_an_external_detector_is_dropped(self):
+        from archplan.detectors import external
+
+        class Ctx:
+            components = {"A": {}}
+        spec = {"id": "concepts.ext", "group": "concepts", "name": "Ext"}
+        hostile = [{"view": "nowhere", "nodes": ["A"]}, {"view": "types", "nodes": [{"x": 1}, None, 7]},
+                   {"view": "components", "nodes": ["A", "B" * 999], "edges": [["A"], ["A", 3], ["A", "B"]],
+                    "fields": {"T": "street", "U": [1, "city"]}, "files": ["../x", "/etc/passwd", "ok.py:3"],
+                    "label": "<b>x</b>"}, "junk"] + [{"view": "types", "nodes": [f"T{i}"]} for i in range(20)]
+        (f,) = external.validate(Ctx(), spec, {"findings": [{"key": "a", "title": "t", "focus": hostile}]})
+        self.assertEqual(f["focus"], [{"view": "components", "nodes": ["A"], "label": "<b>x</b>",
+                                       "edges": [["A", "B"]], "fields": {"U": ["city"]}, "files": ["ok.py"]},
+                                      {"view": "types", "nodes": ["T0"]}])
+        for bad in (None, "x", {"view": "types"}, [{"view": "constructor", "nodes": ["A"]}]):
+            (f,) = external.validate(Ctx(), spec, {"findings": [{"key": "a", "title": "t", "focus": bad}]})
+            self.assertNotIn("focus", f)
+
+
+def leak_model(contexts, count=None, evidence=("lib/web/a.ex:1",), why="avoid", old=None):
+    """A target with a vocabulary leak: web uses the concept payment that pay owns."""
+    usage = {"component": "web", "concept": "payment", "evidence": list(evidence), **(old or {"contexts": contexts})}
+    if count:
+        usage["count"] = count
+    return {"components": {"web": {"name": "web"}, "pay": {"name": "pay"}},
+            "vocabulary": {"concepts": {"payment": {"name": "Payment", "owner": "pay", "terms": ["payment"]}},
+                           "components": {"web": {"avoid": ["payment"] if why == "avoid" else []}},
+                           "usage": [usage]}}
+
+
+class WeightTest(TempProject):
+    """A finding's weight says how much it matters; the strength follows from it."""
+
+    def leak(self, contexts, **kw):
+        from archplan.detectors.vocabulary_leak import leak_findings
+        (f,) = leak_findings(leak_model(contexts, **kw))
+        return f
+
+    def test_occurrence_orders_leaks(self):
+        comment = self.leak({"comment": 3})
+        ident = self.leak({"local": 2, "field": 1})
+        public = self.leak({"public": 1, "type": 2})
+        self.assertLess(comment["weight"], ident["weight"])
+        self.assertLess(ident["weight"], public["weight"])
+        self.assertEqual(comment["evidence"]["occurrence"], "only in comments")
+        self.assertTrue(comment["detail"].startswith("Only in comments."))
+        self.assertEqual(comment["strength"], "weak")
+        self.assertEqual(len({comment["id"], ident["id"], public["id"]}), 1)  # the weight is not part of the id
+        old = self.leak(None, old={"idents": 0, "strings": 0, "comments": 4})  # a row from before contexts
+        self.assertEqual(old["evidence"]["contexts"], {"comment": 4})
+
+    def test_one_site_weighs_less_than_many(self):
+        one = self.leak({"local": 1})
+        many = self.leak({"local": 12}, evidence=[f"lib/web/{i}.ex:1" for i in range(5)])
+        self.assertLess(one["weight"], many["weight"])
+        factors = {b["factor"] for b in many["weight_basis"]}
+        self.assertTrue({"base", "occurrence", "repetition: occurrences", "spread: files"} <= factors)
+
+    def test_strength_follows_weight(self):
+        from archplan import detectors
+        from archplan.detectors.common import clean_weight, strength_for
+        self.p = project.init(self.root)
+        for m in (concept_model(), findings_model()):
+            self.p.model_path.write_text(json.dumps(m))
+            os.utime(self.p.model_path, None)
+            fs = detectors.run(self.p)["findings"]
+            self.assertTrue(fs)
+            for f in fs:
+                self.assertTrue(0 <= f["weight"] <= 100)
+                self.assertEqual(f["strength"], strength_for(f["weight"]), f["kind"])
+                self.assertEqual(f["weight"], max(0, min(100, sum(b["effect"] for b in f["weight_basis"]))))
+            self.assertEqual([f["weight"] for f in fs], sorted((f["weight"] for f in fs), reverse=True))
+        self.assertEqual(clean_weight(250, [{"factor": "x" * 99, "value": {"a": 1}, "effect": 1e9}] * 30),
+                         (100, [{"factor": "x" * 60, "value": None, "effect": 0}] * 12))
+        self.assertEqual(clean_weight("high", []), (None, None))
+        self.assertEqual(clean_weight(float("nan"), None), (None, None))
+
+    def test_ids_unchanged(self):
+        from archplan.detectors.common import fingerprint
+        from archplan.findings import cycle_findings, field_findings
+        m = findings_model()
+        ids = {f["id"] for f in cycle_findings(m)}
+        self.assertEqual(ids, {fingerprint("structure.cycle", "A", "B", "C"), fingerprint("structure.cycle", "D", "E")})
+        self.assertEqual(field_findings(m)[0]["id"], fingerprint("types.fields", "A.User"))
+
+    def test_external_weight(self):
+        from archplan.detectors import external
+
+        class Ctx:
+            components = {}
+        spec = {"id": "concepts.ext", "group": "concepts", "name": "Ext"}
+        out = {"findings": [{"key": "a", "title": "a", "weight": 180, "weight_basis": [{"factor": "spread", "value": 4,
+                                                                                         "effect": 12}]},
+                            {"key": "b", "title": "b", "weight": "x", "strength": "medium"}]}
+        a, b = external.validate(Ctx(), spec, out)
+        self.assertEqual((a["weight"], a["strength"], a["weight_basis"][1]), (100, "strong",
+                                                                              {"factor": "spread", "value": 4, "effect": 12}))
+        self.assertEqual((b["weight"], b["strength"]), (50, "medium"))
+
+    def test_min_weight(self):
+        self.p = project.init(self.root)
+        self.p.model_path.write_text(json.dumps(findings_model()))
+
+        def run(*args):
+            buf = io.StringIO()
+            with redirect_stdout(buf), self.assertRaises(SystemExit) as e, \
+                    unittest.mock.patch("sys.stderr", io.StringIO()):
+                cli.main(["check", "--dir", str(self.root), "--json", *args])
+            return e.exception.code, buf.getvalue()
+        code, out = run()
+        ws = [f["weight"] for f in json.loads(out)["findings"]]
+        cut = sorted(ws)[len(ws) // 2] + 1
+        code, out = run("--min-weight", str(cut))
+        d = json.loads(out)
+        self.assertTrue(all(f["weight"] >= cut for f in d["findings"]))
+        self.assertEqual(d["counts"]["below_min_weight"], sum(1 for w in ws if w < cut))
+        self.assertEqual(run("--min-weight", "101")[0], 2)
+        self.assertEqual(run("--min-weight", "100")[0], 0)
+        self.p.path("config.json").write_text(json.dumps({**json.loads(self.p.path("config.json").read_text()),
+                                                          "check": {"min_weight": 100}}))
+        self.assertEqual(run()[0], 0)
+        self.assertEqual(run("--min-weight", "0")[0], 1)
+
+    def test_occurrence_contexts(self):
+        from archplan.vocab import occurrence
+
+        def ctx(text, word, lang, ch=0, nth=0):
+            i = -1
+            for _ in range(nth + 1):
+                i = text.index(word, i + 1)
+            return occurrence(text, i, word, ch, lang)
+        ex = ('defmodule Shop.Payment.Form do\n  @moduledoc """\n  payment\n  """\n'
+              '  def payment_for(x), do: x.payment\n  defp payment_local(y), do: %{payment: y}\n'
+              '  # payment\n  def go(payment), do: Logger.info("payment")\nend\n')
+        self.assertEqual([ctx(ex, "Payment", "elixir"), ctx(ex, "payment_for", "elixir"),
+                          ctx(ex, "payment_local", "elixir"), ctx(ex, "payment", "elixir", 0, 2),
+                          ctx(ex, "payment", "elixir", 0, 4), ctx(ex, "payment", "elixir", 0, 6),
+                          ctx(ex, '"payment"', "elixir", 1), ctx(ex, '"""\n  payment\n  """', "elixir", 1),
+                          ctx(ex, "# payment", "elixir", 2)],
+                         ["public", "public", "function", "field", "field", "local", "string", "comment", "comment"])
+        js = 'export class PaymentForm {}\nfunction paymentTotal(a) { return a.payment }\n' \
+             'router.get("/payments", h)\nconst payment = 1\n'
+        self.assertEqual([ctx(js, "PaymentForm", "js"), ctx(js, "paymentTotal", "js"), ctx(js, "payment", "js", 0, 1),
+                          ctx(js, '"/payments"', "js", 1), ctx(js, "payment", "js", 0, 3)],
+                         ["public", "function", "field", "public", "local"])
+        self.assertEqual(occurrence("x" * 100000 + " payment", 100001, "payment", 0, "python"), "local")
+
+
+class FocusJsTest(unittest.TestCase):
+    """The editor resolves a finding's focus to a view and ids, and survives hostile values."""
+
+    def resolve(self, cases):
+        src = (ROOT / "src/archplan/static/index.html").read_text()
+        body = src[src.index("// ---------- finding focus"):src.index("// ---------- end finding focus")]
+        out = subprocess.run(["node", "-e", body + f"""
+            const has = {{types: id => ['T1', 'T2'].includes(id), components: id => ['A', 'B'].includes(id),
+                         roles: id => id === 'u1', sequences: () => false, glossary: id => id === 'k'}};
+            console.log(JSON.stringify({json.dumps(cases)}.map(f => focusTargets(f, has))));"""],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    def test_resolves_views_and_ids(self):
+        (ts,) = self.resolve([{"focus": [
+            {"view": "types", "nodes": ["T1", "gone"], "fields": {"T1": ["street"], "gone": ["x"]}},
+            {"view": "components", "nodes": ["A"], "edges": [["A", "B"], ["A", "gone"]]},
+            {"view": "sequences", "nodes": ["nope"]}, {"view": "glossary", "nodes": ["k"], "edges": [["A", "k"]]}]}])
+        self.assertEqual([(t["view"], t["label"], t["nodes"]) for t in ts],
+                         [("types", "Types", ["T1"]), ("components", "Components", ["A"]), ("glossary", "Glossary", ["k"])])
+        self.assertEqual(ts[0]["fields"], {"T1": ["street"]})
+        self.assertEqual(ts[1]["edges"], [["A", "B"]])
+        self.assertEqual(ts[2]["edges"], [["A", "k"]])
+
+    def test_falls_back_when_nothing_exists(self):
+        self.assertEqual(self.resolve([{"focus": [{"view": "types", "nodes": ["gone"]}]}, {}, {"focus": None}]),
+                         [[], [], []])
+
+    def test_hostile_focus_does_not_throw(self):
+        hostile = [{"focus": "x"}, {"focus": [None, {"view": "__proto__", "nodes": ["A"]},
+                                              {"view": "types", "nodes": [{"toString": 1}, ["T1"], "T1"],
+                                               "fields": ["x"], "edges": "AB", "files": {"a": 1}, "label": 5},
+                                              {"view": "constructor"},
+                                              {"view": "roles", "nodes": ["u1"], "fields": {"__proto__": ["x"]}}]},
+                   None, {"focus": [1, "a", [], {"view": "types", "nodes": "T1"}, {"view": "toString", "nodes": ["A"]},
+                                    {"view": "types", "nodes": ["T1"]}]}]  # only five entries count
+        out = self.resolve(hostile)
+        self.assertEqual(out[0], [])
+        self.assertEqual([(t["view"], t["nodes"], t["label"], t["files"]) for t in out[1]],
+                         [("types", ["T1"], "Types", []), ("roles", ["u1"], "Roles", [])])
+        self.assertEqual((out[2], out[3]), ([], []))
+
+
 class RepoCodeTrustTest(TempProject):
     """Exporters that run repository code are never approved by init, and an
     approval lapses when a file the command names changes."""
@@ -2402,6 +2661,207 @@ class GlossaryRoundTripTest(unittest.TestCase):
         self.assertIn("conceptTerms(", diff)
         self.assertNotIn("JSON.stringify(x.terms", diff)
 
+
+
+def copy_package(dest: Path) -> Path:
+    """A copy of the archplan package under dest/src; returns the package dir."""
+    pkg = dest / "src" / "archplan"
+    shutil.copytree(ROOT / "src" / "archplan", pkg, ignore=shutil.ignore_patterns("__pycache__"))
+    return pkg
+
+
+class ReloadTest(unittest.TestCase):
+    """The build id, and restarting only on code that imports."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_build_id_changes_when_a_file_changes(self):
+        from archplan import reload
+        write(self.dir / "pkg", {"a.py": "x = 1\n", "static/index.html": "<p>", "notes.txt": "n",
+                                 "__pycache__/a.cpython.pyc": "c"})
+        pkg = self.dir / "pkg"
+        fp = reload.fingerprint(pkg)
+        (pkg / "notes.txt").write_text("other")  # not code
+        (pkg / "__pycache__" / "a.cpython.pyc").write_text("other")
+        self.assertEqual(reload.fingerprint(pkg), fp)
+        (pkg / "a.py").write_text("x = 22\n")
+        self.assertNotEqual(reload.fingerprint(pkg), fp)
+        fp = reload.fingerprint(pkg)
+        st = (pkg / "static" / "index.html").stat()
+        os.utime(pkg / "static" / "index.html", ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+        self.assertNotEqual(reload.fingerprint(pkg), fp)
+        self.assertTrue(reload.build_id(pkg, "26.10.9").startswith("26.10.9+"))
+
+    def test_restart_waits_for_code_that_imports(self):
+        import threading
+        from archplan import reload
+        pkg = copy_package(self.dir)
+        changed, logs, stop = [], [], threading.Event()
+        t = threading.Thread(target=reload.watch, args=(changed.append,),
+                             kwargs={"pkg": pkg, "interval": 0.1, "stable": 0.3, "log": logs.append, "stop": stop,
+                                     "start": reload.fingerprint(pkg)})
+        t.start()
+        try:
+            (pkg / "store.py").write_text((pkg / "store.py").read_text() + "\ndef broken(:\n")
+            for _ in range(100):
+                if logs:
+                    break
+                time.sleep(0.1)
+            self.assertEqual(changed, [])
+            self.assertIn("does not import", logs[0])
+            self.assertTrue(t.is_alive())
+            (pkg / "store.py").write_text((pkg / "store.py").read_text().replace("\ndef broken(:\n", "\n# fixed\n"))
+            t.join(30)
+            self.assertEqual(len(changed), 1)
+            self.assertEqual(len(logs), 1)
+        finally:
+            stop.set()
+            t.join(5)
+
+    def test_restart_argv_keeps_the_port(self):
+        from archplan import reload
+        with unittest.mock.patch.object(sys, "argv", ["/x/archplan/__main__.py", "serve", "--dir", "/p", "--port", "1"]):
+            self.assertEqual(reload.restart_argv(8800),
+                             [sys.executable, "-m", "archplan", "serve", "--dir", "/p", "--port", "8800"])
+
+    def test_newer_code_on_disk(self):
+        from archplan import reload
+        old = copy_package(self.dir / "cache" / "26.10.1")
+        (old / "__init__.py").write_text('__version__ = "26.10.1"\n')
+        build = reload.build_id(old, "26.10.1")
+        self.assertIsNone(reload.newer_on_disk(old, "26.10.1", build))
+        # a plugin update: a sibling folder with a newer version
+        (self.dir / "cache" / "26.9.4" / "src" / "archplan").mkdir(parents=True)
+        (self.dir / "cache" / "26.9.4" / "src" / "archplan" / "__init__.py").write_text("")
+        self.assertIsNone(reload.newer_on_disk(old, "26.10.1", build))
+        new = self.dir / "cache" / "26.10.2" / "src" / "archplan"
+        new.mkdir(parents=True)
+        (new / "__init__.py").write_text('__version__ = "26.10.2"\n')
+        self.assertEqual(reload.newer_on_disk(old, "26.10.1", build), "26.10.2")
+        # a checkout that changed under the process
+        co = copy_package(self.dir / "checkout")
+        build = reload.build_id(co, "26.10.1")
+        self.assertIsNone(reload.newer_on_disk(co, "26.10.1", build))
+        (co / "__init__.py").write_text('__version__ = "26.10.3"\n')
+        self.assertEqual(reload.newer_on_disk(co, "26.10.1", build), "26.10.3")
+
+    def test_mcp_tells_about_an_update_once(self):
+        from archplan import mcp
+        n = mcp.UpdateNotice(every=0)
+        with unittest.mock.patch("archplan.reload.newer_on_disk", return_value=None):
+            self.assertIsNone(n())
+        with unittest.mock.patch("archplan.reload.newer_on_disk", return_value="26.10.2"):
+            self.assertIn("updated to 26.10.2", n())
+            self.assertIsNone(n())
+        with unittest.mock.patch.dict(os.environ, {"ARCHPLAN_NO_RELOAD": "1"}), \
+                unittest.mock.patch("archplan.reload.newer_on_disk", return_value="26.10.3"):
+            self.assertIsNone(n())
+
+    def test_status_reports_the_build(self):
+        from archplan import reload
+        root = self.dir / "repo"
+        write(root, SAMPLE)
+        with unittest.mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.dir / "config")}):
+            p = project.init(root)
+            srv, url = serve_in_thread(p)
+            try:
+                st = call(url, "/api/status")[1]
+                self.assertEqual((st["build"], st["pid"]), (reload.BUILD, os.getpid()))
+                self.assertTrue(call(url, "/api/threads?since=-1")[1]["key"].endswith(reload.BUILD))
+            finally:
+                srv.shutdown()
+                srv.server_close()
+
+
+class UpReplacesTest(TempProject):
+    """`archplan up` replaces a server that runs other code, on the same port."""
+
+    def setUp(self):
+        super().setUp()
+        import socket
+        self.p = project.init(self.root)
+        project.write_json(self.p.model_path, export(self.root))
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            self.port = s.getsockname()[1]
+        self.env2 = unittest.mock.patch.dict(os.environ, {"PYTHONPATH": str(ROOT / "src"), "ARCHPLAN_NO_RELOAD": "1"})
+        self.env2.start()
+        self.pids, self.procs = [], []
+
+    def tearDown(self):
+        for pid in self.pids:
+            try:
+                os.kill(pid, 15)
+            except ProcessLookupError:
+                pass
+        for proc in self.procs:
+            proc.wait(10)
+        self.env2.stop()
+        super().tearDown()
+
+    def start(self, src: Path) -> int:
+        proc = subprocess.Popen([sys.executable, "-m", "archplan", "serve", "--dir", str(self.root),
+                                 "--port", str(self.port)], cwd=self.root, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                env=dict(os.environ, PYTHONPATH=str(src)))
+        self.pids.append(proc.pid)
+        self.procs.append(proc)
+        for _ in range(100):
+            if cli.server_status(self.p):
+                return proc.pid
+            time.sleep(0.1)
+        self.fail("the server did not start")
+
+    def up(self) -> dict:
+        # In a fresh process, so its build id is that of the code on disk now.
+        subprocess.run([str(ROOT / "bin" / "archplan"), "up", "--dir", str(self.root)], capture_output=True,
+                       timeout=30, check=True)
+        st = cli.server_status(self.p)
+        self.pids.append(st["pid"])
+        return st
+
+    def test_a_server_with_other_code_is_replaced(self):
+        pkg = copy_package(Path(self.tmp.name) / "old")
+        (pkg / "server.py").write_text((pkg / "server.py").read_text() + "# older\n")
+        old = self.start(pkg.parent)
+        before = cli.server_status(self.p)["build"]
+        st = self.up()
+        self.assertNotEqual(st["pid"], old)
+        self.assertNotEqual(st["build"], before)
+        self.assertEqual(st["port"], self.port)
+        self.assertIsNotNone(self.procs[0].wait(5))  # the old server ended
+
+    def test_a_server_with_the_same_code_stays(self):
+        pid = self.start(ROOT / "src")
+        self.assertEqual(self.up()["pid"], pid)
+
+
+class EditorReloadTest(unittest.TestCase):
+    """The editor reloads on a new build id, or offers it while the user types."""
+
+    def run_js(self, expr):
+        src = (ROOT / "src/archplan/static/index.html").read_text()
+        body = src[src.index("// ---------- code updates"):src.index("// ---------- end code updates")]
+        out = subprocess.run(["node", "-e", body + f"console.log(JSON.stringify({expr}));"],
+                             capture_output=True, text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    def test_reload_or_bar(self):
+        self.assertEqual(self.run_js("""[
+            reloadChoice('1+a', '1+a', false), reloadChoice('1+a', '2+b', false),
+            reloadChoice('1+a', '2+b', true), reloadChoice(undefined, '2+b', false),
+            typingIn([{value: '', visible: true}, {value: 'x', visible: false}], null),
+            typingIn([{value: ' hi ', rendered: '', visible: true}], null),
+            typingIn([{value: 'saved intent', rendered: 'saved intent', visible: true}], null),
+            typingIn([{value: 'saved intent', rendered: 'saved intent', focused: true, visible: true}], null),
+            typingIn([], 1)]"""),
+            ["none", "reload", "bar", "none", False, True, False, True, True])
 
 
 class SubfolderVocabTest(TempProject):

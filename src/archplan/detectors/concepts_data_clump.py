@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from .common import EXAMPLES, plural
+from .common import EXAMPLES, Weight, plural, types_focus
 from .fields import key, plain_names
 
 ID = "concepts.data_clump"
@@ -70,6 +70,9 @@ def run(ctx, params) -> list:
         title = (f"The fields {shown} appear together in {plural(len(support), 'type')} across "
                  f"{plural(len(comps), 'component')}.")
         types = [{"type": t, "component": ctx.types[t]["component"]} for t in support[:EXAMPLES]]
+        marked = {t: [f["name"] for f in ctx.types[t].get("fields") or [] if f.get("name")
+                      and (key(f["name"]) in s or key(f["name"]).endswith("_id") and key(f["name"])[:-3] in s)]
+                  for t in support}
         out.append(ctx.finding(
             tuple(fields), title,
             "In " + ", ".join(f"{ctx.types[t].get('name') or t} ({ctx.name(ctx.types[t]['component'])})"
@@ -81,5 +84,9 @@ def run(ctx, params) -> list:
             {"fields": fields, "types": types,
              "moves": [f"Introduce {vo if vo == 'a value object' else 'a ' + vo + ' value object'} with "
                        f"{', '.join(fields[:6])}, owned by one component, and use it in these types.",
-                       "Move the rules about these fields (validation, formatting) into it."]}))
+                       "Move the rules about these fields (validation, formatting) into it."]},
+            focus=types_focus(marked, sorted(comps)),
+            weight=Weight(25, "data clump").spread(len(fields), "fields", per=8, cap=16, free=params["min_fields"] - 1)
+            .spread(len(comps), per=8, cap=16, free=params["min_components"] - 1)
+            .spread(len(support), "types", per=3, cap=6, free=2)))
     return out

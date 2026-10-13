@@ -4,8 +4,8 @@ bag that several components read is a shared, unwritten schema."""
 
 from __future__ import annotations
 
-from .common import finding, plural
-from .data_common import is_json, name, owner, tables, users
+from .common import Weight, finding, plural
+from .data_common import is_json, name, owner, table_focus, tables, users
 
 ID = "data.json_bag"
 NAME = "JSON column"
@@ -38,5 +38,8 @@ def run(ctx, params) -> list:
             {"table": tname, "columns": [{"name": c["name"], "type": c.get("type")} for c in cols],
              "components": sorted(readers), "moves": [
                 "Name the shape: a typed embedded schema or record that says which keys it holds.",
-                "Move keys that queries filter on into real columns."]}))
+                "Move keys that queries filter on into real columns."]},
+            focus=table_focus(ctx, {tname: [c["name"] for c in cols]}, [own, *others]),
+            weight=Weight(25, "JSON column").spread(n, "components using the table", per=25, cap=45)
+            .repetition(len(cols), "JSON columns", per=3, cap=6, single=0)))
     return out

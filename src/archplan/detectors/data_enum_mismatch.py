@@ -9,8 +9,8 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
-from .common import finding, plural
-from .data_common import owner, schema, tables, users
+from .common import Weight, finding, plural
+from .data_common import owner, schema, table_focus, tables, users
 
 ID = "data.enum_mismatch"
 NAME = "Database values differ from code values"
@@ -102,4 +102,7 @@ def mismatch(ctx, tname, c, db, enum_name, only_db, only_code, source) -> dict:
         f"{plural(len(only_db), 'database value')} not in the code", [own], [],
         {"table": tname, "column": c["name"], "database": db[:30], "code_enum": enum_name, "only_code": only_code[:30],
          "only_database": only_db[:30], "source": source,
-         "moves": ["Generate one list from the other, or add a migration that changes the allowed values."]})
+         "moves": ["Generate one list from the other, or add a migration that changes the allowed values."]},
+        focus=table_focus(ctx, {tname: [c["name"]]}, [own]),
+        weight=Weight(35, "value mismatch").add("code values not in the database", len(only_code), 30 if only_code else 0)
+        .add("database values not in the code", len(only_db), 8 if only_db else 0))

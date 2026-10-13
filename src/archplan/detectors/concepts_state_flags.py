@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from .common import EXAMPLES, plural
+from .common import EXAMPLES, Weight, plural, types_focus
 from .fields import is_flag, is_temporal, words
 
 ID = "concepts.state_flags"
@@ -72,5 +72,9 @@ def run(ctx, params) -> list:
             [c], [r[1].get("file") for r in rows],
             {"component": c, "types": [{"type": r[0], "flags": [n for n, _ in r[2]],
                                         "timestamps": [s for _, s in r[2] if s]} for r in rows[:EXAMPLES]],
-             "moves": moves}))
+             "moves": moves},
+            focus=types_focus({r[0]: [n for f in r[2] for n in f if n] for r in rows}, [c]),
+            weight=Weight(25, "state flags").spread(len(flags), "flags", per=8, cap=12, free=params["min_flags"] - 1)
+            .repetition(len(rows), "types", per=4, cap=10, single=0)
+            .add("timestamps", paired, 6 if paired else 0)))
     return out

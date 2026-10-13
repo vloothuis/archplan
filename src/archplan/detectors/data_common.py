@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from .common import COMMON_FIELDS, namer
+from .common import COMMON_FIELDS, focus, namer
 
 TIMESTAMPS = ("timestamp", "datetime", "utc_datetime", "naive_datetime", "timestamptz")
 
@@ -68,6 +68,32 @@ def is_bool(c: dict) -> bool:
 def is_stamp(c: dict) -> bool:
     t = (c.get("type") or "").lower()
     return t.startswith(TIMESTAMPS)
+
+
+def table_focus(ctx, tbls: dict, comps=(), edges=()) -> list:
+    """Where the editor shows a finding about tables ({table: [column names]}):
+    the Types view with the ORM types that map them (schema maps), with the
+    fields named like the columns, then the components. Without such types,
+    only the components."""
+    maps = schema(ctx).get("maps") or {}
+    fields = {}
+    for tname, cols in tbls.items():
+        tid = (maps.get(tname) or {}).get("type")
+        t = (ctx.model.get("types") or {}).get(tid) if isinstance(tid, str) else None
+        if not isinstance(t, dict):
+            continue
+        names = {f.get("name") for f in t.get("fields") or [] if isinstance(f, dict)}
+        hit = fields.setdefault(tid, [])
+        for c in cols:
+            if c in names:
+                hit.append(c)
+            elif c.endswith("_id") and c[:-3] in names:  # belongs_to user for user_id
+                hit.append(c[:-3])
+    comps = [c for c in dict.fromkeys(comps) if c]
+    out = [focus("types", list(fields), fields=fields)] if fields else []
+    if comps or edges:
+        out.append(focus("components", comps, edges))
+    return out
 
 
 def plain_columns(t: dict) -> set:

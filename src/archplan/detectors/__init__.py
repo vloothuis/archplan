@@ -30,7 +30,7 @@ from ..architecture import Architecture, ArchitectureError, analyse as profile_a
 from ..project import Project, etag, read_json, write_json
 from ..store import NotFound
 from . import external
-from .common import GROUPS, STRENGTHS, comp_name, finding, fingerprint, graph, namer
+from .common import GROUPS, STRENGTHS, Weight, comp_name, finding, fingerprint, graph, namer, reweigh
 
 BUILTIN = ["profile_rule", "profile_pair", "structure_cycle", "structure_tangle", "layers_upward", "layers_policy",
            "vocabulary_leak", "types_fields", "types_synonyms", "history_coupling",
@@ -94,8 +94,9 @@ class Context:
         return fingerprint(kind, *keys)
 
     def finding(self, keys, title, detail, strength, basis, components=(), files=(), evidence=None,
-                kind: str | None = None, unit=None) -> dict:
-        return finding(kind or self.detector, keys, title, detail, strength, basis, components, files, evidence, unit)
+                kind: str | None = None, unit=None, focus=None, weight: Weight | None = None) -> dict:
+        return finding(kind or self.detector, keys, title, detail, strength, basis, components, files, evidence, unit,
+                       focus, weight)
 
     def name(self, cid: str) -> str:
         return namer(self.model)(cid)
@@ -118,6 +119,25 @@ class Context:
     @property
     def graph(self) -> dict:
         return self._get("graph", lambda: graph(self.model))
+
+    @property
+    def fan_in(self) -> dict:
+        """{component: number of internal components that depend on it}."""
+        def fn():
+            out = {}
+            for _, b in self.graph:
+                out[b] = out.get(b, 0) + 1
+            return out
+        return self._get("fan_in", fn)
+
+    @property
+    def churn(self) -> dict:
+        """{component: commits} from the cached hotspots; empty without them."""
+        def fn():
+            comps = (self.hotspots or {}).get("components")
+            return {c: x.get("commits") or 0 for c, x in comps.items() if isinstance(x, dict)
+                    and isinstance(x.get("commits"), int)} if isinstance(comps, dict) else {}
+        return self._get("churn", fn)
 
     @property
     def schema(self) -> dict | None:
@@ -391,6 +411,8 @@ def run(p: Project, arch: Architecture | None = None, only=None, execute: bool =
             st["error"] = str(e)[:300]
             missing.append({"kind": did, "detector": did, "reason": f"the detector failed: {e}"[:300]})
             continue
+        if spec["origin"] == "built-in":
+            fs = [reweigh(f, ctx.fan_in, ctx.churn) for f in fs]
         st["seconds"] = round(time.monotonic() - t, 3)
         st["count"] = len(fs)
         found += fs
@@ -401,7 +423,7 @@ def run(p: Project, arch: Architecture | None = None, only=None, execute: bool =
         if f["id"] not in seen:
             seen.add(f["id"])
             uniq.append(f)
-    uniq.sort(key=lambda f: (GROUPS.index(f["group"]) if f["group"] in GROUPS else len(GROUPS),
+    uniq.sort(key=lambda f: (-f.get("weight", 0), GROUPS.index(f["group"]) if f["group"] in GROUPS else len(GROUPS),
                              STRENGTHS.index(f["strength"]), f["kind"], f["title"]))
     return {"findings": uniq, "missing": missing, "detectors": rows, "extras": ctx.extras,
             "capabilities": ctx.capabilities}

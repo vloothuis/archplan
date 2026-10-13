@@ -11,7 +11,11 @@ archplan writes the context (the model, the parameters, the capabilities
 and the files per component) to a temporary JSON file, puts its quoted path
 in place of {ctx}, and runs the command in a shell in the project root. The
 command prints {"findings": [{"key", "title", "detail"?, "strength"?,
-"basis"?, "components"?, "files"?, "evidence"?}]}.
+"basis"?, "components"?, "files"?, "evidence"?, "focus"?, "weight"?,
+"weight_basis"?}]}. focus says where the editor shows the finding (see
+common.clean_focus); weight (0 to 100) how much it matters, with the factors
+behind it in weight_basis (see common.Weight). Without a weight, the
+strength sets it; with one, the strength follows from it.
 
 A project entry's command comes from the repository, so it runs only after
 a person approved that exact command for this directory: `archplan detectors
@@ -19,8 +23,9 @@ trust <id>` at a terminal. The approval also records a sha256 of each
 argument that names a file in the repository (such as tools/check.py); when
 one changes, the command needs a new approval. Shipped entries need no approval. The output is
 untrusted: archplan keeps at most MAX_FINDINGS findings, shortens strings,
-drops paths that leave the repository and components the model does not
-have, and makes each id from the detector id and the finding's key.
+drops paths that leave the repository, components the model does not
+have and focus entries with an unknown view, and makes each id from the
+detector id and the finding's key.
 
 A result is cached in .archplan/detectors-cache.json (not committed) for the
 model, settings and command it came from. The editor shows the cached
@@ -41,7 +46,7 @@ from pathlib import Path
 from ..project import append_ignore, changed_note, command_hash, etag, read_json, record_trust, write_json
 from ..project import trust_state as project_trust_state
 from ..safeio import read_file
-from .common import EXAMPLES, GROUPS, STRENGTHS, fingerprint
+from .common import EXAMPLES, GROUPS, STRENGTHS, Weight, clean_focus, clean_weight, fingerprint, set_weight
 
 BUILTIN = Path(__file__).resolve().parent.parent / "contrib" / "detectors"
 CACHE = "detectors-cache.json"
@@ -271,9 +276,23 @@ def validate(ctx, spec: dict, out: dict) -> list:
         cs = [c for c in (x.get("components") if isinstance(x.get("components"), list) else [])[:50]
               if isinstance(c, str) and c in comps]
         strength = x.get("strength") if x.get("strength") in STRENGTHS else "weak"
-        fs.append({"id": fingerprint(spec["id"], *keys), "kind": spec["id"], "group": spec["group"],
-                   "title": title, "detail": text_of(x.get("detail"), DETAIL_MAX),
-                   "strength": strength, "basis": text_of(x.get("basis"), BASIS_MAX) or spec["name"],
-                   "components": list(dict.fromkeys(cs)), "files": list(dict.fromkeys(f for f in files if f)),
-                   "evidence": ev, "external": True})
+        fc = clean_focus(x.get("focus"))
+        for e in fc:
+            if "files" in e:
+                e["files"] = [f for f in map(safe_path, e["files"]) if f]
+                if not e["files"]:
+                    del e["files"]
+        fc = [e for e in fc if e["nodes"] or e.get("edges") or e.get("files")]
+        f = {"id": fingerprint(spec["id"], *keys), "kind": spec["id"], "group": spec["group"],
+             "title": title, "detail": text_of(x.get("detail"), DETAIL_MAX),
+             "strength": strength, "basis": text_of(x.get("basis"), BASIS_MAX) or spec["name"],
+             "components": list(dict.fromkeys(cs)), "files": list(dict.fromkeys(f for f in files if f)),
+             "evidence": ev, "external": True, **({"focus": fc} if fc else {})}
+        weight, wb = clean_weight(x.get("weight"), x.get("weight_basis"))
+        w = Weight.of_strength(strength)
+        if weight is not None:
+            w = Weight(weight, "detector")
+            w.basis += [b for b in wb if b["factor"] != "base"]
+            w.basis[0]["effect"] = weight - sum(b["effect"] for b in w.basis[1:])  # the factors add up to the weight
+        fs.append(set_weight(f, w))
     return fs

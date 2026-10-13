@@ -197,6 +197,9 @@ body.drop #stage{outline:3px dashed var(--acc);outline-offset:-6px}
 .pal-i .k{font-size:12px;color:var(--mute);width:72px;flex:none}.pal-i .r{margin-left:auto;font-size:12px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45%}
 #toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#0f172a;color:#fff;border-radius:8px;padding:8px 14px;font-size:13px;z-index:80;opacity:0;transition:opacity .3s;pointer-events:none;max-width:60vw}
 #toast.on{opacity:.95}
+#updBar{position:fixed;left:50%;top:10px;transform:translateX(-50%);background:#0f172a;color:#fff;border-radius:8px;padding:6px 8px 6px 14px;font-size:13px;z-index:81;display:flex;gap:10px;align-items:center}
+#updBar[hidden]{display:none}
+#updBar button{font:inherit;border:0;border-radius:6px;padding:3px 10px;background:#2563eb;color:#fff;cursor:pointer}
 #hint{position:absolute;right:12px;top:12px;background:#0f172a;color:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:13px;max-width:340px;opacity:.9;z-index:5}
 #handle{position:absolute;width:14px;height:14px;border-radius:50%;background:var(--acc);border:2px solid var(--panel);box-shadow:0 0 0 1px var(--acc),0 2px 6px rgba(0,0,0,.2);cursor:crosshair;display:none;z-index:5}
 #handle:hover{transform:scale(1.25)}
@@ -240,6 +243,9 @@ ul.breaks{margin:4px 0 8px;padding-left:18px;font-size:13px;max-height:260px;ove
 .find{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px}.find.on{border-color:var(--acc)!important;box-shadow:0 0 0 2px var(--sel)}.find.base{opacity:.72}
 .find .ft{font-weight:600;margin:4px 0 2px}.fk{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600}.fk i{width:8px;height:8px;border-radius:50%}
 .fsm{font-size:12.5px}.fev{list-style:none;margin:4px 0 0;padding:0;font-size:12.5px}.fev li{padding:1px 0}.fkv{font-size:12.5px;margin-top:4px;overflow-wrap:anywhere}
+.members li.fhl code{background:#fef3c7;box-shadow:0 0 0 2px #fde68a;border-radius:3px}
+.fshow{margin:4px 0 0;font-size:12px;color:var(--mute)}
+.fw{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--mute)}.fw b{display:inline-block;width:34px;height:5px;border-radius:3px;background:var(--line);overflow:hidden}.fw b i{display:block;height:100%;background:var(--acc)}
 .fld{display:inline-block;font:12px ui-monospace,Menlo,monospace;color:#0f172a;border-radius:4px;padding:0 6px;margin:3px 4px 0 0}
 .fbox{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0}.fev-box{border:1px solid var(--line);border-radius:6px;padding:6px 9px;background:var(--bg)}
 .cand{border-bottom:1px solid var(--soft)}.cand-h{display:flex;align-items:center;gap:8px;padding:4px 2px;cursor:pointer;flex-wrap:wrap}.cand-h:hover{background:var(--bg)}.cand.ign{opacity:.6}
@@ -378,6 +384,7 @@ ul.breaks{margin:4px 0 8px;padding-left:18px;font-size:13px;max-height:260px;ove
   </section>
 </main>
 <div id="toast"></div>
+<div id="updBar" hidden><span>archplan was updated.</span><button id="updReload">Reload</button></div>
 <script>
 // ---------- helpers ----------
 const clone = o => JSON.parse(JSON.stringify(o));
@@ -580,11 +587,50 @@ const markers = () => threads.filter(t => t.status === 'open').map(t => t.anchor
 function onThreads(redrawCanvas) {
   if (redrawCanvas) render(); else renderSide();
 }
+// ---------- code updates
+// The server restarts itself when archplan's code changes, and reports the new
+// build id. The page reloads to get the new editor, unless the user is typing:
+// then a bar offers the reload. The new page has the new id, so this cannot loop.
+const reloadChoice = (loaded, now, busy) => !loaded || !now || loaded === now ? 'none' : busy ? 'bar' : 'reload';
+// Busy: a target edit not saved yet, or a visible text field with content that
+// has focus or differs from what the page rendered (a draft, not a saved value).
+const typingIn = (fields, unsaved) => !!unsaved || fields.some(f => f.visible && String(f.value || '').trim() !== '' && (f.focused || f.value !== f.rendered));
+// ---------- end code updates
+function userTyping() {
+  const fields = [...document.querySelectorAll('textarea, input:not([type]), input[type=text], input[type=search]')]
+    .filter(x => x.id !== 'palIn').map(x => ({value: x.value, rendered: x.defaultValue, focused: x === document.activeElement, visible: !!x.offsetParent}));
+  return typingIn(fields, saveT || saving);
+}
+const RESUME = 'archplan.resume';
+function reloadPage() {
+  // Keep what can be kept: the view, focus and selection (as the link hash), the
+  // open composer, form drafts and what is typed in the side panel.
+  const fields = Object.fromEntries([...$('panel').querySelectorAll('textarea[id], input[id]')].filter(x => x.value).map(x => [x.id, x.value]));
+  try { sessionStorage.setItem(RESUME, JSON.stringify({drafts, composeKey, fields})); } catch {}
+  history.replaceState(null, '', viewLink());
+  location.reload();
+}
+function codeUpdated(build) {
+  const c = reloadChoice(known.build, build, userTyping());
+  if (c === 'reload') return reloadPage();
+  if (c === 'bar') $('updBar').hidden = false;
+}
+$('updReload').addEventListener('click', reloadPage);
+function resumeAfterReload() {
+  let r = null;
+  try { r = JSON.parse(sessionStorage.getItem(RESUME) || 'null'); sessionStorage.removeItem(RESUME); } catch {}
+  if (!r) return;
+  Object.assign(drafts, r.drafts || {});
+  if (r.composeKey) composeKey = r.composeKey;
+  renderSide();
+  for (const [id, v] of Object.entries(r.fields || {})) { const x = $(id); if (x && !x.value) x.value = v; }
+}
 async function pollThreads() {
   while (collab) {
     try {
       const d = await api('GET', `/api/threads?since=${encodeURIComponent(pollKey)}`);
       pollKey = d.key;
+      if (d.build && d.build !== known.build) codeUpdated(d.build);
       if (d.version !== threadsVer) { const was = markers(); threadsVer = d.version; threads = d.threads; onThreads(markers() !== was); }
       if (d.model_etag && d.model_etag !== known.modelEtag) { known.modelEtag = d.model_etag; await reloadAsIs(); }
       if (d.target_rev > known.targetRev) { known.targetRev = d.target_rev; await reloadTarget(d.target_by); refreshPreviews(); }
@@ -686,17 +732,18 @@ async function restoreTarget() {
   render();
   if (msg) toast(msg);
 }
-let saveT = null;
+let saveT = null, saving = 0;
 // Publish the target model and plan for the agent (get_plan, get_item).
 function publish() {
   if (!collab || !restored) return;
   clearTimeout(saveT);
   saveT = setTimeout(() => {
+    saveT = null;
     const P = buildPlan(asIs, toBe, D), sig = pubSig();
     if (sig !== lastPub) {
-      lastPub = sig;
+      lastPub = sig; saving++;
       api('PUT', '/api/target', {target: toArchModel(toBe), base_etag: known.modelEtag, intent})
-        .then(r => { known.targetRev = Math.max(known.targetRev, r.target_rev); }).catch(() => {});
+        .then(r => { known.targetRev = Math.max(known.targetRev, r.target_rev); }).catch(() => {}).finally(() => saving--);
     }
     api('PUT', '/api/plan', {md: planMD(P), json: planJSON(P)}).catch(() => {});
   }, 800);
@@ -1626,20 +1673,22 @@ function typeLabel(id) {
   if (t.kind === 'interface') lines.push('«interface»');
   lines.push(noted + (mode === 'diff' && x && y && x.name !== y.name ? `${y.name}  (was ${x.name})` : t.name));
   let F_, M_;
+  // Fields a finding marks start with ▶.
+  const hiF = fhiFields(id), fm = (name, p) => hiF?.has(name) ? (p === '  ' ? '▶ ' : p[0] + '▶') : p;
   if (mode === 'diff' && x && y) {
     F_ = []; const xf = new Map(x.fields.map(f => [f.name, f])), yn = new Set(y.fields.map(f => f.name));
-    y.fields.forEach(f => { const o = xf.get(f.name); F_.push((!o ? '+ ' : fEq(o, f) ? '  ' : '~ ') + fieldStr(toBe, y, f)); });
+    y.fields.forEach(f => { const o = xf.get(f.name); F_.push(fm(f.name, !o ? '+ ' : fEq(o, f) ? '  ' : '~ ') + fieldStr(toBe, y, f)); });
     x.fields.forEach(f => { if (!yn.has(f.name)) F_.push('− ' + fieldStr(asIs, x, f)); });
     M_ = []; const xm = new Map(x.methods.map(f => [f.name, f])), ym = new Set(y.methods.map(f => f.name));
     y.methods.forEach(f => { const o = xm.get(f.name); M_.push((!o ? '+ ' : o.sig === f.sig ? '  ' : '~ ') + f.name + f.sig); });
     x.methods.forEach(f => { if (!ym.has(f.name)) M_.push('− ' + f.name + f.sig); });
   } else {
-    F_ = t.fields.map(f => '  ' + fieldStr(m, t, f));
+    F_ = t.fields.map(f => fm(f.name, '  ') + fieldStr(m, t, f));
     M_ = t.methods.map(f => '  ' + f.name + f.sig);
   }
   const trunc = s => s.length > 46 ? s.slice(0, 45) + '…' : s;
   const MAXM = 14, cap = arr => arr.length > MAXM ? [...arr.slice(0, MAXM - 1), `  … ${arr.length - MAXM + 1} more`] : arr;
-  if (mode !== 'diff') { F_ = cap(F_); M_ = cap(M_); }
+  if (mode !== 'diff') { F_ = hiF ? F_ : cap(F_); M_ = cap(M_); }
   const body = [...F_, ...M_].map(trunc);
   const width = Math.max(...lines.map(l => l.length + 2), ...body.map(l => l.length), 12);
   const div = '─'.repeat(Math.min(width, 46));
@@ -2571,7 +2620,7 @@ function inspector() {
     const blast = [...refsTo(asIs, sel.id).map(k => qname(asIs, k)), ...callers(asIs, sel.id)];
     return `${roMsg}<div class="ins-h"><span class="kind">${t.kind}</span><b>${esc(qname(m, sel.id))}</b>${mode === 'diff' ? badge(D.type[sel.id]) : ''}</div>
       <div class="anchor mono">📍 ${esc(t.file || 'new in target')}</div>
-      <h4>Fields</h4><ul class="members">${t.fields.map((f, i) => `<li><code>${esc(fieldStr(m, t, f))}</code>${ro ? '' : `<button class="x" title="Remove" data-act="field.del" data-i="${i}">×</button>`}</li>`).join('') || '<li class="mute">none</li>'}</ul>
+      <h4>Fields</h4><ul class="members">${t.fields.map((f, i) => `<li${fhiFields(sel.id)?.has(f.name) ? ' class="fhl" title="Marked by the finding in focus"' : ''}><code>${esc(fieldStr(m, t, f))}</code>${ro ? '' : `<button class="x" title="Remove" data-act="field.del" data-i="${i}">×</button>`}</li>`).join('') || '<li class="mute">none</li>'}</ul>
       ${ro ? '' : `<div class="row"><input id="i-field" placeholder="PaymentTx string   or   cache *Cache"><button class="btn" data-act="field.add">Add field</button></div>`}
       <h4>Methods</h4><ul class="members">${t.methods.map((x, i) => `<li><code>${esc(x.name + x.sig)}</code>${ro ? '' : `<button class="x" title="Remove" data-act="method.del" data-i="${i}">×</button>`}</li>`).join('') || '<li class="mute">none</li>'}</ul>
       ${ro ? '' : `<div class="row"><input id="i-method" placeholder="Refund(ctx, id string) error"><button class="btn" data-act="method.add">Add method</button></div>
@@ -3081,9 +3130,10 @@ async function loadArch() {
 }
 function setLeft(m) {
   leftMode = m; localStorage.setItem('archplan.left', m);
-  if (m !== 'find' && findOn) { findOn = null; FHI = {nodes: new Set(), edges: new Set()}; }
+  const marked = findOn && m !== 'find' && view === 'types' && Object.keys(FHI.fields || {}).length;
+  if (m !== 'find' && findOn) { findOn = null; FHI = NOFHI(); }
   sel = null; multi = []; page = homePage(); renderHeader();
-  if (view === 'seq') renderSeq(); else applySel();
+  if (view === 'seq') renderSeq(); else if (marked) renderCy(); else applySel();
   renderSide(); $('panel').scrollTop = 0;
 }
 $('leftModes').addEventListener('click', e => { const b = e.target.closest('[data-left]'); if (b) setLeft(b.dataset.left); });
@@ -3313,6 +3363,33 @@ Object.assign(actions, {
 // baseline of accepted and dismissed ones. Without that endpoint the mode stays hidden.
 let FIND = null, findGroup = 'all', findBase = false, findDis = null, findOn = null;
 let FHI = {nodes: new Set(), edges: new Set()};
+// ---------- finding focus ----------
+// A finding's focus says where to show it: [{view, label?, nodes, edges?, fields?, files?}].
+// It comes from detectors, some of them the repository's own, so every value is checked.
+// focusTargets keeps the entries whose nodes exist (has[view](id)), mapped to the editor's views.
+const FVIEW = {types: 'types', components: 'components', roles: 'roles', sequences: 'seq', glossary: 'glossary'};
+const FVLABEL = {types: 'Types', components: 'Components', roles: 'Roles', sequences: 'Sequences', glossary: 'Glossary'};
+const ownKey = (o, k) => !!o && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
+const fStrs = (x, n = 100) => Array.isArray(x) ? [...new Set(x.slice(0, n).filter(s => typeof s === 'string' && s && s.length <= 300))] : [];
+function focusTargets(f, has) {
+  const fc = f && Array.isArray(f.focus) ? f.focus.slice(0, 5) : [], out = [];
+  for (const e of fc) {
+    if (!e || typeof e !== 'object' || Array.isArray(e) || !ownKey(FVIEW, e.view)) continue;
+    const ok = typeof has?.[e.view] === 'function' ? id => { try { return !!has[e.view](id); } catch { return false; } } : () => false;
+    const okC = typeof has?.components === 'function' ? id => { try { return !!has.components(id); } catch { return false; } } : () => false;
+    const nodes = fStrs(e.nodes).filter(ok);
+    const edges = (Array.isArray(e.edges) ? e.edges.slice(0, 100) : []).filter(p => Array.isArray(p) && p.length === 2 && fStrs(p).length === 2
+      && (ok(p[0]) || okC(p[0])) && (ok(p[1]) || okC(p[1]))).map(p => [p[0], p[1]]);
+    const fields = {};
+    if (e.fields && typeof e.fields === 'object' && !Array.isArray(e.fields))
+      for (const k of Object.keys(e.fields).slice(0, 100)) { const v = fStrs(e.fields[k], 50); if (v.length && ok(k)) fields[k] = v; }
+    if (!nodes.length && !edges.length) continue;
+    out.push({view: FVIEW[e.view], key: e.view, label: typeof e.label === 'string' && e.label ? e.label.slice(0, 60) : FVLABEL[e.view],
+      nodes, edges, fields, files: fStrs(e.files, 20)});
+  }
+  return out;
+}
+// ---------- end finding focus ----------
 const FGROUPS = [['profile', 'Profile'], ['structure', 'Structure'], ['layers', 'Layers'], ['vocabulary', 'Vocabulary'], ['types', 'Types'], ['history', 'History'], ['concepts', 'Concepts'], ['boundaries', 'Boundaries'], ['data', 'Data'], ['evolution', 'Evolution']];
 const FCOL = {profile: ['var(--rem)', 'var(--rem-ink)'], structure: ['var(--chg)', 'var(--warn-ink)'], layers: ['var(--acc)', 'var(--sel-ink)'], vocabulary: ['var(--agent)', 'var(--agent-ink)'], types: ['var(--mute)', 'var(--ink)'], history: ['var(--mute)', 'var(--ink)'], concepts: ['var(--agent)', 'var(--agent-ink)'], boundaries: ['var(--acc)', 'var(--sel-ink)'], data: ['var(--mute)', 'var(--ink)'], evolution: ['var(--mute)', 'var(--ink)']};
 const FKIND = {'profile.rule': 'call rule', 'profile.pair': 'missing pair', 'structure.cycle': 'cycle', 'structure.tangle': 'tangle', 'layers.upward': 'upward dependency', 'vocabulary.leak': 'leak', 'vocabulary.synonyms': 'synonyms', 'types.fields': 'field clusters', 'types.synonyms': 'synonyms', 'history.coupling': 'changes together'};
@@ -3385,6 +3462,12 @@ function evHTML(f, full) {
   const kv = Object.entries(e).filter(([a, v]) => a !== 'moves' && v != null && v !== '');
   return `${kv.length ? `<div class="fkv">${kv.slice(0, 20).map(([a, v]) => `<span class="mute">${esc(a.replace(/_/g, ' '))}</span> ${esc(evShort(v))}`).join('<br>')}</div>` : ''}${mvH}`;
 }
+// A finding's weight (0 to 100) and the factors behind it, from the detector: checked before use.
+const MINOR = 40;  // below this a finding is minor (weak)
+const fWeight = f => typeof f.weight === 'number' && isFinite(f.weight) ? Math.max(0, Math.min(100, Math.round(f.weight))) : null;
+const fBasis = f => objs(f.weight_basis).slice(0, 12).map(b => `${evShort(b.factor)}${b.value != null && b.value !== '' && typeof b.value !== 'object' ? ` (${evShort(b.value)})` : ''}: ${+b.effect > 0 ? '+' : ''}${Number.isFinite(+b.effect) ? Math.round(+b.effect) : 0}`);
+const fWeightHTML = f => { const w = fWeight(f); return w == null ? '' : `<span class="fw" title="${esc(['Weight ' + w + ' of 100', ...fBasis(f)].join('\n'))}"><b><i style="width:${w}%"></i></b>${w}</span>`; };
+let findSort = localStorage.getItem('archplan.findSort') === 'kind' ? 'kind' : 'weight', findMinor = localStorage.getItem('archplan.findMinor') === '1';
 function findCard(f) {
   const ev = evHTML(f);  // the evidence repeats the detail text, so show the detail only without it
   const [c1, c2] = FCOL[fGroup(f)] || FCOL.types, base = f.state !== 'new', th = f.thread && threads.find(t => t.id === f.thread);
@@ -3395,49 +3478,95 @@ function findCard(f) {
     : `<span class="spacer"></span>${(ps => ps ? `<button class="pill add" data-act="ref.open" data-id="${esc(ps.id)}" title="${esc(ps.title || 'A pending refactor proposal')}">Proposed fix</button>` : '')(sugFor(f.id))}${f.thread ? `<button class="linkb" data-act="find.thread" data-id="${esc(f.thread)}">In discussion${th && th.status !== 'open' ? ` (${esc(th.status)})` : ''}</button>` : `<button class="btn" data-act="find.discuss" data-id="${esc(f.id)}">Discuss</button>`}<button class="btn ghost" data-act="find.dis" data-id="${esc(f.id)}">Dismiss…</button><button class="btn ghost" data-act="find.accept" data-id="${esc(f.id)}" title="Add it to the baseline: archplan check stops reporting it">Accept as is</button>`;
   return `<div class="find${findOn === f.id ? ' on' : ''}${base ? ' base' : ''}" id="fi-${esc(f.id)}" style="${fGroup(f) === 'profile' && !base ? 'border-color:var(--rem-line,#fecaca)' : ''}">
     <div data-act="find.focus" data-id="${esc(f.id)}" title="Show it in the diagram" style="cursor:pointer">
-      <div class="row" style="margin:0;gap:8px"><span class="fk" style="color:${c2}"><i style="background:${c1}"></i>${esc(kindLabel(f))}</span><span class="spacer"></span>${f.label ? `<span class="pill agent" title="Claude's judgement, not a verdict">Claude: ${esc(f.label)}</span>` : ''}${f.strength || f.basis ? `<span class="mute fsm">${esc([f.strength, f.basis].filter(Boolean).join(' · '))}</span>` : ''}</div>
+      <div class="row" style="margin:0;gap:8px"><span class="fk" style="color:${c2}"><i style="background:${c1}"></i>${esc(kindLabel(f))}</span><span class="spacer"></span>${f.label ? `<span class="pill agent" title="Claude's judgement, not a verdict">Claude: ${esc(f.label)}</span>` : ''}${f.strength || f.basis ? `<span class="mute fsm">${esc([f.strength, f.basis].filter(Boolean).join(' · '))}</span>` : ''}${fWeightHTML(f)}</div>
       <div class="ft">${esc(f.title || f.id)}</div>${ev ? '' : f.detail ? `<div class="fsm" style="color:var(--mute)">${esc(f.detail)}</div>` : ''}
-      ${ev}</div>
+      ${ev}</div>${(ts => ts.length > 1 ? `<div class="fshow">Show in: ${ts.map((t, i) => `<button class="linkb" data-act="find.focusAt" data-id="${esc(f.id)}" data-i="${i}">${esc(t.label)}</button>`).join(' · ')}</div>` : '')(findTargets(f))}
     <div class="row fsm" style="margin:6px 0 0;gap:6px">${acts}</div></div>`;
 }
 function findPage() {
   const all = findings(), base = all.filter(f => f.state !== 'new'), byG = FIND.counts?.by_group;
-  const nw = all.filter(f => f.state === 'new'), pool = findBase ? all : nw;
-  const cnt = g => g === 'all' ? pool.length : findBase || !byG ? pool.filter(f => fGroup(f) === g).length : byG[g] ?? pool.filter(f => fGroup(f) === g).length;
-  const list = pool.filter(f => findGroup === 'all' || fGroup(f) === findGroup).sort((a, b) => (a.state !== 'new') - (b.state !== 'new'));
+  const minor = f => f.state === 'new' && (fWeight(f) ?? 100) < MINOR;
+  const nw = all.filter(f => f.state === 'new'), nMinor = nw.filter(minor).length;
+  const pool = (findBase ? all : nw).filter(f => !findMinor || !minor(f));
+  const cnt = g => g === 'all' ? pool.length : findBase || findMinor || !byG ? pool.filter(f => fGroup(f) === g).length : byG[g] ?? pool.filter(f => fGroup(f) === g).length;
+  const gi = f => { const i = FGROUPS.findIndex(x => x[0] === fGroup(f)); return i < 0 ? FGROUPS.length : i; };
+  const list = pool.filter(f => findGroup === 'all' || fGroup(f) === findGroup).sort((a, b) => (a.state !== 'new') - (b.state !== 'new')
+    || (findSort === 'kind' ? gi(a) - gi(b) || String(a.kind).localeCompare(String(b.kind)) : 0) || (fWeight(b) ?? 0) - (fWeight(a) ?? 0));
   const nA = FIND.counts?.accepted ?? base.filter(f => f.state === 'accepted').length, nD = FIND.counts?.dismissed ?? base.filter(f => f.state === 'dismissed').length;
   const chip = (g, l) => `<button class="pill${findGroup === g ? ' acc' : ''}" data-act="find.group" data-g="${g}"${g !== 'all' && !cnt(g) ? ' style="opacity:.55"' : ''}>${l} ${cnt(g)}</button>`;
   return `<div class="doc-title">Findings</div>
     <p class="mute" style="margin:4px 0 10px">What the checks found in the code. Discuss one with Claude, dismiss it with a reason, or accept it as is. Accepted and dismissed findings form the baseline: <span class="mono">archplan check</span> reports only new ones.</p>
     <div class="row" style="gap:5px;flex-wrap:wrap;margin-bottom:6px">${chip('all', 'All')}${FGROUPS.map(([g, l]) => chip(g, l)).join('')}</div>
     <div class="row fsm" style="margin:0 0 10px"><span class="mute">Baseline: ${nA} accepted · ${nD} dismissed</span>${nA + nD ? `<button class="linkb" data-act="find.base">${findBase ? 'Hide them' : 'Show them'}</button>` : ''}</div>
+    <div class="row fsm" style="margin:-4px 0 10px;gap:10px"><span class="mute">Sort by</span><button class="linkb"${findSort === 'weight' ? ' style="font-weight:600"' : ''} data-act="find.sort" data-s="weight" title="How much a finding matters: spread, repetition, where it occurs, fan-in and churn">weight</button><button class="linkb"${findSort === 'kind' ? ' style="font-weight:600"' : ''} data-act="find.sort" data-s="kind">kind</button><span class="spacer"></span>${nMinor ? `<label class="mute" title="Minor: weight below ${MINOR}"><input type="checkbox" data-act="find.minor"${findMinor ? ' checked' : ''}> Hide minor (${nMinor})</label>` : ''}</div>
     ${list.map(findCard).join('') || `<div class="empty">${all.length ? 'No findings here.' : 'No findings. The code passes every check.'}</div>`}`;
 }
-// Show a finding in the diagram: a unit in the Roles view, a cycle or tangle with its
+// Show a finding in the diagram, where its focus says (entry i, else the first):
+// the view, its nodes and edges highlighted and fitted, and for types the fields.
+// Without a usable focus: a unit in the Roles view, a cycle or tangle with its
 // edges, or else its components in the Components view.
-function focusFinding(f) {
-  findOn = f.id; FHI = {nodes: new Set(), edges: new Set()};
+const NOFHI = () => ({view: 'components', nodes: new Set(), edges: new Set(), fields: {}});
+const conceptOf = id => [toBe, asIs].map(m => m.vocabulary?.concepts).find(K => ownKey(K, id))?.[id];
+const focusHas = () => ({
+  types: id => ownKey(toBe.types, id) || ownKey(asIs.types, id),
+  components: id => ownKey(toBe.components, id) || ownKey(asIs.components, id),
+  roles: id => !!ARCH && !!unitById(id),
+  sequences: id => ownKey(toBe.sequences, id) || ownKey(asIs.sequences, id),
+  glossary: id => !!conceptOf(id)});
+const findTargets = f => focusTargets(f, focusHas());
+function focusFinding(f, i = 0) {
+  const ts = findTargets(f), t = ts[i] || ts[0];
+  if (!t) return focusLegacy(f);
+  findOn = f.id; sel = null; multi = [];
+  FHI = {view: t.view, nodes: new Set(t.nodes), edges: new Set(t.edges.map(([a, b]) => `${a}->${b}`)), fields: t.view === 'types' ? t.fields : {}};
+  if (t.view === 'roles') { showUnit(t.nodes[0], {from: t.files[0] || null, to: null, files: t.files}); return renderSide(); }
+  if (t.view === 'seq') { view = 'seq'; curSeq = t.nodes[0]; return render(); }
+  const isC = id => ownKey(toBe.components, id) || ownKey(asIs.components, id);
+  const ends = t.edges.flat().filter(isC);
+  const comps = t.view === 'types' ? t.nodes.map(id => (toBe.types[id] || asIs.types[id])?.comp)
+    : t.view === 'glossary' ? [...t.nodes.map(k => conceptOf(k)?.owner), ...ends] : [...t.nodes, ...ends];
+  if (t.view === 'glossary' && glossMode === 'table') glossMode = 'map';
+  view = t.view; seqFilter = '';
+  setFocus([...new Set(comps)].filter(c => typeof c === 'string' && isC(c)));
+  fhiFit();
+  renderSide();
+}
+function focusLegacy(f) {
+  findOn = f.id; FHI = NOFHI();
   const ev = f.evidence && typeof f.evidence === 'object' ? f.evidence : {};
   const files = [...new Set([...(Array.isArray(f.files) ? f.files : []), ...objs(ev.breaks).flatMap(b => [b.from, b.to]), ...objs(ev.missing).map(m => m.file)])].filter(x => typeof x === 'string' && x);
   if (f.unit && unitById(f.unit)) { showUnit(f.unit, {from: files[0] || null, to: null, files}); return renderSide(); }
   const cyc = f.kind === 'structure.cycle' && Array.isArray(ev.cycle) ? ev.cycle : [];
   const tng = f.kind === 'structure.tangle' ? ev : {};
   objs(tng.cuts).forEach(c => FHI.edges.add(`${c.from}->${c.to}`));
-  const comps = [...new Set([...(Array.isArray(f.components) ? f.components : []), ...cyc, ...(Array.isArray(tng.members) ? tng.members : [])])].filter(c => toBe.components[c] || asIs.components[c]);
+  const comps = [...new Set([...(Array.isArray(f.components) ? f.components : []), ...cyc, ...(Array.isArray(tng.members) ? tng.members : [])])].filter(c => ownKey(toBe.components, c) || ownKey(asIs.components, c));
   cyc.forEach((c, i) => FHI.edges.add(`${c}->${cyc[(i + 1) % cyc.length]}`));
   comps.forEach(c => FHI.nodes.add(c));
   if (!comps.length) { renderSide(); return toast('This finding names no component in the model.'); }
   view = 'components'; sel = null; multi = [];
   setFocus(comps);
-  const hn = cy.nodes('.fhi'); if (hn.length) { cy.fit(hn.union(cy.edges('.fhi')), 70); zoomReadout(); }
+  fhiFit();
   renderSide();
 }
+// The finding's highlight, in the view it belongs to only.
 function fhiApply() {
   cy.elements('.fhi').removeClass('fhi');
-  if (view !== 'components') return;
-  FHI.nodes.forEach(c => cy.getElementById('c:' + c).addClass('fhi'));
-  FHI.edges.forEach(k => { cy.getElementById('ce:' + k).addClass('fhi'); cy.getElementById('r:' + k).addClass('fhi'); });
+  const v = FHI.view || 'components';
+  if (view !== v) return;
+  const pre = v === 'types' ? ['t:'] : v === 'glossary' ? ['k:', 'c:'] : ['c:'];
+  FHI.nodes.forEach(id => pre.forEach(p => cy.getElementById(p + id).addClass('fhi')));
+  if (v === 'components') FHI.edges.forEach(k => { cy.getElementById('ce:' + k).addClass('fhi'); cy.getElementById('r:' + k).addClass('fhi'); });
+  else if (FHI.edges.size) cy.edges().forEach(e => { if (FHI.edges.has(`${e.source().data('sid')}->${e.target().data('sid')}`)) e.addClass('fhi'); });
 }
+// Fit the highlight; when it does not fit at the smallest zoom, show its first node at 100% at most.
+function fhiFit() {
+  const hn = cy.nodes('.fhi'); if (!hn.length) return;
+  cy.fit(hn.union(cy.edges('.fhi')), 70);
+  if (cy.zoom() <= ZMIN + 1e-6 && hn.length > 1) { cy.fit(hn.first(), 70); if (cy.zoom() > 1) { cy.zoom(1); cy.center(hn.first()); } }
+  zoomReadout();
+}
+// Fields of type id that the finding in focus marks.
+const fhiFields = id => FHI.view === 'types' && view === 'types' && ownKey(FHI.fields, id) ? new Set(FHI.fields[id]) : null;
 function openThread(id) {
   if (leftMode !== 'plan') { leftMode = 'plan'; localStorage.setItem('archplan.left', 'plan'); }
   sel = null; multi = []; page = 'plan'; renderSide();
@@ -3450,12 +3579,15 @@ function findBox(t) {
   const id = t.anchor.slice(8), f = findById(id);
   if (!f) return `<div class="fbox"><span class="pill">from finding</span> <span class="mute fsm">${esc(id)}</span></div>`;
   return `<div class="fbox"><div class="row" style="margin:0 0 6px;gap:6px"><span class="pill">from finding</span><span class="fk mute">${esc(kindLabel(f))}</span><span class="spacer"></span><button class="linkb" data-act="find.show" data-id="${esc(f.id)}">Show</button></div>
-    <div class="fev-box"><div class="ft" style="font-size:13px">${esc(f.title || f.id)}</div>${evHTML(f, true)}${f.detail ? `<div class="mute fsm" style="margin-top:4px">${esc(f.detail)}</div>` : ''}</div></div>`;
+    <div class="fev-box"><div class="ft" style="font-size:13px">${esc(f.title || f.id)}</div>${evHTML(f, true)}${f.detail ? `<div class="mute fsm" style="margin-top:4px">${esc(f.detail)}</div>` : ''}${fWeight(f) != null ? `<div class="mute fsm" style="margin-top:4px">Weight ${fWeight(f)}: ${esc(fBasis(f).join(', '))}</div>` : ''}</div></div>`;
 }
 Object.assign(actions, {
   'find.group': e => { findGroup = e.dataset.g; renderSide(); },
   'find.base': () => { findBase = !findBase; renderSide(); },
+  'find.sort': e => { findSort = e.dataset.s === 'kind' ? 'kind' : 'weight'; localStorage.setItem('archplan.findSort', findSort); renderSide(); },
+  'find.minor': () => { findMinor = !findMinor; localStorage.setItem('archplan.findMinor', findMinor ? '1' : '0'); renderSide(); },
   'find.focus': e => { const f = findById(e.dataset.id); if (f) focusFinding(f); },
+  'find.focusAt': e => { const f = findById(e.dataset.id); if (f) focusFinding(f, +e.dataset.i || 0); },
   'find.show': e => { const f = findById(e.dataset.id); if (!f) return; leftMode = 'find'; localStorage.setItem('archplan.left', 'find'); sel = null; multi = []; page = 'find'; findGroup = 'all'; if (f.state !== 'new') findBase = true; focusFinding(f); flash($('fi-' + f.id)); },
   'find.dis': e => { findDis = e.dataset.id; renderSide(); $('fd-' + findDis)?.focus(); },
   'find.discancel': () => { clearDrafts('fd-'); findDis = null; renderSide(); },
@@ -4681,7 +4813,7 @@ window.addEventListener('load', () => requestAnimationFrame(async () => {
   if (collab) {
     document.title = `archplan · ${collab.name}`;
     $('proj').textContent = collab.name;
-    known.modelEtag = collab.model_etag;
+    known.modelEtag = collab.model_etag; known.build = collab.build;
     const d = await api('GET', '/api/threads?since=-1'); threadsVer = d.version; threads = d.threads; pollKey = d.key;
     known.sugVer = d.suggestions_version; known.actEtag = d.activity_etag; known.hoVer = d.handover_version; known.archVer = d.architecture_version ?? d.architecture_etag; known.findVer = d.findings_version ?? d.findings_etag; known.vocVer = d.vocabulary_version ?? d.vocabulary_etag; known.autoVer = d.suggest_version ?? d.suggest_etag;
     loadActivity(); loadSuggestions(); loadHotspots(); loadHandover(); loadArch(); loadFindings(); probeVocab(); loadAuto();
@@ -4691,7 +4823,7 @@ window.addEventListener('load', () => requestAnimationFrame(async () => {
   if (!url) {
     restored = true;
     if (collab) { pollThreads(); toast(collab.can_export ? 'No model of the code yet. Choose Export from code in the ⋯ menu.' : 'No model of the code yet: set "export" in .archplan/config.json.'); }
-    render(); return applyHash();
+    render(); applyHash(); return resumeAfterReload();
   }
   try {
     const r = await fetch(url);
@@ -4702,7 +4834,7 @@ window.addEventListener('load', () => requestAnimationFrame(async () => {
   restored = true;
   publish();
   applyHash();
-  if (collab) pollThreads();
+  if (collab) { resumeAfterReload(); pollThreads(); }
 }));
 </script>
 </body>

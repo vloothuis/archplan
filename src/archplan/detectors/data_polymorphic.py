@@ -5,8 +5,8 @@ and every reader must know the list of possible tables."""
 
 from __future__ import annotations
 
-from .common import finding, plural
-from .data_common import name, owner, tables
+from .common import Weight, finding, plural
+from .data_common import name, owner, table_focus, tables
 
 ID = "data.polymorphic"
 NAME = "Polymorphic reference"
@@ -56,5 +56,8 @@ def run(ctx, params) -> list:
             plural(len(ps), "type and id pair"), [own], [],
             {"table": tname, "pairs": [{"type": a, "id": b} for a, b in ps], "values": known[:20],
              "moves": ["Use one nullable foreign key per target table, with a check that one is set.",
-                       "Or give each target its own join table."]}))
+                       "Or give each target its own join table."]},
+            focus=table_focus(ctx, {tname: [x for p in ps for x in p]}, [own]),
+            weight=Weight(35, "polymorphic reference").repetition(len(ps), "pairs", per=8, cap=10, single=0)
+            .add("known targets", len(known), 0 if known else 5)))
     return out

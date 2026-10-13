@@ -670,6 +670,28 @@ class DetectorTest(unittest.TestCase):
         self.assertEqual([f["evidence"]["table"] for f in fs], ["legacy"])
         self.assertEqual(fs[0]["strength"], "medium")
 
+    def test_focus(self):
+        m = detector_model()
+        m["types"] = {"Order": {"name": "Order", "component": "orders",
+                                "fields": [{"name": "user", "ref": "User"}, {"name": "meta", "type": "map"},
+                                           {"name": "street", "type": "string"}]}}
+        run = lambda mod, **kw: mod.run(Ctx(m), {**mod.PARAMS, **kw})
+        (shared,) = run(data_shared_table)
+        self.assertEqual([(e["view"], e["nodes"]) for e in shared["focus"]],
+                         [("types", ["Order"]), ("components", ["orders", "billing"])])
+        (bag,) = run(data_json_bag)
+        self.assertEqual(bag["focus"][0]["fields"], {"Order": ["meta"]})
+        fk = {(f["evidence"]["from"], f["evidence"]["to"]): f for f in run(data_cross_fk, include_coded=True)}
+        fc = fk[("orders", "users")]["focus"]
+        self.assertEqual((fc[0]["view"], fc[0]["fields"]), ("types", {"Order": ["user"]}))  # user_id is the user field
+        self.assertEqual((fc[1]["view"], fc[1]["edges"]), ("components", [["orders", "users"]]))
+        (orphan,) = run(data_orphan_table)
+        self.assertNotIn("focus", orphan)  # and no owner either: nothing to show
+        flags = run(data_flag_columns)[0]["focus"]
+        self.assertEqual([(e["view"], e["nodes"]) for e in flags], [("components", ["users"])])
+        for f in run(data_enum_mismatch) + run(data_polymorphic) + run(data_repeated_columns):
+            self.assertTrue(f["focus"], f["kind"])
+
     def test_registered(self):
         from archplan import detectors
         ids = {d for d in detectors.builtins() if d.startswith("data.")}

@@ -5,8 +5,8 @@ state a row is in."""
 
 from __future__ import annotations
 
-from .common import COMMON_FIELDS, finding, plural
-from .data_common import is_bool, is_stamp, name, owner, tables
+from .common import COMMON_FIELDS, Weight, finding, plural
+from .data_common import is_bool, is_stamp, name, owner, table_focus, tables
 
 ID = "data.flag_columns"
 NAME = "State in flag columns"
@@ -46,5 +46,8 @@ def run(ctx, params) -> list:
             plural(len(fs), "flag column"), [own], [],
             {"table": tname, "booleans": bools, "timestamps": stamps,
              "moves": ["Add one state column (an enum) and derive the flags from it.",
-                       "Keep timestamps for when a state began, not for which state the row is in."]}))
+                       "Keep timestamps for when a state began, not for which state the row is in."]},
+            focus=table_focus(ctx, {tname: fs}, [own]),
+            weight=Weight(30, "flag columns").spread(len(fs), "flag columns", per=35, cap=40,
+                                                     free=params["min_flags"])))
     return out

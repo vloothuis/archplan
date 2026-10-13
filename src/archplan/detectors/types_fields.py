@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from .common import EXAMPLES, finding, plural
+from .common import EXAMPLES, Weight, finding, plural, types_focus
 from .fields import is_flag
 
 ID = "types.fields"
@@ -63,5 +63,11 @@ def field_findings(model: dict, large: int = LARGE_TYPE, n_groups: int = CLUSTER
             [t.get("component")], [t.get("file")],
             {"type": tid, "name": name, "fields": size,
              "groups": {k: v[:EXAMPLES] for k, v in sorted(clusters.items(), key=lambda kv: -len(kv[1]))[:8]},
-             "flags": flags[:EXAMPLES], **({"line": t["line"]} if t.get("line") else {})}))
+             "flags": flags[:EXAMPLES], **({"line": t["line"]} if t.get("line") else {})},
+            focus=types_focus({tid: [n for v in clusters.values() for n in v] + flags}, [t.get("component")],
+                              [tid]),
+            weight=Weight(30, "large type").spread(size, "fields", per=8, cap=16, free=large // 2)
+            .spread(len(clusters), "field groups", per=6, cap=12, free=n_groups - 1)
+            .spread(len(flags), "boolean flags", per=4, cap=8, free=n_flags - 1)
+            .add("reasons", len(why), 6 * (len(why) - 1))))
     return out

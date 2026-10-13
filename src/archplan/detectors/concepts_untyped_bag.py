@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from .common import EXAMPLES, plural
+from .common import EXAMPLES, Weight, plural, types_focus
 from .fields import is_bag
 
 ID = "concepts.untyped_bag"
@@ -71,5 +71,8 @@ def run(ctx, params) -> list:
              "fields": [{"type": tid, "field": f["name"], "field_type": f.get("type"), "used_by": sorted(users[tid])}
                         for tid, _, bs in rows for f in bs][:EXAMPLES],
              "moves": ["Give each bag a named type (a struct, record or schema) that says which keys it holds.",
-                       "Validate it where it enters the component, and keep the raw map inside."]}))
+                       "Validate it where it enters the component, and keep the raw map inside."]},
+            focus=types_focus({tid: [f["name"] for f in bs] for tid, _, bs in rows}, [c] + others),
+            weight=Weight(25, "untyped data").spread(len(others), "other components using it", per=7, cap=18, free=0.5)
+            .repetition(n, "untyped fields", per=3, cap=9, single=0)))
     return out

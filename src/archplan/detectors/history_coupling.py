@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .common import comp_name, finding
+from .common import Weight, comp_name, finding, focus
 
 ID = "history.coupling"
 NAME = "Hidden coupling"
@@ -36,5 +36,8 @@ def coupling_findings(res: dict, model: dict, degree: float = COUPLING_DEGREE, t
             "strong" if x["degree"] >= 0.8 else "medium" if x["degree"] >= 0.65 else "weak",
             f"{x['together']} commits together, degree {x['degree']:.2f}", [a, b], [],
             {"a": a, "b": b, "together": x["together"], "degree": x["degree"], "head": (res.get("head") or "")[:10],
-             "since_days": res.get("since_days")}))
+             "since_days": res.get("since_days")},
+            focus=[focus("components", [a, b])],
+            weight=Weight(30, "hidden coupling").add("degree", x["degree"], 50 * (x["degree"] - degree))
+            .repetition(x["together"], "commits together", per=3, cap=10, single=0)))
     return out

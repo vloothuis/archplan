@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from .common import EXAMPLES, plural
+from .common import EXAMPLES, Weight, focus, plural
 
 ID = "evolution.ownership"
 NAME = "Ownership"
@@ -45,7 +45,11 @@ def run(ctx, params) -> list:
             f"{len(active)} authors with {params['active_commits']}+ commits, top share {top:.2f}",
             [c], [], {"component": c, "authors": len(active), "commits": total, "top_share": round(top, 3),
                       "moves": [f"Name an owner for {ctx.name(c)} who reviews changes to its interface.",
-                                "If it changes for unrelated reasons, split it along those reasons."]}))
+                                "If it changes for unrelated reasons, split it along those reasons."]},
+            focus=[focus("components", [c])],
+            weight=Weight(25, "no clear owner").spread(len(active), "active authors", per=5, cap=12,
+                                                         free=params["min_authors"])
+            .add("top share", round(top, 2), 8 if top <= params["max_top_share"] / 2 else 0)))
     n_comps = len([c for c in owners if c in ctx.components])
     limit = max(params["spread_components"], params["spread_share"] * n_comps)
     spread = sorted(((a, cs) for a, cs in per_author.items() if len(cs) >= limit), key=lambda x: (-len(x[1]), x[0]))
@@ -58,5 +62,7 @@ def run(ctx, params) -> list:
             {"authors": [{"author": a, "components": len(cs), "top": sorted(cs, key=lambda c: -cs[c])[:5]}
                          for a, cs in spread[:EXAMPLES]],
              "moves": ["Check whether a typical change touches many components: the boundaries may cut "
-                       "through features.", "Group the components these authors change together."]}))
+                       "through features.", "Group the components these authors change together."]},
+            focus=[focus("components", sorted({c for _, cs in spread for c in cs})[:EXAMPLES])],
+            weight=Weight(20, "authors spread out").spread(len(spread), "authors", per=4, cap=10)))
     return out

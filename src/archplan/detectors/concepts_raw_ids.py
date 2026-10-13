@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from .common import EXAMPLES, plural
+from .common import EXAMPLES, Weight, plural, types_focus
 from .fields import is_primitive_id, key, words
 
 ID = "concepts.raw_ids"
@@ -60,6 +60,9 @@ def run(ctx, params) -> list:
         concepts = sorted({s for _, _, s in rows})
         fields = sorted({n for _, n, _ in rows})
         tid0 = rows[0][0]
+        marked = {}
+        for t, n, _ in rows:
+            marked.setdefault(t, []).append(n)
         idname = "".join(x.capitalize() for x in concepts[0].split("_")) + "Id"
         out.append(ctx.finding(
             (c, o),
@@ -74,5 +77,8 @@ def run(ctx, params) -> list:
              "fields": [{"type": t, "field": n, "concept": s} for t, n, s in rows[:EXAMPLES]],
              "moves": [f"Introduce a typed id ({idname}) in {ctx.name(o)} and use it in "
                        f"{ctx.types[tid0].get('name') or tid0} and the other fields.",
-                       f"Or hold a reference to {ctx.name(o)}'s type instead of its id."]}))
+                       f"Or hold a reference to {ctx.name(o)}'s type instead of its id."]},
+            focus=types_focus(marked, [c, o]),
+            weight=Weight(25, "raw ids").repetition(len(rows), "fields", per=6, cap=18, single=0)
+            .spread(len(concepts), "concepts", per=4, cap=8)))
     return out

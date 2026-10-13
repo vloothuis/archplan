@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 
-from .common import EXAMPLES, plural
+from .common import EXAMPLES, Weight, focus, plural
 from .fields import key
 
 ID = "concepts.string_enum"
@@ -84,11 +84,20 @@ def run(ctx, params) -> list:
             moves = [f"Make '{name}' a named constant or an enum value owned by one component.",
                      "Let the other components ask that component instead of comparing the string."]
         n_sites = len(e["sites"])
+        fc = [focus("components", comps)]
+        if kind == "field":
+            owners = {tid: [f["name"] for f in t.get("fields") or [] if f.get("name") and key(f["name"]) == name]
+                      for tid, t in ctx.types.items() if t.get("component") in comps}
+            owners = {tid: v for tid, v in owners.items() if v}
+            if owners:
+                fc.append(focus("types", list(owners), fields=owners))
         out.append(ctx.finding(
             (kind, name), title, "Sites: " + ", ".join(s for s in e["sites"][:4] if s) + ".",
             "medium" if len(comps) >= 3 else "weak", f"{plural(n_sites, 'site')} in {plural(len(comps), 'component')}",
             comps, [s.rsplit(":", 1)[0] for s in e["sites"] if s],
             {"kind": kind, "name": name, "components": comps[:EXAMPLES],
              **({"values": dict(e["values"].most_common(EXAMPLES))} if kind == "field" else {}),
-             "sites": [s for s in e["sites"] if s][:EXAMPLES], "moves": moves}))
+             "sites": [s for s in e["sites"] if s][:EXAMPLES], "moves": moves}, focus=fc,
+            weight=Weight(20, "string enum").spread(len(comps), per=7, cap=16)
+            .repetition(n_sites, "sites", per=3, cap=10, single=-4)))
     return out

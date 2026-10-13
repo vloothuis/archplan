@@ -4,8 +4,8 @@ by code outside the model (scripts, another service)."""
 
 from __future__ import annotations
 
-from .common import finding, plural
-from .data_common import access_by_table, owner, tables
+from .common import Weight, finding, plural
+from .data_common import access_by_table, owner, table_focus, tables
 
 ID = "data.orphan_table"
 NAME = "Table without owner or use"
@@ -37,5 +37,8 @@ def run(ctx, params) -> list:
             f"Used by {plural(len({a['component'] for a in real}), 'component')}, but none owns it.",
             "medium" if not own and not real else "weak", "; ".join(why), [own], [],
             {"table": tname, "owner": own, "uses": len(real),
-             "moves": ["Drop the table if nothing uses it.", "Or give it an owner: an ORM type in one component."]}))
+             "moves": ["Drop the table if nothing uses it.", "Or give it an owner: an ORM type in one component."]},
+            focus=table_focus(ctx, {tname: []}, [own]),
+            weight=Weight(25, "orphan table").add("owner", own or "none", 0 if own else 8)
+            .add("use", "none" if not real else len(real), 0 if real else 8)))
     return out

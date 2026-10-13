@@ -4,8 +4,8 @@ the writes and offer them to the rest."""
 
 from __future__ import annotations
 
-from .common import EXAMPLES, evidence_file, finding, plural
-from .data_common import access_by_table, name, owner
+from .common import EXAMPLES, Weight, evidence_file, finding, plural
+from .data_common import access_by_table, name, owner, table_focus
 
 ID = "data.shared_table"
 NAME = "Table written by several components"
@@ -37,5 +37,10 @@ def run(ctx, params) -> list:
              "writers": [{"component": a["component"], "weight": a["weight"], "evidence": a.get("evidence") or []}
                          for a in writes][:EXAMPLES],
              "moves": ["Let the owner do every write; the others call its public functions.",
-                       "Or split the table, so each component writes its own part."]}))
+                       "Or split the table, so each component writes its own part."]},
+            focus=table_focus(ctx, {table: []}, writers),
+            weight=Weight(35, "shared table").spread(len(foreign), "writers besides the owner", per=15, cap=30, free=0.5)
+            .add("owner", own or "none", 0 if own else 5)
+            .repetition(sum(a["weight"] for a in writes if a["component"] != own), "foreign writing files",
+                        per=3, cap=9, single=0)))
     return out

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from .common import graph
+from .common import Weight, focus, graph
 
 ID = "boundaries.stability"
 NAME = "Stability and abstractness"
@@ -69,7 +69,11 @@ def run(ctx, params) -> list:
                 {"component": c, "zone": "pain", **m,
                  "moves": [f"Put the parts of {ctx.name(c)} that others need behind interfaces they own, "
                            "so it can change without them.",
-                           f"Or split {ctx.name(c)} so the stable core is small and the rest can change freely."]}))
+                           f"Or split {ctx.name(c)} so the stable core is small and the rest can change freely."]},
+                focus=[focus("components", [c])],
+                weight=Weight(30, "zone of pain").spread(m["ca"], "dependents", per=5, cap=15,
+                                                          free=params["pain_dependents"])
+                .add("distance", m["d"], 20 * (m["d"] - params["distance"]))))
         elif m["i"] >= params["high"] and m["a"] >= params["high"]:
             out.append(ctx.finding(
                 (c, "uselessness"),
@@ -78,5 +82,7 @@ def run(ctx, params) -> list:
                 f"{nums}.", "weak", nums, [c], [],
                 {"component": c, "zone": "uselessness", **m,
                  "moves": [f"Remove the interfaces in {ctx.name(c)} that have one implementation and no other user.",
-                           f"Or move them next to the code that implements them."]}))
+                           f"Or move them next to the code that implements them."]},
+                focus=[focus("components", [c])],
+                weight=Weight(20, "zone of uselessness").add("distance", m["d"], 20 * (m["d"] - params["distance"]))))
     return out
