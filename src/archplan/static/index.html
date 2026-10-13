@@ -302,7 +302,7 @@ ul.breaks{margin:4px 0 8px;padding-left:18px;font-size:13px;max-height:260px;ove
   <p>When the project has an architecture profile, the header shows <i>Plan</i> and <i>Architecture</i>. The profile says what a unit is (for example a system or a Django app), which roles its files have (recognised by file name patterns), the rules between roles and the layers. archplan proposes a profile from the code. Edit it, then lock it in. After that, every export is checked against it. Click a rule to see where it breaks.</p>
   <p>The <i>Roles</i> view shows one unit with its files in lanes per role. A dashed box is a role the unit lacks. A red dashed line is a rule break. <i>Compare with</i> shows a second unit below it. Double-click a unit in the Components view to open it here. The <i>Conformance</i> overlay colours each unit by how well it follows the profile.</p>
   <h3>Findings</h3>
-  <p><i>Findings</i> in the header lists what the checks found in the code: rule breaks, cycles, upward dependencies, leaking terms, field clusters, likely synonyms and files that change together. The pill counts new findings. Click a finding to see it in the diagram. <i>Discuss</i> starts a discussion with the evidence attached. <i>Dismiss</i> asks for a reason. <i>Accept as is</i> adds it to the baseline. <span class="mono">archplan check</span> reports only findings outside the baseline.</p>
+  <p><i>Findings</i> in the header lists what the checks found in the code: rule breaks, cycles, upward dependencies, leaking terms, field clusters, likely synonyms and files that change together. The pill counts new findings. Click a finding to see it in the diagram. <i>Discuss</i> starts a discussion with the evidence attached. <i>Dismiss</i> asks for a reason. <i>Accept as is</i> adds it to the baseline. <span class="mono">archplan check</span> reports only findings outside the baseline. The <i>Ratchet</i> line shows project numbers that may only get better, such as the propagation cost; <span class="mono">archplan check</span> fails when one gets worse.</p>
   <h3 id="keys">Keyboard shortcuts</h3>
   <table>
     <tr><td><kbd>⌘K</kbd></td><td>Search components, types, tasks and actions</td></tr>
@@ -3392,7 +3392,7 @@ function focusTargets(f, has) {
 // ---------- end finding focus ----------
 const FGROUPS = [['profile', 'Profile'], ['structure', 'Structure'], ['layers', 'Layers'], ['vocabulary', 'Vocabulary'], ['types', 'Types'], ['history', 'History'], ['concepts', 'Concepts'], ['boundaries', 'Boundaries'], ['data', 'Data'], ['evolution', 'Evolution']];
 const FCOL = {profile: ['var(--rem)', 'var(--rem-ink)'], structure: ['var(--chg)', 'var(--warn-ink)'], layers: ['var(--acc)', 'var(--sel-ink)'], vocabulary: ['var(--agent)', 'var(--agent-ink)'], types: ['var(--mute)', 'var(--ink)'], history: ['var(--mute)', 'var(--ink)'], concepts: ['var(--agent)', 'var(--agent-ink)'], boundaries: ['var(--acc)', 'var(--sel-ink)'], data: ['var(--mute)', 'var(--ink)'], evolution: ['var(--mute)', 'var(--ink)']};
-const FKIND = {'profile.rule': 'call rule', 'profile.pair': 'missing pair', 'structure.cycle': 'cycle', 'structure.tangle': 'tangle', 'layers.upward': 'upward dependency', 'vocabulary.leak': 'leak', 'vocabulary.synonyms': 'synonyms', 'types.fields': 'field clusters', 'types.synonyms': 'synonyms', 'history.coupling': 'changes together'};
+const FKIND = {'profile.rule': 'call rule', 'profile.pair': 'missing pair', 'structure.cycle': 'cycle', 'structure.tangle': 'tangle', 'layers.upward': 'upward dependency', 'vocabulary.leak': 'leak', 'vocabulary.synonyms': 'synonyms', 'types.fields': 'field clusters', 'types.synonyms': 'synonyms', 'history.coupling': 'changes together', 'history.modularity_violation': 'modularity violation'};
 const FLDBG = ['#fef3c7', '#e0e7ff', '#dcfce7', '#fce7f3', '#e0f2fe', '#f1f5f9'];
 const findings = () => FIND?.findings || [];
 const findById = id => findings().find(f => f.id === id);
@@ -3454,6 +3454,7 @@ function evHTML(f, full) {
     return `<div>${(Array.isArray(e.types) ? e.types : []).map(t => `<span class="fld" style="background:var(--soft)">${esc(tn(t))}</span>`).join('')}</div>${sh.length ? `<div class="mute fsm">Shared: ${esc(sh.slice(0, full ? 30 : 6).join(', '))}${sh.length > (full ? 30 : 6) ? ', …' : ''}</div>` : ''}`;
   }
   if (k === 'history.coupling' && e.count == null && e.together != null) e = {...e, count: e.together};
+  if (k === 'history.modularity_violation' && Array.isArray(e.pairs)) return `<ul class="mute fsm">${e.pairs.slice(0, 4).map(x => `<li><code>${esc(x.a)}</code> + <code>${esc(x.b)}</code>: ${plural(x.together, 'commit')}, ${typeof x.degree === 'number' ? Math.round(x.degree * 100) + '%' : ''}${x.fixes ? `, ${esc(x.fixes)} bug fix${x.fixes === 1 ? '' : 'es'}` : ''}</li>`).join('')}${e.pairs.length > 4 ? `<li>and ${e.pairs.length - 4} more</li>` : ''}</ul>`;
   if (k === 'history.coupling' && (e.count != null || e.degree != null)) return `<div class="mute fsm">${e.count != null ? `Changed together in ${plural(e.count, 'commit')}` : ''}${e.degree != null ? `${e.count != null ? ', ' : ''}${typeof e.degree === 'number' && e.degree <= 1 ? Math.round(e.degree * 100) + '%' : esc(e.degree)} of the time` : ''}.</div>`;
   // Any other kind: the detail line and the suggested moves on the card; the raw evidence only in full.
   const mv = Array.isArray(e.moves) ? e.moves.filter(m => typeof m === 'string') : [];
@@ -3483,6 +3484,17 @@ function findCard(f) {
       ${ev}</div>${(ts => ts.length > 1 ? `<div class="fshow">Show in: ${ts.map((t, i) => `<button class="linkb" data-act="find.focusAt" data-id="${esc(f.id)}" data-i="${i}">${esc(t.label)}</button>`).join(' · ')}</div>` : '')(findTargets(f))}
     <div class="row fsm" style="margin:6px 0 0;gap:6px">${acts}</div></div>`;
 }
+// The ratchet from /api/findings: project numbers that may only get better
+// (see `archplan check`). One line, plus the metrics that changed.
+function ratchetHTML() {
+  const r = FIND?.ratchet, rows = r?.rows || [], v = x => x == null ? '–' : String(x);
+  if (!r) return '';
+  if (!r.stored) return `<div class="row fsm" style="margin:-4px 0 10px"><span class="mute">Ratchet: not started; <span class="mono">archplan check --tighten</span> starts it.</span></div>`;
+  const tip = rows.map(x => `${x.label}: ${v(x.old)} → ${v(x.new)} (${x.status})`).join('\n');
+  const moved = rows.filter(x => x.status === 'worse' || x.status === 'better');
+  return `<div class="fsm" style="margin:-4px 0 10px"><span class="mute" title="${esc(tip)}">Ratchet: ${r.worse} worse · ${r.better} better · ${rows.length - moved.length} other</span>${moved.map(x =>
+    `<div style="color:var(${x.status === 'worse' ? '--rem' : '--add'})">${x.status === 'worse' ? 'Worse' : 'Better'}: ${esc(x.label)} ${v(x.old)} → ${v(x.new)}</div>`).join('')}</div>`;
+}
 function findPage() {
   const all = findings(), base = all.filter(f => f.state !== 'new'), byG = FIND.counts?.by_group;
   const minor = f => f.state === 'new' && (fWeight(f) ?? 100) < MINOR;
@@ -3498,6 +3510,7 @@ function findPage() {
     <p class="mute" style="margin:4px 0 10px">What the checks found in the code. Discuss one with Claude, dismiss it with a reason, or accept it as is. Accepted and dismissed findings form the baseline: <span class="mono">archplan check</span> reports only new ones.</p>
     <div class="row" style="gap:5px;flex-wrap:wrap;margin-bottom:6px">${chip('all', 'All')}${FGROUPS.map(([g, l]) => chip(g, l)).join('')}</div>
     <div class="row fsm" style="margin:0 0 10px"><span class="mute">Baseline: ${nA} accepted · ${nD} dismissed</span>${nA + nD ? `<button class="linkb" data-act="find.base">${findBase ? 'Hide them' : 'Show them'}</button>` : ''}</div>
+    ${ratchetHTML()}
     <div class="row fsm" style="margin:-4px 0 10px;gap:10px"><span class="mute">Sort by</span><button class="linkb"${findSort === 'weight' ? ' style="font-weight:600"' : ''} data-act="find.sort" data-s="weight" title="How much a finding matters: spread, repetition, where it occurs, fan-in and churn">weight</button><button class="linkb"${findSort === 'kind' ? ' style="font-weight:600"' : ''} data-act="find.sort" data-s="kind">kind</button><span class="spacer"></span>${nMinor ? `<label class="mute" title="Minor: weight below ${MINOR}"><input type="checkbox" data-act="find.minor"${findMinor ? ' checked' : ''}> Hide minor (${nMinor})</label>` : ''}</div>
     ${list.map(findCard).join('') || `<div class="empty">${all.length ? 'No findings here.' : 'No findings. The code passes every check.'}</div>`}`;
 }

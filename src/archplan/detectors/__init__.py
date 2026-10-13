@@ -33,7 +33,7 @@ from . import external
 from .common import GROUPS, STRENGTHS, Weight, comp_name, finding, fingerprint, graph, namer, reweigh
 
 BUILTIN = ["profile_rule", "profile_pair", "structure_cycle", "structure_tangle", "layers_upward", "layers_policy",
-           "vocabulary_leak", "types_fields", "types_synonyms", "history_coupling",
+           "vocabulary_leak", "types_fields", "types_synonyms", "history_coupling", "history_modularity",
            "concepts_state_flags", "concepts_data_clump", "concepts_raw_ids", "concepts_untyped_bag",
            "concepts_units_in_names", "concepts_string_enum", "concepts_bool_params",
            "boundaries_stability", "boundaries_unused_public", "evolution_ownership",
@@ -50,6 +50,7 @@ REASONS = {
     "vocabulary": "the project has no glossaries (vocabulary usage)",
     "git": "no cached hotspots; run `archplan hotspots`",
     "authors": "the cached hotspots have no author counts; run `archplan hotspots --refresh`",
+    "cochange": "the cached hotspots have no file-level co-change; run `archplan hotspots --refresh`",
     "signatures": "the model has no signatures section; the exporter does not provide it",
     "literals": "the model has no literals section; the exporter does not provide it",
     "schema": "the model has no schema section",
@@ -242,6 +243,10 @@ class Context:
             if self.hotspots is None:
                 return REASONS["git"]
             ok = isinstance(self.hotspots.get("owners"), dict)
+        elif need == "cochange":
+            if self.hotspots is None:
+                return REASONS["git"]
+            ok = isinstance(self.hotspots.get("cochange"), dict)
         elif need == "signatures":
             ok = bool(self.signatures)
         elif need == "literals":

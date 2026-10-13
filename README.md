@@ -106,7 +106,7 @@ Everything is stored in `.archplan/` in the repository:
 | `suggestions.json` | target changes the agent proposed, and what you decided, with your reason for a rejected refactor |
 | `handovers.json` | planned refactors you sent to the agent, its batches and progress |
 | `architecture.json` | the architecture profile: units, roles, rules and layers |
-| `baseline.json` | findings you accepted or dismissed, and Claude's labels on findings |
+| `baseline.json` | findings you accepted or dismissed, Claude's labels on findings, and the ratchet |
 | `vocabulary.json` | terms you told archplan to ignore as glossary candidates |
 | `vocab-cache.json` | the cached word counts per file |
 | `activity.json` | what the agent did last, shown in the editor |
@@ -136,7 +136,7 @@ In a message, `@[Label](anchor)` mentions a model item, for example
 | `archplan hotspots [--since DAYS] [--json]` | components that change most, and pairs that change together without a dependency |
 | `archplan profile [infer\|show] [--json]` | propose an architecture profile, or show how the code conforms to it |
 | `archplan profile list`, `archplan profile use NAME` | the framework profiles that match, with their fit; propose one of them |
-| `archplan check [--format github] [--all] [--update-baseline] [--export] [--min-weight N] [--json]` | new findings; exit 1 when there are any, 2 on errors |
+| `archplan check [--format github] [--all] [--update-baseline] [--tighten] [--loosen REASON] [--export] [--min-weight N] [--json]` | new findings and the ratchet; exit 1 when there are new findings or a ratchet metric got worse, 2 on errors |
 | `archplan detectors [--json]` | each detector: group, needs, whether it is on, missing data and its finding count |
 | `archplan detectors enable\|disable\|trust\|run ID [--json]` | switch a detector on or off, approve an external one, or run one |
 | `archplan schema [show\|tables] [--json] [--refresh]` | the database tables, their owner components, and foreign keys across components |
@@ -152,8 +152,8 @@ In a message, `@[Label](anchor)` mentions a model item, for example
 
 ## Hotspots
 
-`archplan hotspots` reads the last year of git history (`--since DAYS` to
-change it). A hotspot is a component that changes in many commits. Two
+`archplan hotspots` reads the year of git history up to the HEAD commit
+(`--since DAYS` to change it). A hotspot is a component that changes in many commits. Two
 components are coupled when they change in the same commits. The degree is
 the number of shared commits divided by the commits of the less active of the
 two. A coupled pair with no dependency in the model is hidden coupling: the
@@ -163,6 +163,13 @@ The analysis maps each changed file to a component with the model's `match`
 patterns and `path`. Commits that touch more than 50 files are skipped as bulk
 changes. Only git runs, with hooks, fsmonitor and signature checks switched
 off. The result is cached per HEAD in `.archplan/hotspots.json`.
+
+The same pass also counts co-change per file, for the files in the model's
+`files` section. Lockfiles, vendored and generated code, migrations and
+translations are left out. A commit with more than 25 files, not counting those, is skipped.
+A file pair is kept when it shares 3 or more commits and a degree of 0.3 or
+more; the 600 strongest pairs are cached with their commits and the commit
+subjects. The `history.modularity_violation` detector reads them.
 
 ## Architecture profile
 
@@ -209,6 +216,7 @@ follow it".
 | `types.fields` | a type with 25 or more fields, 3 or more groups of related fields, or 6 or more boolean flags |
 | `types.synonyms` | types in different components that share 70% or more of their field names |
 | `history.coupling` | components that change together without a dependency (from the cached `archplan hotspots`) |
+| `history.modularity_violation` | files in different components that change together while neither refers to the other: no import, call or type reference, also not through a package's `__init__.py` or `index.ts` (needs `files` and the cached `archplan hotspots`). After Xiao, Cai and Kazman (DRSpaces, DV8). One finding per component pair, or per file name repeated across components (such as `api/schema.py`). It weighs shared commits, degree and bug-fix commits on the files; `fix_pattern` sets which commit subjects count as bug fixes. Unlike `history.coupling`, it works per file and also reports files whose components do depend on each other |
 | `concepts.state_flags` | types that keep their state in 3 or more boolean flags (`is_*`, `has_*`, a flag next to a `*_at` timestamp); one finding per component |
 | `concepts.data_clump` | the same 3 or more field names in types of 2 or more components, such as street, city and zip |
 | `concepts.raw_ids` | fields such as `invoice_id` that hold another component's concept as a plain string or number |
@@ -271,6 +279,18 @@ step for a Python project:
 `--export` runs the configured export command first. It runs only once a
 person approved that command with `archplan trust`, so in CI run the
 exporter yourself, as above.
+
+### The ratchet
+
+The baseline also keeps a few project-level numbers that may only get
+better: the weight of the open findings per group, the size of the largest
+tangle, the dependencies inside cycles, the upward layer dependencies and
+the propagation cost. `archplan check` fails when one of them got worse,
+and names the findings behind it. `--tighten` writes the numbers that got
+better; `--update-baseline` does that too. Only `--loosen REASON` writes
+worse numbers, and the baseline keeps the reason. See
+[docs/ci.md](docs/ci.md) for the metrics, the tolerances and a GitHub
+Actions workflow.
 
 ### Detectors
 

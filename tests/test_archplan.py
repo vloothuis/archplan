@@ -504,7 +504,9 @@ class HotspotTest(unittest.TestCase):
             commit("README.md")
             write(root, {"core/.archplan/config.json": "{}"})
             m = {"components": self.COMPS, "dependencies": [{"from": "web", "to": "orders"}]}
-            res = hotspots.analyse(hotspots.history(root, 30), m, max_files=5, min_together=1, min_degree=0.3)
+            log = hotspots.history(root, 30)
+            self.assertEqual([c[4] for c in log[-2:]], ["c2", "c1"])  # subjects, newest first
+            res = hotspots.analyse(log, m, max_files=5, min_together=1, min_degree=0.3)
             self.assertEqual((res["commits"], res["skipped"], res["unmapped"], res["prefix"]), (6, 1, 1, "core/"))
             self.assertEqual(res["components"]["orders"]["commits"], 5)
             self.assertEqual(res["components"]["orders"]["authors"], 2)
@@ -1013,6 +1015,103 @@ class FindingsTest(TempProject):
         self.assertIn("[accepted: baseline]", run("--all")[1])
         self.p.model_path.unlink()
         self.assertEqual(run()[0], 2)
+
+    def test_ratchet_measure(self):
+        from archplan import ratchet
+        from archplan.findings import Findings
+        self.assertEqual(ratchet.graph_metrics(findings_model()),
+                         {"largest_tangle": 3, "cycle_edges": 5, "propagation_cost": 18.0})
+        F = Findings(self.p)
+        lst = F.listing()
+        now = ratchet.measure(lst, findings_model())
+        structure = [f for f in lst["findings"] if f["group"] == "structure"]
+        self.assertEqual(now["weight.structure"], sum(ratchet.plain_weight(f) for f in structure))
+        self.assertNotIn("upward_edges", now)  # no layers: the detector did not run
+        self.assertNotIn("weight.history", now)
+        F.decide(structure[0]["id"], "dismissed", "known")
+        self.assertEqual(ratchet.measure(F.listing(), findings_model())["weight.structure"],
+                         now["weight.structure"] - ratchet.plain_weight(structure[0]))
+        f = {"weight": 60, "weight_basis": [{"factor": "base", "effect": 50}, {"factor": "churn: commits", "effect": 10}]}
+        self.assertEqual(ratchet.plain_weight(f), 50)  # churn comes from git: left out
+
+    def test_ratchet_check(self):
+        def run(*args):
+            buf, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(buf), self.assertRaises(SystemExit) as e, unittest.mock.patch("sys.stderr", err):
+                cli.main(["check", "--dir", str(self.root), *args])
+            return e.exception.code, buf.getvalue() + err.getvalue()
+
+        def model(*extra):
+            m = findings_model()
+            m["dependencies"] += [{"from": a, "to": b, "weight": 1, "evidence": ["lib/f/x.ex:1"]} for a, b in extra]
+            self.p.model_path.write_text(json.dumps(m))
+            os.utime(self.p.model_path, (time.time() + len(extra), time.time() + len(extra)))
+        stored = lambda: json.loads(self.p.path("baseline.json").read_text())["ratchet"]
+        code, out = run()
+        self.assertIn("Ratchet: none yet", out)
+        self.assertEqual(run("--update-baseline")[0], 0)  # accepts the findings and starts the ratchet
+        self.assertEqual(stored()["metrics"]["propagation_cost"], 18.0)
+        self.assertEqual(stored()["log"][0]["change"], "start")
+        model(("F", "G"))  # F now reaches G: no new finding, but a higher propagation cost
+        code, out = run()
+        self.assertEqual(code, 1)
+        self.assertIn("worse   propagation_cost: 18 -> 19", out)
+        self.assertIn("A reaches 2 of 9 components", out)
+        d = json.loads(run("--json")[1])
+        self.assertEqual((d["counts"]["new"], d["ratchet"]["worse"]), (0, 1))
+        self.assertIn("::error title=archplan ratchet propagation_cost::", run("--format", "github")[1])
+        self.assertEqual(run("--tighten")[0], 1)  # tightening never loosens
+        self.assertEqual(stored()["metrics"]["propagation_cost"], 18.0)
+        cfg = json.loads(self.p.path("config.json").read_text())
+        self.p.path("config.json").write_text(json.dumps({**cfg, "check": {"tolerance": {"propagation_cost": 5}}}))
+        self.assertEqual(run()[0], 0)
+        self.p.path("config.json").write_text(json.dumps(cfg))
+        self.assertEqual(run("--loosen", " ")[0], 2)
+        self.assertEqual(run("--loosen", "F needs G until the split")[0], 0)
+        log = stored()["log"][-1]
+        self.assertEqual((log["change"], log["reason"], log["metrics"]),
+                         ("loosen", "F needs G until the split", {"propagation_cost": [18.0, 19.0]}))
+        model()
+        code, out = run()
+        self.assertEqual(code, 0)
+        self.assertIn("better  propagation_cost: 19 -> 18", out)
+        self.assertIn("ratchet: tightened propagation_cost 19 -> 18", run("--tighten")[1])
+        self.assertEqual(stored()["metrics"]["propagation_cost"], 18.0)
+        # a different minimum weight: the weight metrics are not compared, nor tightened
+        code, out = run("--min-weight", "100")
+        self.assertEqual(code, 0)
+        self.assertIn("skipped weight.structure", out)
+        run("--min-weight", "100", "--tighten")
+        self.assertGreater(stored()["metrics"]["weight.structure"], 0)
+
+    def test_ratchet_untrusted(self):
+        from archplan import ratchet
+        from archplan.findings import Findings
+        self.assertIsNone(ratchet.clean({"metrics": {"weight.history": 3, "rm -rf": 1}}))
+        r = ratchet.clean({"metrics": {"cycle_edges": 4, "largest_tangle": -1, "propagation_cost": float("nan"),
+                                       "upward_edges": True, "weight.types": "9", "weight.data": 10 ** 12},
+                           "min_weight": 500, "at": ["x" * 90],
+                           "log": [{"change": "loosen", "reason": "r" * 900, "metrics": {"cycle_edges": [1, 2],
+                                                                                      "bad": [1, 2]}},
+                                   {"change": "drop table"}, "nope"] * 30})
+        self.assertEqual(r["metrics"], {"cycle_edges": 4})
+        self.assertEqual((r["min_weight"], len(r["at"])), (0, 40))
+        self.assertTrue(0 < len(r["log"]) <= ratchet.LOG_MAX)
+        self.assertEqual((len(r["log"][0]["reason"]), r["log"][0]["metrics"]), (500, {"cycle_edges": [1, 2]}))
+        # the ratchet survives other writes to the baseline
+        self.p.path("baseline.json").write_text(json.dumps({"ratchet": {"metrics": {"cycle_edges": 4}}}))
+        F = Findings(self.p)
+        F.decide(F.listing()["findings"][0]["id"], "accepted")
+        self.assertEqual(F.baseline.read()["ratchet"]["metrics"], {"cycle_edges": 4})
+        srv, url = serve_in_thread(self.p)
+        try:
+            st, d = call(url, "/api/findings")
+        finally:
+            srv.shutdown()
+            srv.server_close()
+        row = next(x for x in d["ratchet"]["rows"] if x["metric"] == "cycle_edges")
+        self.assertEqual((row["old"], row["new"], row["status"]), (4, 5, "worse"))
+        self.assertEqual(row["causes"][0]["text"], "D → E → D form a dependency cycle.")
 
     def test_api_discuss(self):
         srv, url = serve_in_thread(self.p)
@@ -2158,6 +2257,87 @@ class NewDetectorsTest(TempProject):
                    ("2", "b@x", "2026-01-01", ["lib/core/repo.ex"])]
         res = hotspots.analyse(commits, concept_model())
         self.assertEqual(res["owners"], {"core": {"a@x": 1, "b@x": 1}, "orders": {"a@x": 1}})
+
+    def modularity_history(self):
+        """concept_model plus schema.ex in orders and billing, and a synthetic history:
+        invoice.ex and parcel.ex change together without a reference (two bug fixes),
+        order.ex and parcel.ex do too but parcel.ex refers to order.ex, and the two
+        schema.ex files are a structure repeated in two components."""
+        m = concept_model()
+        for c in ("orders", "billing"):
+            m["files"][f"lib/{c}/schema.ex"] = {"component": c, "refs": []}
+        inv, par, order = "lib/billing/invoice.ex", "lib/shipping/parcel.ex", "lib/orders/order.ex"
+        c = lambda i, subject, *fs: (f"c{i:02d}".ljust(40, "0"), "a@x", "2026-01-01", list(fs), subject)
+        commits = [c(1, "fix: invoice address", inv, par), c(2, "Fix parcel label (#12)", inv, par, "mix.lock"),
+                   c(3, "add totals", inv, par), c(4, "add weights", inv, par, order),
+                   c(5, "rename", inv, par, *[f"lib/core/f{i}.ex" for i in range(30)]),  # bulk: skipped
+                   c(6, "orders", order, par), c(7, "orders", order, par),
+                   c(8, "schemas", "lib/orders/schema.ex", "lib/billing/schema.ex"),
+                   c(9, "schemas", "lib/orders/schema.ex", "lib/billing/schema.ex"),
+                   c(10, "schemas", "lib/orders/schema.ex", "lib/billing/schema.ex", "test/x_test.exs"),
+                   c(11, "core", "lib/core/cache.ex", "lib/core/clock.ex"),
+                   c(12, "core", "lib/core/cache.ex", "lib/core/clock.ex"),
+                   c(13, "core", "lib/core/cache.ex", "lib/core/clock.ex")]
+        return m, commits
+
+    def test_hotspots_cochange(self):
+        m, commits = self.modularity_history()
+        cc = hotspots.analyse(commits, m)["cochange"]
+        self.assertEqual((cc["commits"], cc["skipped"]), (12, 1))
+        pairs = {(x["a"], x["b"]): x for x in cc["pairs"]}
+        inv = pairs[("lib/billing/invoice.ex", "lib/shipping/parcel.ex")]
+        self.assertEqual((inv["together"], inv["degree"], len(inv["shas"])), (4, 1.0, 4))
+        self.assertEqual(pairs[("lib/orders/order.ex", "lib/shipping/parcel.ex")]["together"], 3)
+        self.assertNotIn("mix.lock", cc["files"])  # ignored, and not a model file
+        self.assertEqual(cc["files"]["lib/shipping/parcel.ex"]["commits"], 6)
+        self.assertEqual(cc["subjects"][commits[0][0][:10]], "fix: invoice address")
+        self.assertNotIn(commits[4][0][:10], cc["subjects"])
+        self.assertTrue(hotspots.ignored("core/mix.lock") and hotspots.ignored("app/migrations/0001_x.py"))
+
+    def test_modularity_violation(self):
+        m, commits = self.modularity_history()
+        self.p.model_path.write_text(json.dumps(m))
+        self.p.path("hotspots.json").write_text(json.dumps({"key": {}, "result": {
+            "head": "abc", "since_days": 365, "pairs": [], **hotspots.analyse(commits, m)}}))
+        fs = {tuple(f["components"]): f for f in self.found("history.modularity_violation")}
+        self.assertEqual(set(fs), {("billing", "shipping"), ("billing", "orders")})  # order.ex -> parcel.ex is related
+        f = fs[("billing", "shipping")]
+        self.assertEqual(f["files"], ["lib/billing/invoice.ex", "lib/shipping/parcel.ex"])
+        self.assertEqual((f["evidence"]["commits"], f["evidence"]["bug_fixes_together"]), (4, 2))
+        self.assertEqual(f["evidence"]["fixes_together"], ["fix: invoice address", "Fix parcel label (#12)"])
+        self.assertIn("invoice.ex and shipping/parcel.ex change together in 4 commits", f["title"])
+        self.assertEqual(f["focus"][0]["view"], "components")
+        self.assertEqual(f["focus"][0]["files"], f["files"])
+        factors = {b["factor"]: b["effect"] for b in f["weight_basis"]}
+        self.assertGreater(factors["bug fixes together"], 0)
+        s = fs[("billing", "orders")]
+        self.assertEqual(s["title"], "schema.ex in 2 components change together, but do not refer to each other.")
+        self.assertNotIn("bug fixes together", {b["factor"] for b in s["weight_basis"]})
+        self.assertGreater(f["weight"], s["weight"])
+        # no subject counts as a fix, and pairs inside a component count too
+        from archplan import detectors
+        detectors.configure(self.p, "history.modularity_violation",
+                            params={"fix_pattern": "^never$", "within_component": True})
+        fs = {tuple(f["components"]): f for f in self.found("history.modularity_violation")}
+        self.assertEqual(fs[("billing", "shipping")]["evidence"]["bug_fixes"], 0)
+        self.assertEqual(fs[("core",)]["files"], ["lib/core/cache.ex", "lib/core/clock.ex"])
+
+    def test_modularity_relations(self):
+        from archplan.detectors.history_modularity import relations
+        related = relations({"files": {"web/view.py": {"refs": [{"to": "store/__init__.py"}]},
+                                       "store/__init__.py": {"refs": [{"to": "store/repo.py"}]},
+                                       "store/repo.py": {"refs": []}, "web/form.py": {"refs": []}},
+                             "types": {"F": {"file": "web/form.py", "fields": [{"name": "r", "ref": "R"}]},
+                                       "R": {"file": "store/repo.py"}}})
+        self.assertTrue(related("store/repo.py", "web/view.py"))  # through the package's __init__.py
+        self.assertTrue(related("store/repo.py", "web/form.py"))  # a field's type
+        self.assertFalse(related("web/view.py", "web/form.py"))
+
+    def test_modularity_needs_cochange(self):
+        self.p.path("hotspots.json").write_text(json.dumps({"key": {}, "result": {"head": "x", "pairs": []}}))
+        from archplan import detectors
+        res = detectors.run(self.p, only={"history.modularity_violation"})
+        self.assertIn("hotspots --refresh", res["missing"][0]["reason"])
 
 
 class FocusTest(TempProject):

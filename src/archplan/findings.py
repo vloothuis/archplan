@@ -30,7 +30,10 @@ The baseline in .archplan/baseline.json is committed. It holds the findings
 the human accepted or dismissed, and Claude's labels:
 
   {"version": 1, "findings": {id: {"state", "reason", "at", "title", "size"?}},
-   "labels": {id: {"label", "note", "at"}}}
+   "labels": {id: {"label", "note", "at"}}, "ratchet"?: {...}}
+
+The ratchet section holds a few project-level numbers that may only get
+better; see the ratchet module.
 
 Only git-free data is read: history findings come from .archplan/hotspots.json
 as `archplan hotspots` left it.
@@ -49,7 +52,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from . import detectors
+from . import detectors, ratchet
 from .architecture import Architecture
 from .detectors.common import (COMMON_FIELDS, EXAMPLES, GROUPS, STRENGTHS, comp_name, evidence_file,  # noqa: F401
                                finding, fingerprint, graph, namer, plural, strength_of)
@@ -105,6 +108,9 @@ def clean_baseline(d) -> dict:
         if isinstance(e, dict) and e.get("label"):
             out["labels"][clip(k, 100)] = {"label": clip(e["label"], 60), "note": clip(e.get("note")),
                                            "at": clip(e.get("at"), 40)}
+    r = ratchet.clean(d.get("ratchet"))
+    if r:
+        out["ratchet"] = r
     return out
 
 
@@ -150,6 +156,7 @@ class Findings:
         self.arch = Architecture(p)
         self.baseline = Baseline(p.dir)
         self._cache = (None, None)
+        self._model = (None, None)
         self.execute = False
 
     def result(self) -> dict:
@@ -257,6 +264,27 @@ class Findings:
         th = store.create(f"finding:{fid}", f["title"], (text or "").strip() or f"{f['title']}\n\n{f['detail']}",
                           "human", snapshot=snap)
         return th, True
+
+    def ratchet(self, listing: dict | None = None, given_min_weight: int | None = None) -> dict:
+        """The ratchet's metrics now against the baseline: see ratchet.status."""
+        mw = min_weight(self.p, given_min_weight)
+        return ratchet.status(listing or self.listing(), self.model(), self.baseline.read().get("ratchet"),
+                              ratchet.tolerances(self.p), mw)
+
+    def model(self) -> dict:
+        """The as-is model, read again only when the file changed."""
+        key = etag(self.p.model_path)
+        if self._model[0] != key or key is None:
+            self._model = (key, self.arch.model())
+        return self._model[1]
+
+    def ratchet_write(self, how: str, reason: str | None = None, given_min_weight: int | None = None) -> dict:
+        """Tighten or loosen the ratchet with the metrics now."""
+        mw = min_weight(self.p, given_min_weight)
+        now = ratchet.measure(self.listing(), self.model(), mw)
+        if how == "loosen":
+            return ratchet.loosen(self.baseline, now, mw, reason)
+        return ratchet.tighten(self.baseline, now, mw)
 
     def update_baseline(self) -> dict:
         """Accept every current new finding with the reason "baseline", and

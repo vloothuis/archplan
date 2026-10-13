@@ -182,7 +182,8 @@ def make_handler(p: Project, store: Store):
             if path == "/api/findings":
                 try:
                     with arch_lock:
-                        return self.send_json({**findings.listing(store), **changes(p, store)})
+                        lst = findings.listing(store)
+                        return self.send_json({**lst, "ratchet": findings.ratchet(lst), **changes(p, store)})
                 except ArchitectureError as e:
                     return self.send_json({"error": str(e)}, HTTPStatus.NOT_FOUND)
             if path in ("/api/detectors", "/api/metrics"):

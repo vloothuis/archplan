@@ -11,7 +11,8 @@
   archplan watch                 one line per human comment, plan change or decided suggestion
   archplan hotspots [--since N]  components that change often, and ones that change together
   archplan profile [infer|show|list|use NAME]  the architecture profile: roles, rules and where the code breaks them
-  archplan check [--format github]  new findings (cycles, rule breaks, ...); exit 1 when there are any
+  archplan check [--format github] [--tighten]  new findings (cycles, rule breaks, ...) and the ratchet;
+                                 exit 1 when there are new findings or a ratchet metric got worse
   archplan detectors [enable|disable|trust|run ID]  the checks behind the findings, and their settings
   archplan schema [show|tables] [--json] [--sqlite FILE] [--postgres --url-env VAR]
                                  database tables, their owners and who reads or writes them
@@ -388,8 +389,9 @@ def cmd_profile(a):
 
 
 def cmd_check(a):
-    """Exit 1 when there are new findings, 0 when there are none, 2 on errors."""
-    from . import findings
+    """Exit 1 when there are new findings or a ratchet metric got worse, 0
+    when neither, 2 on errors."""
+    from . import findings, ratchet
     try:
         p = Project.find(dir=a.dir)
     except ProjectError as e:
@@ -416,21 +418,34 @@ def cmd_check(a):
                   f"{f.baseline.path.relative_to(p.root)}", file=sys.stderr)
         if a.min_weight is not None and not 0 <= a.min_weight <= 100:
             die("--min-weight must be 0 to 100", 2)
-        lst = findings.above(f.listing(), findings.min_weight(p, a.min_weight))
+        if a.loosen is not None and not a.loosen.strip():
+            die("--loosen needs a reason", 2)
+        if a.loosen is not None:
+            r = f.ratchet_write("loosen", a.loosen, a.min_weight)
+            print(f"ratchet: loosened, {len(r['changed'])} metrics changed", file=sys.stderr)
+        elif a.tighten or a.update_baseline:
+            r = f.ratchet_write("tighten", None, a.min_weight)
+            ch = r["changed"]
+            msg = (f"started with {len(ch)} metrics" if r["started"] else "nothing got better" if not ch else
+                   "tightened " + ", ".join(f"{k} {ratchet.fmt(o)} -> {ratchet.fmt(n)}" for k, (o, n) in ch.items()))
+            print(f"ratchet: {msg}", file=sys.stderr)
+        full = f.listing()
+        rat = f.ratchet(full, a.min_weight)
+        lst = findings.above(full, findings.min_weight(p, a.min_weight))
     except ProjectError as e:
         die(str(e), 2)
-    new = lst["counts"]["new"]
+    new, worse = lst["counts"]["new"], rat["worse"]
     if a.json:
-        out = {**lst, "findings": [x for x in lst["findings"] if a.all or x["state"] == "new"]}
+        out = {**lst, "findings": [x for x in lst["findings"] if a.all or x["state"] == "new"], "ratchet": rat}
         print(json.dumps(out, indent=2, ensure_ascii=False))
     elif a.format == "github":
-        text = findings.github(lst, a.all)
+        text = "\n".join(x for x in (findings.github(lst, a.all), ratchet.github(rat)) if x)
         if text:
             print(text)
-        print(f"archplan: {new} new findings", file=sys.stderr)
+        print(f"archplan: {new} new findings, {worse} ratchet metrics worse", file=sys.stderr)
     else:
-        print(findings.text(lst, a.all))
-    sys.exit(1 if new else 0)
+        print(findings.text(lst, a.all) + "\n\n" + ratchet.text(rat))
+    sys.exit(1 if new or worse else 0)
 
 
 def cmd_detectors(a):
@@ -709,13 +724,17 @@ def main(argv=None):
     s.add_argument("action", nargs="?", choices=["show", "infer", "list", "use"], default="show")
     s.add_argument("name", nargs="?", help="for use: a profile name from `archplan profile list`, or inferred")
     s.add_argument("--json", action="store_true", help="the profile and the full analysis as JSON")
-    s = add("check", cmd_check, "list new findings (exit 1 when there are any), for CI")
+    s = add("check", cmd_check, "list new findings and the ratchet (exit 1 on new findings or a worse metric), for CI")
     s.add_argument("--json", action="store_true", help="findings, counts and missing kinds as JSON")
     s.add_argument("--format", choices=["text", "github"], default="text",
                    help="github: ::warning annotations for GitHub Actions")
     s.add_argument("--all", action="store_true", help="also list accepted and dismissed findings")
     s.add_argument("--update-baseline", action="store_true",
                    help="accept every current finding into .archplan/baseline.json (reason: baseline)")
+    s.add_argument("--tighten", action="store_true",
+                   help="write the ratchet metrics that got better into the baseline (--update-baseline does too)")
+    s.add_argument("--loosen", metavar="REASON", default=None,
+                   help="write every ratchet metric as it is now, worse ones too; the reason goes into the log")
     s.add_argument("--export", action="store_true", help="run the export command first")
     s.add_argument("--min-weight", type=int, metavar="N", default=None,
                    help='leave out new findings that weigh less than N (0 to 100); default: "check": '

@@ -5,6 +5,12 @@ they change in the same commits. Coupled components without a dependency in
 the model are hidden coupling: something ties them together that the code's
 imports do not show.
 
+The same is done per file for the files the model knows (its files section):
+pairs of files that change together, with the commits behind them and their
+subjects. The history.modularity_violation detector compares them with the
+code's file references, and counts bug fixes from the subjects. It never runs
+git itself.
+
 Only git itself runs. Settings that would make git run other programs
 (fsmonitor, hooks, signature checks, diff drivers) are switched off."""
 
@@ -26,7 +32,22 @@ MIN_TOGETHER = 3
 MIN_DEGREE = 0.3
 MAX_PAIRS = 200
 MAX_OWNERS = 30  # authors kept per component, with their commit counts, for the ownership detector
-VERSION = 2      # of the cached result: 2 added owners
+VERSION = 3      # of the cached result: 2 added owners, 3 added cochange
+
+# File-level co-change (cochange in the result). A commit with more files is a
+# bulk change for this purpose; ignored files do not count towards its size.
+FILE_MAX_FILES = 25
+FILE_MIN_TOGETHER = 3
+FILE_MIN_DEGREE = 0.3
+MAX_FILE_PAIRS = 600
+MAX_FILE_SHAS = 100    # commits kept per file and per pair
+SUBJECT_MAX = 120
+# Files that change with everything for reasons outside the design: lockfiles,
+# vendored and generated code, migrations, translations, changelogs.
+IGNORE = ("*.lock", "*-lock.json", "*-lock.yaml", "go.sum", "uv.lock", "Pipfile.lock", "*/vendor/*", "vendor/*",
+          "*/node_modules/*", "*/third_party/*", "*.min.js", "*.min.css", "*.map", "*_pb2.py", "*_pb2_grpc.py",
+          "*.pb.go", "*.generated.*", "*.gen.*", "*/generated/*", "*/__generated__/*", "*/migrations/*",
+          "*/__snapshots__/*", "*.snap", "*.po", "*.pot", "CHANGELOG*", "*/CHANGELOG*", "*.svg", "*.png")
 
 SAFE = GIT_SAFE
 
@@ -61,15 +82,21 @@ def info(root: Path) -> dict | None:
 
 
 def history(top: Path, since_days: int, max_commits: int = MAX_COMMITS) -> list:
-    """Commits newest first: (sha, author email, iso date, [paths])."""
+    """Commits newest first: (sha, author email, iso date, [paths], subject).
+    The period ends at the HEAD commit, not today, so a repository that has
+    been quiet for a while still has a history to read."""
+    try:
+        end = int(git(top, "log", "-1", "--format=%ct", "HEAD", timeout=10).strip())
+    except (NotGit, ValueError):
+        end = int(time.time())
     out = git(top, "log", "--no-merges", "--no-renames", "--no-color", "--no-ext-diff", "--no-textconv",
-              f"--since={int(since_days)} days ago", f"--max-count={int(max_commits)}",
-              "--name-only", "--format=%x1e%H%x1f%aE%x1f%aI", timeout=300)
+              f"--since=@{end - int(since_days) * 86400}", f"--max-count={int(max_commits)}",
+              "--name-only", "--format=%x1e%H%x1f%aE%x1f%aI%x1f%s", timeout=300)
     commits = []
     for chunk in out.split("\x1e")[1:]:
         head, _, files = chunk.partition("\n")
-        sha, email, date = (head.split("\x1f") + ["", ""])[:3]
-        commits.append((sha, email.lower(), date, [f for f in files.splitlines() if f.strip()]))
+        sha, email, date, subject = (head.split("\x1f", 3) + ["", "", ""])[:4]
+        commits.append((sha, email.lower(), date, [f for f in files.splitlines() if f.strip()], subject.strip()))
     return commits
 
 
@@ -151,7 +178,7 @@ def analyse(commits: list, model: dict, prefix: str | None = None, hint: str = "
         prefix = best_prefix({f for c in used for f in c[3]}, mapper, hint)
     n_commits, authors, files, last = Counter(), defaultdict(Counter), defaultdict(set), {}
     together, unmapped = Counter(), set()
-    for sha, email, date, paths in used:
+    for sha, email, date, paths, *_ in used:
         comps = set()
         for f in paths:
             cid = mapper(f[len(prefix):]) if f.startswith(prefix) else None
@@ -178,7 +205,63 @@ def analyse(commits: list, model: dict, prefix: str | None = None, hint: str = "
             "components": {cid: {"commits": n, "authors": len(authors[cid]), "files": len(files[cid]),
                                  "last": last[cid]} for cid, n in n_commits.most_common()},
             "pairs": pairs[:max_pairs],
-            "owners": {cid: dict(authors[cid].most_common(MAX_OWNERS)) for cid in n_commits}}
+            "owners": {cid: dict(authors[cid].most_common(MAX_OWNERS)) for cid in n_commits},
+            "cochange": cochange(commits, model, prefix)}
+
+
+def ignored(path: str) -> bool:
+    return any(fnmatch.fnmatchcase(path, pat) or fnmatch.fnmatchcase(path.rsplit("/", 1)[-1], pat)
+               for pat in IGNORE)
+
+
+def cochange(commits: list, model: dict, prefix: str = "", max_files: int = FILE_MAX_FILES,
+             min_together: int = FILE_MIN_TOGETHER, min_degree: float = FILE_MIN_DEGREE,
+             max_pairs: int = MAX_FILE_PAIRS) -> dict:
+    """Pairs of model files that change in the same commits.
+
+    Only files in the model's files section count (paths as the model has
+    them), so tests, templates and configuration stay out: the model says
+    nothing about their structure. A commit whose files, ignored ones left
+    out, number more than max_files is skipped. A pair needs min_together
+    shared commits, and degree (shared commits over the commits of the file
+    that changes least) of at least min_degree. The strongest max_pairs are
+    kept, with their commits; subjects lists those commits' subjects, so a
+    detector can count bug fixes without git.
+
+    {"commits", "skipped", "max_files", "files": {path: {"commits", "shas"}},
+     "pairs": [{"a", "b", "together", "degree", "shas"}], "subjects": {sha: subject}}"""
+    known = set(model.get("files") or {})
+    n_file, shas_of, together, skipped, used = Counter(), defaultdict(list), defaultdict(list), 0, 0
+    for c in commits:
+        sha, paths = c[0][:10], c[3]
+        rel = [f[len(prefix):] for f in paths if f.startswith(prefix)]
+        size = sum(1 for f in rel if not ignored(f))
+        if size > max_files:
+            skipped += 1
+            continue
+        fs = sorted({f for f in rel if f in known and not ignored(f)})
+        if not fs:
+            continue
+        used += 1
+        for f in fs:
+            n_file[f] += 1
+            shas_of[f].append(sha)
+        for pair in combinations(fs, 2):
+            together[pair].append(sha)
+    pairs = []
+    for (a, b), shas in together.items():
+        n = len(shas)
+        deg = n / min(n_file[a], n_file[b])
+        if n >= min_together and deg >= min_degree:
+            pairs.append({"a": a, "b": b, "together": n, "degree": round(deg, 3), "shas": shas[:MAX_FILE_SHAS]})
+    pairs.sort(key=lambda x: (-x["together"] * x["degree"], x["a"], x["b"]))
+    pairs = pairs[:max_pairs]
+    in_pairs = sorted({f for x in pairs for f in (x["a"], x["b"])})
+    files = {f: {"commits": n_file[f], "shas": shas_of[f][:MAX_FILE_SHAS]} for f in in_pairs}
+    wanted = {s for x in pairs for s in x["shas"]} | {s for v in files.values() for s in v["shas"]}
+    subjects = {c[0][:10]: c[4][:SUBJECT_MAX] for c in commits if len(c) > 4 and c[0][:10] in wanted}
+    return {"commits": used, "skipped": skipped, "max_files": max_files, "files": files, "pairs": pairs,
+            "subjects": subjects}
 
 
 def hotspots(p: Project, since_days: int = 365, refresh: bool = False, **kw) -> dict:
