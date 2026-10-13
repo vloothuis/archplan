@@ -41,6 +41,57 @@ To give a Claude Code session the MCP tools without the plugin:
 claude mcp add archplan -- archplan mcp
 ```
 
+### With OpenAI Codex
+
+Codex uses the same command, MCP server, skill and hook. It has no monitors,
+so the agent learns about new comments from the hook at each prompt, or by
+calling `wait_for_comments`.
+
+1. Install the `archplan` command as described above, and clone this
+   repository for the skill:
+
+   ```bash
+   git clone https://github.com/vloothuis/archplan ~/.local/share/archplan
+   ```
+
+2. Add the MCP server. `wait_for_comments` can block for up to 10 minutes,
+   so raise the tool timeout from the default of 60 seconds:
+
+   ```bash
+   codex mcp add archplan -- archplan mcp
+   ```
+
+   Then add this to `~/.codex/config.toml`, under the new
+   `[mcp_servers.archplan]` table:
+
+   ```toml
+   tool_timeout_sec = 660
+   ```
+
+3. Link the skill into your Codex skills folder:
+
+   ```bash
+   mkdir -p ~/.agents/skills && ln -s ~/.local/share/archplan/skills/archplan ~/.agents/skills/archplan
+   ```
+
+4. Add the hook to `~/.codex/hooks.json`. It is silent outside archplan
+   projects:
+
+   ```json
+   {
+     "hooks": {
+       "SessionStart": [{"hooks": [{"type": "command", "command": "archplan hook", "timeout": 10}]}],
+       "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "archplan hook", "timeout": 10}]}]
+     }
+   }
+   ```
+
+   Codex runs a new hook only after you trust it. Run `/hooks` in Codex to
+   review and trust it.
+
+In Codex, start with `$archplan` instead of `/archplan`. Run `git pull` in
+`~/.local/share/archplan` to update the skill.
+
 ### Updates
 
 Every push to `develop` is a release, so archplan changes often. Each running
