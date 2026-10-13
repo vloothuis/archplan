@@ -49,9 +49,13 @@ ID = "history.modularity_violation"
 NAME = "Modularity violations"
 GROUP = "history"
 NEEDS = {"git", "files", "cochange"}
-FIX_PATTERN = (r"(?i)\b(fix(e[sd]|ing)?|bug(s|fix(es)?)?|hotfix(es)?|regression|crash(es|ed)?|broken)\b"
-               r"|:bug:|:ambulance:|:adhesive_bandage:")
-PARAMS = {"together": 3, "degree": 0.5, "within_component": False, "fix_pattern": FIX_PATTERN}
+# Words in a commit subject that mark a bug fix. A word list, not a regular
+# expression: config.json is repo data, and a crafted pattern could backtrack
+# without end on the commit subjects.
+FIX_WORDS = ["fix", "fixes", "fixed", "fixing", "bug", "bugs", "bugfix", "bugfixes", "hotfix", "hotfixes",
+             "regression", "crash", "crashes", "crashed", "broken", ":bug:", ":ambulance:", ":adhesive_bandage:"]
+PARAMS = {"together": 3, "degree": 0.5, "within_component": False, "fix_words": FIX_WORDS}
+WORD = re.compile(r":[a-z_]+:|[a-z0-9]+")
 BARRELS = {"__init__.py", "index.ts", "index.tsx", "index.js", "index.jsx", "index.mjs", "mod.rs", "lib.rs"}
 
 
@@ -104,10 +108,8 @@ def groups(pairs: list) -> list:
 
 def modularity_findings(res: dict, model: dict, params: dict | None = None) -> list:
     params = {**PARAMS, **(params or {})}
-    try:
-        is_fix = re.compile(params["fix_pattern"]).search if params["fix_pattern"] else (lambda s: False)
-    except re.error as e:
-        raise ValueError(f"fix_pattern is not a valid regular expression: {e}") from e
+    words = {w.lower() for w in params["fix_words"]}
+    is_fix = lambda subj: not words.isdisjoint(WORD.findall(subj.lower()))
     cc = res.get("cochange") or {}
     files = model.get("files") or {}
     comps = model.get("components") or {}

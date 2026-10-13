@@ -2317,7 +2317,7 @@ class NewDetectorsTest(TempProject):
         # no subject counts as a fix, and pairs inside a component count too
         from archplan import detectors
         detectors.configure(self.p, "history.modularity_violation",
-                            params={"fix_pattern": "^never$", "within_component": True})
+                            params={"fix_words": [], "within_component": True})
         fs = {tuple(f["components"]): f for f in self.found("history.modularity_violation")}
         self.assertEqual(fs[("billing", "shipping")]["evidence"]["bug_fixes"], 0)
         self.assertEqual(fs[("core",)]["files"], ["lib/core/cache.ex", "lib/core/clock.ex"])
