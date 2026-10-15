@@ -430,6 +430,37 @@ class McpTest(TempProject):
             out = [json.loads(l) for l in r.stdout.splitlines()]
             self.assertIn("archplan init", out[1]["result"]["content"][0]["text"])
 
+    def test_init_after_start(self):
+        """A server started before `archplan init` serves the full tools once the project exists."""
+        from archplan.mcp import TOOLS
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+        env["CLAUDE_PROJECT_DIR"] = str(self.root)
+        with tempfile.TemporaryDirectory() as d:
+            srv = subprocess.Popen([str(ROOT / "bin" / "archplan"), "mcp"], cwd=d, env=env, text=True,
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+
+            def ask(id, method, params=None):
+                srv.stdin.write(json.dumps({"jsonrpc": "2.0", "id": id, "method": method, "params": params or {}}) + "\n")
+                srv.stdin.flush()
+                return json.loads(srv.stdout.readline())
+
+            try:
+                init = ask(1, "initialize")["result"]
+                self.assertEqual(init["capabilities"]["tools"], {"listChanged": True})
+                self.assertEqual([t["name"] for t in ask(2, "tools/list")["result"]["tools"]], ["status"])
+                self.assertTrue(ask(3, "tools/call", {"name": "status"})["result"]["isError"])
+                project.init(self.root).export()
+                # The next request finds the project: first the notice, then the answer.
+                self.assertEqual(ask(4, "tools/list"), {"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+                self.assertEqual(json.loads(srv.stdout.readline())["result"]["tools"], TOOLS)
+                r = ask(5, "tools/call", {"name": "get_item", "arguments": {"anchor": "comp:shop.orders"}})["result"]
+                self.assertNotIn("isError", r)
+                self.assertEqual(json.loads(r["content"][0]["text"])["path"], "shop/orders")
+            finally:
+                srv.stdin.close()
+                srv.wait(timeout=30)
+                srv.stdout.close()
+
 
 def serve_in_thread(p):
     """An editor server on a free port; returns (server, base url)."""
