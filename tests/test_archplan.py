@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from archplan import cli, hotspots, model, project  # noqa: E402
 from archplan.mcp import Agent, record, snapshot_text  # noqa: E402
 from archplan.suggestions import Conflict, Suggestions  # noqa: E402
-from archplan.pyexport import export  # noqa: E402
+from archplan.pyexport import export, read_sequences  # noqa: E402
 from archplan.store import Store, mentions, needs, who_next  # noqa: E402
 
 
@@ -63,6 +63,14 @@ SAMPLE = {
     "tests/__init__.py": "",
     "tests/test_x.py": "import shop\n",
 }
+
+
+SEQUENCE = {"participants": ["Caller", "shop"],
+            "messages": [{"id": "Caller>shop:pay#1", "from": "Caller", "to": "shop", "label": "pay()", "depth": 0}]}
+
+
+def write_sequences(root: Path, data) -> None:
+    write(root, {".archplan/sequences.json": data if isinstance(data, str) else json.dumps(data)})
 
 
 class TempProject(unittest.TestCase):
@@ -123,6 +131,26 @@ class PyExportTest(TempProject):
         self.assertNotIn("tests", export(self.root)["components"])
         self.assertIn("tests.test_x", export(self.root, tests=True, granularity="module")["components"])
 
+    def test_sequences_file(self):
+        m = export(self.root)
+        self.assertEqual(m["sequences"], {})
+        self.assertNotIn("calls", m["source"]["capabilities"])
+        write_sequences(self.root, {"format": "archplan-sequences/1", "sequences": {"pay": SEQUENCE}})
+        m = export(self.root)
+        self.assertEqual(m["sequences"], {"pay": SEQUENCE})
+        self.assertIn("calls", m["source"]["capabilities"])
+
+    def test_malformed_sequences_file(self):
+        for bad in ["{", {"format": "other/1", "sequences": {}}, {"format": "archplan-sequences/1"},
+                    {"format": "archplan-sequences/1", "sequences": {"pay": {"participants": []}}}]:
+            write_sequences(self.root, bad)
+            with self.assertRaisesRegex(ValueError, "sequences.json"):
+                read_sequences(self.root)
+        err = io.StringIO()
+        with redirect_stderr(err), self.assertRaises(SystemExit):
+            cli.main(["export-python", str(self.root)])
+        self.assertIn("needs participants and messages lists", err.getvalue())
+
 
 class ProjectTest(TempProject):
     def test_init_export_and_find(self):
@@ -162,6 +190,221 @@ class DetectTest(unittest.TestCase):
             self.assertEqual(project.detect_export(root), "archplan export-ts -C frontend -o .archplan/model.archmodel.json")
             write(root, {"package.json": "{}", "tsconfig.json": "{}"})
             self.assertEqual(project.detect_export(root), "archplan export-ts -o .archplan/model.archmodel.json")
+
+
+def set_config(root: Path, **kw) -> None:
+    cfg_path = root / ".archplan" / "config.json"
+    cfg = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(json.dumps({**cfg, **kw}))
+
+
+class ExcludeTest(TempProject):
+    def test_matcher(self):
+        from archplan.exclude import Exclude
+        ex = Exclude(self.root, ["prototype/**", "./research/", "**/fixtures", "gen/*.py", "", 3])
+        self.assertEqual(ex.patterns, ["prototype/**", "research", "**/fixtures", "gen/*.py"])
+        for path in ["prototype", "prototype/a/b.py", "research/x.ts", "a/b/fixtures/c.json", "fixtures",
+                     "gen/x.py", "gen/x.py/y"]:
+            self.assertTrue(ex.match(path), path)
+        for path in ["prototypes/a.py", "src/research/x.ts", "gen/sub/x.py", "src/fixtures.py", ""]:
+            self.assertFalse(ex.match(path), path)
+        self.assertTrue(ex(self.root / "prototype" / "x.py"))
+        self.assertFalse(ex(self.root.parent / "prototype" / "x.py"))  # outside the project
+        self.assertFalse(Exclude(self.root))
+
+    def test_hostile_pattern_is_fast(self):
+        from archplan.architecture import wildcard
+        from archplan.exclude import Exclude
+        t = time.monotonic()
+        self.assertFalse(wildcard("a" * 5000, "*a*a*a*a*a*a*a*a*a*a*b"))
+        self.assertFalse(Exclude(self.root, ["**/*a*a*a*a*a*a*a*a*a*a*b"]).match("x/" + "a" * 250))
+        self.assertLess(time.monotonic() - t, 1)
+        self.assertTrue(wildcard("model.py", "[lm]o*.p?"))
+        self.assertFalse(wildcard("model.py", "[!m]*"))
+
+    @unittest.skipUnless(shutil.which("node"), "needs node")
+    def test_node_matcher_agrees(self):
+        import random
+        from archplan.exclude import Exclude
+        src = (ROOT / "src/archplan/ts/archplan_export.mjs").read_text()
+        code = src[src.index("// A glob segment as tokens"):src.index("function readJson(")]
+        rnd = random.Random(7)
+        pats = ["".join(rnd.choice("ab*?[]!/") for _ in range(rnd.randint(1, 8))) for _ in range(300)]
+        pats += ["**/fixtures", "prototype/", "a/**/b", "*a*a*a*a*a*a*a*a*a*a*b"]
+        paths = ["/".join("".join(rnd.choice("ab!]") for _ in range(rnd.randint(1, 4)))
+                          for _ in range(rnd.randint(1, 3))) for _ in range(60)] + ["a/" * 60 + "a" * 250]
+        script = code + textwrap.dedent("""
+            const path = await import("node:path");
+            const [pats, paths, base] = JSON.parse(process.argv[1]);
+            console.log(JSON.stringify(pats.map((p) => paths.map((f) => makeExclude([p], base)(path.join(base, f))))));
+            """)
+        r = subprocess.run(["node", "--input-type=module", "-e", script, json.dumps([pats, paths, str(self.root)])],
+                           capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        want = [[Exclude(self.root, [p]).match(f) for f in paths] for p in pats]
+        self.assertEqual(json.loads(r.stdout), want)
+
+    def test_python_export_and_trust(self):
+        write(self.root, {"shop/legacy/__init__.py": "from shop.orders import model\nclass Old:\n    pass\n",
+                          "prototype/__init__.py": "", "prototype/x.py": "import shop.billing\n"})
+        p = project.init(self.root)
+        self.assertTrue(p.trusted())
+        set_config(self.root, exclude=["shop/legacy/**", "prototype"])
+        p = project.Project(self.root)
+        self.assertTrue(p.trusted())  # excludes only narrow what is read
+        p.export()
+        m = json.loads(p.model_path.read_text())
+        self.assertEqual(set(m["components"]), {"shop", "shop.orders", "shop.billing"})
+        self.assertFalse([f for f in m["files"] if "legacy" in f or "prototype" in f])
+        self.assertFalse([t for t in m["types"] if "legacy" in t])
+        self.assertEqual(Agent(p).status()["exclude"], ["shop/legacy/**", "prototype"])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            cli.main(["status", "--dir", str(self.root)])
+        self.assertIn("exclude  shop/legacy/**, prototype", out.getvalue())
+
+    def test_lite_export(self):
+        from archplan.liteexport import export as lite
+        write(self.root, {"app/src/a/A.java": "package a;\nimport b.B;\npublic class A { B b; }\n",
+                          "app/src/b/B.java": "package b;\npublic class B {}\n",
+                          "prototype/c/C.java": "package c;\nimport a.A;\npublic class C { A a; }\n"})
+        self.assertIn("prototype/c/C.java", {t["file"] for t in lite(self.root)["types"].values()})
+        set_config(self.root, exclude=["prototype/"])
+        m = lite(self.root)
+        self.assertNotIn("prototype/c/C.java", {t["file"] for t in m["types"].values()})
+        self.assertFalse([d for d in m["dependencies"] if any("prototype" in e for e in d.get("evidence", []))])
+
+    def test_walkers(self):
+        from archplan import exporters, schema
+        from archplan.architecture import source_files
+        from archplan.frameworks import Context
+        write(self.root, {"prototype/package.json": "{}", "prototype/tsconfig.json": "{}", "prototype/src/a.ts": "",
+                          "prototype/schema.prisma": "model A { id Int @id }\n"})
+        project.init(self.root)
+        self.assertIn("prototype/src/a.ts", source_files({}, self.root))
+        self.assertEqual(next(r for r in exporters.survey(self.root)["exporters"]
+                              if r["name"] == "typescript")["match"], "prototype")
+        self.assertIn({"kind": "prisma", "path": "prototype/schema.prisma"}, schema.detect(self.root))
+        set_config(self.root, exclude=["prototype/**"])
+        self.assertFalse([f for f in source_files({}, self.root) if f.startswith("prototype")])
+        self.assertIn("shop/orders/model.py", source_files({}, self.root))
+        self.assertFalse([f for f in source_files({"files": {"prototype/src/a.ts": {}, "shop/x.py": {}}}, self.root)
+                          if f.startswith("prototype")])
+        res = exporters.survey(self.root)
+        self.assertIsNone(next(r for r in res["exporters"] if r["name"] == "typescript")["match"])
+        self.assertIn("excluded (config.json): prototype/**", exporters.text(res))
+        self.assertNotIn({"kind": "prisma", "path": "prototype/schema.prisma"}, schema.detect(self.root))
+        self.assertFalse([x for x in Context([], self.root).paths if x.startswith("prototype")])
+
+    def test_filter_model(self):
+        from archplan.exclude import Exclude, filter_model
+        m = {"components": {"a": {"path": "a"}, "p": {"path": "prototype"}, "x": {"path": "x", "kind": "external"}},
+             "files": {"a/1.go": {"component": "a", "refs": [{"to": "prototype/2.go"}, {"to": "a/3.go"}]},
+                       "prototype/2.go": {"component": "p", "refs": []}},
+             "types": {"a.T": {"component": "a", "file": "a/1.go"},
+                       "p.T": {"component": "p", "file": "prototype/2.go"}},
+             "signatures": [{"component": "a", "file": "a/1.go"}, {"component": "p", "file": "prototype/2.go"}],
+             "dependencies": [{"from": "a", "to": "p", "weight": 1}, {"from": "a", "to": "x", "weight": 3,
+                                                                       "evidence": ["a/1.go:1", "a/gen/y.go:2"]},
+                              {"from": "a", "to": "x", "weight": 1, "evidence": ["a/gen/z.go:4"]}]}
+        n = filter_model(m, Exclude(self.root, ["prototype", "a/gen"]), self.root)
+        self.assertEqual(n, 6)
+        self.assertEqual(set(m["components"]), {"a", "x"})
+        self.assertEqual(m["files"], {"a/1.go": {"component": "a", "refs": [{"to": "a/3.go"}]}})
+        self.assertEqual(list(m["types"]), ["a.T"])
+        self.assertEqual(len(m["signatures"]), 1)
+        self.assertEqual(m["dependencies"], [{"from": "a", "to": "x", "weight": 2, "evidence": ["a/1.go:1"]}])
+
+
+class GroupingTest(TempProject):
+    def model(self):
+        files = {"src/core/a.ts": ["src/core/b.ts", "src/ui/v.ts"], "src/core/b.ts": [],
+                 "src/core/probe/p.ts": ["src/core/a.ts", "src/ui/v.ts"],
+                 "src/core/probe/q.ts": ["src/core/probe/p.ts"],
+                 "src/core/probe/p.test.ts": ["src/ui/v.ts"], "src/ui/v.ts": [], "src/ui/w.ts": ["src/ui/v.ts"]}
+        comp = {f: "ui" if "/ui/" in f else "core" for f in files}
+        return {"components": {"core": {"name": "core", "path": "src/core", "match": ["src/core/**"]},
+                               "ui": {"name": "ui", "path": "src/ui", "match": ["src/ui/**"]},
+                               "react": {"name": "react", "kind": "external"}},
+                "files": {f: {"component": comp[f], "refs": [{"to": t, "line": 1} for t in refs]}
+                          for f, refs in files.items()},
+                "types": {"core/probe/p.P": {"component": "core", "file": "src/core/probe/p.ts"},
+                          "core/a.A": {"component": "core", "file": "src/core/a.ts"}},
+                "literals": [{"value": "x", "component": "core", "file": "src/core/probe/q.ts"}],
+                "dependencies": [
+                    {"from": "core", "to": "ui", "weight": 2, "evidence": ["src/core/a.ts:1", "src/core/probe/p.ts:1"]},
+                    {"from": "core", "to": "react", "weight": 4, "typeOnly": 1,
+                     "evidence": ["src/core/a.ts:3", "src/core/probe/p.ts:2", "src/core/probe/q.ts:2"]},
+                    {"from": "ui", "to": "react", "weight": 2, "evidence": ["src/ui/v.ts:1"]}]}
+
+    def test_regroup(self):
+        from archplan.grouping import apply
+        m = self.model()
+        cfg = {"components": {"probe": {"match": ["src/core/probe"], "name": "probe core", "layer": "framework"},
+                              "never": {"match": ["nowhere/**"]}}}
+        self.assertTrue(apply(m, cfg, self.root))
+        self.assertEqual(m["components"]["probe"], {"name": "probe core", "path": "src/core/probe",
+                                                    "match": ["src/core/probe/**"], "kind": "internal",
+                                                    "layer": "framework"})
+        self.assertNotIn("never", m["components"])
+        self.assertEqual(m["files"]["src/core/probe/q.ts"]["component"], "probe")
+        self.assertEqual(m["types"]["core/probe/p.P"]["component"], "probe")
+        self.assertEqual(m["types"]["core/a.A"]["component"], "core")
+        self.assertEqual(m["literals"][0]["component"], "probe")
+        deps = {(d["from"], d["to"]): d for d in m["dependencies"]}
+        self.assertEqual(set(deps), {("core", "ui"), ("probe", "core"), ("probe", "ui"), ("core", "react"),
+                                     ("probe", "react"), ("ui", "react")})
+        self.assertEqual(deps[("probe", "ui")], {"from": "probe", "to": "ui", "weight": 1,
+                                                 "evidence": ["src/core/probe/p.ts:1"]})  # the test file is left out
+        self.assertEqual(deps[("probe", "core")]["evidence"], ["src/core/probe/p.ts:1"])
+        # the external edge splits by its evidence; the uncounted weight stays with core
+        self.assertEqual((deps[("core", "react")]["weight"], deps[("probe", "react")]["weight"]), (2, 2))
+        self.assertEqual(deps[("ui", "react")],
+                         {"from": "ui", "to": "react", "weight": 2, "evidence": ["src/ui/v.ts:1"]})
+        self.assertEqual(m["layers"], [{"id": "framework", "name": "framework"}])
+
+    def test_whole_component_moves(self):
+        from archplan.grouping import apply
+        m = self.model()
+        self.assertTrue(apply(m, {"components": {"app/ui": {"match": ["src/ui/**"]},
+                                                 "app/all": {"match": ["src/**"]}}}, self.root))
+        self.assertEqual(sorted(c for c, v in m["components"].items() if v.get("kind") != "external"),
+                         ["app/all", "app/ui"])  # core and ui lost all their files
+        self.assertEqual(m["components"]["app/ui"]["name"], "ui")
+        deps = {(d["from"], d["to"]): d["weight"] for d in m["dependencies"]}
+        self.assertEqual(deps, {("app/all", "app/ui"): 2, ("app/all", "react"): 4, ("app/ui", "react"): 2})
+        self.assertFalse(apply(m, {}, self.root))
+
+    def test_bad_config(self):
+        from archplan.grouping import GroupingError, apply
+        for cfg in [{"components": []}, {"components": {"a": {"match": "x/**"}}}, {"components": {"a": {}}},
+                    {"layers": {}}, {"layers": [{"components": ["a"]}]}]:
+            with self.assertRaises(GroupingError):
+                apply(self.model(), cfg, self.root)
+
+    def test_export_and_profile_layers(self):
+        from archplan.architecture import seed_layers
+        write(self.root, {"shop/billing/tax.py": "from shop.orders.model import Order\n"})
+        p = project.init(self.root)
+        set_config(self.root, components={"money": {"match": ["shop/billing/invoice.py"], "layer": "domain"}},
+                   layers=[{"name": "app", "components": ["shop.*"]}, {"name": "domain"}])
+        p = project.Project(self.root)
+        self.assertTrue(p.trusted())
+        p.export()
+        m = json.loads(p.model_path.read_text())
+        self.assertEqual(m["files"]["shop/billing/invoice.py"]["component"], "money")
+        self.assertEqual(m["types"]["shop.billing.invoice.Invoice"]["component"], "money")
+        deps = {(d["from"], d["to"]) for d in m["dependencies"]}
+        self.assertEqual(deps, {("money", "shop.orders"), ("shop.orders", "money"), ("shop.billing", "shop.orders")})
+        self.assertEqual(m["layers"], [{"id": "app", "name": "app"}, {"id": "domain", "name": "domain"}])
+        self.assertEqual(m["components"]["money"]["layer"], "domain")
+        self.assertEqual(seed_layers({"layers": []}, m, p.dir)["layers"],
+                         [{"name": "app", "components": ["shop.billing", "shop.orders"]},
+                          {"name": "domain", "components": ["money"]}])
+        set_config(self.root, components={"money": {"match": "shop"}})
+        with self.assertRaisesRegex(project.ProjectError, "components.money.match"):
+            project.Project(self.root).export()
 
 
 TS_MODULES = Path(os.environ.get("ARCHPLAN_TS_MODULES", "/Users/jeroen/Work/sourcehaven/rela/frontend/node_modules"))
@@ -256,6 +499,45 @@ class TsExportTest(TempProject):
         self.assertIn({"name": "Status", "component": "models", "file": "src/models/status.ts", "line": 1,
                        "values": ["open", "closed"]}, m["enums"])
         self.assertIn("literals", m["source"]["capabilities"])
+
+    def export_ts(self, root: Path, *args):
+        return subprocess.run([sys.executable, "-m", "archplan", "export-ts", *args], cwd=root, capture_output=True,
+                              text=True, env={**os.environ, "NODE_PATH": str(TS_MODULES), "PYTHONPATH": str(ROOT / "src")})
+
+    def test_sequences_file(self):
+        root = Path(self.tmp.name) / "web"
+        write(root, TS_SAMPLE)
+        out = self.export_ts(root)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        m = json.loads(out.stdout)
+        self.assertEqual(m["sequences"], {})
+        self.assertNotIn("calls", m["source"]["capabilities"])
+        write_sequences(root, {"format": "archplan-sequences/1", "sequences": {"pay": SEQUENCE}})
+        for args in [(), ("-o", "out/m.json")]:
+            out = self.export_ts(root, *args)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            m = json.loads((root / args[1]).read_text() if args else out.stdout)
+            self.assertEqual(m["sequences"], {"pay": SEQUENCE})
+            self.assertIn("calls", m["source"]["capabilities"])
+            self.assertIn("models", m["components"])
+        write_sequences(root, {"format": "archplan-sequences/1", "sequences": []})
+        out = self.export_ts(root)
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("expected archplan-sequences/1", out.stderr)
+
+
+    def test_exclude(self):
+        root = Path(self.tmp.name) / "web"
+        write(root, TS_SAMPLE)
+        set_config(root, exclude=["src/components/**", "src/models/status.ts"])
+        out = self.export_ts(root)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        m = json.loads(out.stdout)
+        self.assertEqual({c for c, v in m["components"].items() if v["kind"] == "internal"}, {"src", "models"})
+        self.assertNotIn("react", m["components"])
+        self.assertEqual(m["dependencies"], [])
+        self.assertFalse([f for f in m["files"] if "components" in f or "status" in f])
+        self.assertFalse([x for x in m["literals"] + m["signatures"] + m["enums"] if "status" in x["file"]])
 
 
 class TrustTest(TempProject):
@@ -556,6 +838,10 @@ class HotspotTest(unittest.TestCase):
             self.assertEqual(hotspots.hotspots(p, 30, max_files=5, min_together=3), r1)
             self.assertEqual(hotspots.info(sub)["head"], r1["head"][:len(hotspots.info(sub)["head"])])
             self.assertIn("billing <-> orders", hotspots.text(r1))
+            write(sub, {".archplan/config.json": json.dumps({"exclude": ["lib/billing"]})})
+            r2 = hotspots.hotspots(project.Project(sub), 30, max_files=5, min_together=3)
+            self.assertNotIn("billing", r2["components"])
+            self.assertEqual(r2["pairs"], [])
         with tempfile.TemporaryDirectory() as d:
             self.assertIsNone(hotspots.info(Path(d)))
 

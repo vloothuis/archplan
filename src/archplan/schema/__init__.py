@@ -39,8 +39,9 @@ LIVE = "schema-live.json"
 
 
 def walk(root: Path, depth: int = 4):
+    from ..exclude import load
     base = len(root.parts)
-    for d, dirs, names in safe_walk(root, SKIP_DIRS):
+    for d, dirs, names in safe_walk(root, SKIP_DIRS, exclude=load(root)):
         if len(Path(d).parts) - base >= depth:
             dirs[:] = []
         yield Path(d), names

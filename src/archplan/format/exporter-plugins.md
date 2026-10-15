@@ -45,6 +45,15 @@ asks a person before a command runs for the first time in a directory.
 - `{root}` or `{chdir}` name the folder to read when the code sits in a
   subfolder, such as `frontend/`.
 - Progress and warnings go to standard error.
+- archplan does not pass the `exclude` list from `.archplan/config.json` to
+  plugin exporters. After the export, it removes the excluded paths from the
+  model: files, refs, types, signatures, literals, enums, components whose
+  `path` is excluded, and the dependencies and evidence that came from them.
+  An exporter that reads the list itself gives exact dependency weights.
+- In the same step, archplan applies `components` and `layers` from
+  `.archplan/config.json`: it moves files to the configured components and
+  adds up their dependencies again. A `files` section with `refs` makes those
+  weights exact.
 - The command must not change the source files, and must not need the network
   after its install step.
 
@@ -78,6 +87,14 @@ Optional, in order of value to archplan:
 - `policy`, `layers` and `vocabulary`.
 
 archplan computes the vocabulary itself when a model has none.
+
+The built-in Python and TypeScript exporters also read test-recorded sequences
+from `.archplan/sequences.json` in the project root. The file has format
+`archplan-sequences/1` and a `sequences` object using the model's sequence
+shape. Each sequence needs `participants` and `messages` lists. Keep argument
+values out of labels. A missing file means no sequences; a malformed file stops
+the export with an error. When the file has sequences, the model lists the
+`calls` capability.
 
 ## Capabilities
 

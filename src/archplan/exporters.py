@@ -129,15 +129,20 @@ def load(project_dir: Path | None = None) -> tuple:
 
 # ---------- matching ----------
 
-def _glob(d: Path, pattern: str) -> bool:
-    """Whether a file under d matches; a pattern without a slash looks at d itself."""
+def _glob(d: Path, pattern: str, ex=None) -> bool:
+    """Whether a file under d matches; a pattern without a slash looks at d itself.
+    ex (an exclude.Exclude) leaves out the paths it matches."""
     if "/" not in pattern:
-        return any(True for _ in d.glob(pattern))
+        return any(not (ex and ex(p)) for p in d.glob(pattern))
     from .architecture import glob_match
     for dirpath, dirs, names in os.walk(d):
         dirs[:] = [x for x in dirs if x not in SKIP and not x.startswith(".")]
+        if ex:
+            ex.prune(dirpath, dirs)
         rel = os.path.relpath(dirpath, d).replace(os.sep, "/")
         for n in names:
+            if ex and ex(os.path.join(dirpath, n)):
+                continue
             if glob_match(n if rel == "." else f"{rel}/{n}", pattern):
                 return True
     return False
@@ -148,14 +153,14 @@ def _deps_in(path: Path) -> set:
     return read_deps(path)
 
 
-def matches_dir(e: dict, d: Path) -> bool:
+def matches_dir(e: dict, d: Path, ex=None) -> bool:
     det = e["detect"]
     files, man = det.get("files") or [], det.get("manifests") or {}
     if man:
         ok = False
         for name, deps in man.items():
             for p in ([d / name] if not any(c in name for c in "*?[") else sorted(d.glob(name))):
-                if not is_file(p):
+                if not is_file(p) or (ex and ex(p)):
                     continue
                 if not deps:
                     ok = True
@@ -169,10 +174,10 @@ def matches_dir(e: dict, d: Path) -> bool:
                 break
         if not ok:
             return False
-    return not files or any(_glob(d, g) for g in files)
+    return not files or any(_glob(d, g, ex) for g in files)
 
 
-def weight(e: dict, d: Path) -> int:
+def weight(e: dict, d: Path, ex=None) -> int:
     from .architecture import glob_match
     pats = e["detect"].get("weight") or []
     if not pats:
@@ -180,6 +185,9 @@ def weight(e: dict, d: Path) -> int:
     n = 0
     for dirpath, dirs, names in os.walk(d):
         dirs[:] = [x for x in dirs if x not in SKIP and not x.startswith(".")]
+        if ex:
+            ex.prune(dirpath, dirs)
+            names = [x for x in names if not ex(os.path.join(dirpath, x))]
         rel = os.path.relpath(dirpath, d).replace(os.sep, "/")
         n += sum(1 for x in names if any(glob_match(x if rel == "." else f"{rel}/{x}", p) for p in pats))
         if n >= WEIGHT_CAP:
@@ -187,18 +195,18 @@ def weight(e: dict, d: Path) -> int:
     return n
 
 
-def locate(e: dict, root: Path) -> Path | None:
+def locate(e: dict, root: Path, ex=None) -> Path | None:
     """The folder the entry matches: the root, or else the best direct subfolder."""
-    if matches_dir(e, root):
+    if matches_dir(e, root, ex):
         return Path(".")
     if not e["detect"].get("subdirs"):
         return None
     subs = [d for d in sorted(root.iterdir())
             if d.is_dir() and not d.is_symlink() and not d.name.startswith(".") and d.name not in SKIP
-            and matches_dir(e, d)]
+            and not (ex and ex(d)) and matches_dir(e, d, ex)]
     if not subs:
         return None
-    return max(subs, key=lambda d: weight(e, d)).relative_to(root)
+    return max(subs, key=lambda d: weight(e, d, ex)).relative_to(root)
 
 
 def installed(e: dict, root: Path, where: Path) -> bool | None:
@@ -228,10 +236,12 @@ def survey(root: Path, project_dir: Path | None = None, out: str = ".archplan/mo
     """Every entry with its match, installed state and command, and the pick:
     the highest-priority match that is installed, else lite, else the
     highest-priority match."""
+    from .exclude import load as load_exclude
     es, errors = load(project_dir)
+    ex = load_exclude(root)
     rows = []
     for e in sorted(es.values(), key=lambda e: (-e.get("priority", 0), e["name"])):
-        where = locate(e, root)
+        where = locate(e, root, ex)
         row = {"name": e["name"], "title": e.get("title"), "languages": e.get("languages") or [],
                "origin": e["origin"], "priority": e.get("priority", 0), "capabilities": e.get("capabilities") or [],
                "match": None if where is None else str(where), "install": e.get("install"),
@@ -246,7 +256,7 @@ def survey(root: Path, project_dir: Path | None = None, out: str = ".archplan/mo
     return {"exporters": rows, "pick": pick["name"] if pick else None, "command": pick["command"] if pick else None,
             "trusted_source": bool(pick and pick["origin"] == "built-in"),
             "runs_repo_code": bool(pick and (pick["runs_repo_code"] or pick["origin"] != "built-in")),
-            "errors": [{"file": f, "error": x} for f, x in errors]}
+            "errors": [{"file": f, "error": x} for f, x in errors], "exclude": ex.patterns}
 
 
 def text(res: dict) -> str:
@@ -269,4 +279,6 @@ def text(res: dict) -> str:
             lines.append(f"to use {r['name']}: {r['install']}")
     for e in res["errors"]:
         lines.append(f"skipped {e['file']}: {e['error']}")
+    if res.get("exclude"):
+        lines.append("excluded (config.json): " + ", ".join(res["exclude"]))
     return "\n".join(lines)

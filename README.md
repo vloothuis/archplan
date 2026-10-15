@@ -147,7 +147,7 @@ Everything is stored in `.archplan/` in the repository:
 
 | File | What it holds |
 |---|---|
-| `config.json` | export command, model path, port, auto suggestion mode |
+| `config.json` | export command, model path, paths to exclude, components and layers, port, auto suggestion mode |
 | `model.archmodel.json` | the as-is model, written by the exporter |
 | `target.archmodel.json` | the target model |
 | `base.archmodel.json` | the as-is model the target was last edited against, for rebasing |
@@ -516,6 +516,62 @@ them to find concepts the code has no type for.
   `require` and Zeitwerk constants, Rust `mod` and `use`) and lists types
   with simple fields. It misses calls and anything a compiler would infer;
   see [its limits](src/archplan/format/archmodel.md).
+
+### Excluding paths
+
+To leave folders or files out of the model, list glob patterns under
+`exclude` in `.archplan/config.json`:
+
+```json
+"exclude": ["prototype/**", "research/", "**/fixtures"]
+```
+
+Patterns are relative to the project root, the folder that holds
+`.archplan` (normally the repository root). `**` matches any number of
+folders; `*` and `?` match within one name. A pattern that matches a folder
+excludes everything in it, so `prototype`, `prototype/` and `prototype/**`
+do the same. Patterns are anchored at the root: use `**/fixtures` for a
+folder name at any depth.
+
+Excluded files give no components, types, dependencies, files, signatures,
+literals or findings. The built-in Python, TypeScript and lite exporters skip
+them while reading. For other exporters, `archplan export` removes them from
+the model afterwards. Hotspots, the architecture profile, glossary candidates,
+schema detection and `archplan init`'s exporter detection skip them too.
+`archplan status` and `archplan exporters` list the active patterns. Changing
+`exclude` does not need a new `archplan trust`: it only narrows what is read.
+
+### Your own components and layers
+
+An exporter groups files into components by its own rules, such as one
+component per folder. To choose the grouping yourself, list components under
+`components` in `.archplan/config.json`:
+
+```json
+"components": {
+  "probe/core": {"match": ["packages/probe/src/core/**"], "name": "probe core", "layer": "framework"},
+  "tools/symbols": {"match": ["tools/symbols/"]}
+},
+"layers": [
+  {"name": "app", "components": ["web", "api/*"]},
+  {"name": "framework"}
+]
+```
+
+- `match` lists glob patterns, with the same rules as `exclude`. A file goes
+  to the first component in the list whose pattern matches it. Files that
+  match no pattern keep the exporter's component.
+- `name`, `layer` and `doc` are optional.
+- `archplan export` applies this after any exporter. It moves the files'
+  types, signatures, literals and enums along, removes exporter components
+  that lost all their files, and adds up the dependencies between the new
+  components again, without edges from a component to itself. With a `files`
+  section in the model, those weights count importing files, tests left out.
+  Without one, archplan splits a dependency by the files in its evidence.
+- `layers` lists layers from top to bottom. Each names its components by id
+  or by a glob over ids. A component's `layer` puts it in that layer too.
+  The layers go into the model and replace the inferred ones when
+  `archplan profile infer` proposes a profile; a locked profile keeps its own.
 
 These exporters are entries in a registry,
 [`src/archplan/contrib/exporters`](src/archplan/contrib/exporters).

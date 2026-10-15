@@ -262,6 +262,7 @@ class Agent:
         return {"project": p.name, "root": str(p.root),
                 "editor": srv["url"] if srv else "not running (run `archplan up`)",
                 "model": counts(model) if model else "none yet (call refresh_model)",
+                "exclude": p.exclude.patterns,
                 "target": {"edited": bool(target), "violations": len(violations(target)) if target else 0},
                 "export_approved": p.trusted(),
                 "intent": p.state().get("intent", ""),

@@ -2,6 +2,7 @@
 // archplan exporter for TypeScript and JavaScript projects.
 //
 //   node archplan_export.mjs [-C DIR] [-o FILE] [--root DIR] [--depth N] [--tests]
+//                            [--exclude GLOB]... [--exclude-base DIR]
 //
 // Writes an archmodel/1 file (stdout without -o). -C names the project
 // directory, the one with package.json (default: the current directory).
@@ -9,6 +10,9 @@
 // current directory, which is where archplan runs the export). --depth limits
 // how deep components nest under src (default: 3). --tests also counts test
 // files in dependencies and types; they are always in the files section.
+// --exclude leaves out files and folders that match GLOB, relative to
+// --exclude-base (default: the current directory); archplan passes the
+// "exclude" list from .archplan/config.json.
 //
 // The script has no dependencies of its own. It uses the typescript package
 // the project installed, so run `npm install` in the project first.
@@ -54,7 +58,7 @@ function usage(code) {
 }
 
 function parseArgs(argv) {
-  const o = { dir: ".", out: null, root: null, depth: 3, tests: false };
+  const o = { dir: ".", out: null, root: null, depth: 3, tests: false, exclude: [], excludeBase: "." };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const val = () => (i + 1 < argv.length ? argv[++i] : usage(2));
@@ -63,6 +67,8 @@ function parseArgs(argv) {
     else if (a === "--root") o.root = val();
     else if (a === "--depth") o.depth = Math.max(1, parseInt(val(), 10) || 3);
     else if (a === "--tests") o.tests = true;
+    else if (a === "--exclude") o.exclude.push(val());
+    else if (a === "--exclude-base") o.excludeBase = val();
     else if (a === "-h" || a === "--help") usage(0);
     else { process.stderr.write(`unknown argument: ${a}\n`); usage(2); }
   }
@@ -89,17 +95,112 @@ function loadTs(dir) {
   return ts;
 }
 
+// ---------- excludes ----------
+// The same matching as archplan's exclude.py: patterns are relative to a base
+// folder, ** spans folders, and a match on a folder excludes all under it.
+
+// A glob segment as tokens: "*", "?", a literal character, or {neg, body}.
+// Matching walks the tokens with one backtrack point for the last *, without
+// regular expressions, so a hostile pattern stays cheap.
+function segment(pat) {
+  const toks = [];
+  for (let i = 0; i < pat.length; i++) {
+    const c = pat[i];
+    if (c === "[") {
+      let j = i + 1;
+      if (pat[j] === "!") j++;
+      if (pat[j] === "]") j++;
+      while (j < pat.length && pat[j] !== "]") j++;
+      if (j < pat.length) {
+        const body = pat.slice(i + 1, j);
+        toks.push(body[0] === "!" ? { neg: true, body: body.slice(1) } : { neg: false, body });
+        i = j;
+        continue;
+      }
+    }
+    if (!(c === "*" && toks[toks.length - 1] === "*")) toks.push(c);
+  }
+  return { test: (name) => wildcard(name, toks) };
+}
+
+function inClass(ch, body) {
+  for (let i = 0; i < body.length;) {
+    if (i + 2 < body.length && body[i + 1] === "-") {
+      if (body[i] <= ch && ch <= body[i + 2]) return true;
+      i += 3;
+    } else {
+      if (ch === body[i]) return true;
+      i++;
+    }
+  }
+  return false;
+}
+
+function wildcard(name, toks) {
+  let i = 0, j = 0, starJ = -1, starI = 0;
+  while (i < name.length) {
+    const t = j < toks.length ? toks[j] : undefined;
+    if (t === "*") { starJ = j; starI = i; j++; continue; }
+    if (t !== undefined && (t === "?" || (typeof t === "object" && inClass(name[i], t.body) !== t.neg) || t === name[i])) {
+      i++; j++; continue;
+    }
+    if (starJ < 0) return false;
+    i = ++starI; j = starJ + 1;
+  }
+  while (j < toks.length && toks[j] === "*") j++;
+  return j === toks.length;
+}
+
+function compileGlob(pattern) {
+  const pats = [];
+  for (const x of pattern.split("/")) {
+    if (!(x === "**" && pats.length && pats[pats.length - 1] === "**")) pats.push(x);
+  }
+  return pats.map((x) => (x === "**" ? x : segment(x)));
+}
+
+function globMatch(parts, pats) {
+  const n = parts.length, m = pats.length;
+  let nxt = new Array(m + 1).fill(true);
+  for (let j = m - 1; j >= 0; j--) nxt[j] = pats[j] === "**" && nxt[j + 1];
+  for (let i = n - 1; i >= 0; i--) {
+    const ok = new Array(m + 1).fill(false);
+    for (let j = m - 1; j >= 0; j--) {
+      ok[j] = pats[j] === "**" ? ok[j + 1] || nxt[j] : nxt[j + 1] && pats[j].test(parts[i]);
+    }
+    nxt = ok;
+  }
+  return nxt[0];
+}
+
+function makeExclude(patterns, base) {
+  const globs = patterns.map((p) => p.trim().replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/^\/+|\/+$/g, ""))
+    .filter(Boolean).map(compileGlob);
+  if (!globs.length) return () => false;
+  base = path.resolve(base);
+  return (f) => {
+    const r = path.relative(base, path.resolve(f));
+    if (!r || r.startsWith("..") || path.isAbsolute(r)) return false;
+    const parts = r.split(path.sep);
+    for (let i = 1; i <= parts.length; i++) {
+      if (globs.some((g) => globMatch(parts.slice(0, i), g))) return true;
+    }
+    return false;
+  };
+}
+
 function readJson(f) {
   try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return null; }
 }
 
-function walk(dir, out = []) {
+function walk(dir, excluded, out = []) {
   let ents;
   try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
   for (const e of ents) {
     if (e.name.startsWith(".") || SKIP.has(e.name)) continue;
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) walk(p, out);
+    if (excluded(p)) continue;
+    if (e.isDirectory()) walk(p, excluded, out);
     else if (e.isFile() && SRC_EXT.has(path.extname(e.name))) out.push(p);
   }
   return out;
@@ -286,8 +387,9 @@ function main() {
   const pkg = readJson(path.join(projectDir, "package.json")) || {};
 
   const cfg = loadConfig(ts, projectDir);
-  let files = (cfg ? cfg.files.map((f) => path.resolve(f)) : walk(projectDir)).filter((f) => {
-    if (!inside(projectDir, f) || !SRC_EXT.has(path.extname(f))) return false;
+  const excluded = makeExclude(opt.exclude, opt.excludeBase);
+  let files = (cfg ? cfg.files.map((f) => path.resolve(f)) : walk(projectDir, excluded)).filter((f) => {
+    if (!inside(projectDir, f) || !SRC_EXT.has(path.extname(f)) || excluded(f)) return false;
     return !path.relative(projectDir, f).split(path.sep).slice(0, -1).some((d) => SKIP.has(d) || d.startsWith("."));
   });
   files = [...new Set(files)].sort();

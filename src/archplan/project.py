@@ -3,7 +3,8 @@
 The directory holds everything archplan shares between the human (in the
 editor) and an agent (over MCP):
 
-  config.json            how to export the code's model, which port to use, auto suggestion mode
+  config.json            how to export the code's model, paths to exclude, components and layers,
+                         which port to use, auto suggestion mode
   model.archmodel.json   the as-is model, written by the exporter
   target.archmodel.json  the target model the human (or agent) edits
   base.archmodel.json    the as-is model the target was last edited against
@@ -303,6 +304,12 @@ class Project:
         """The target model, or the as-is model when nobody edited one yet."""
         return read_json(self.target_path) or read_json(self.model_path)
 
+    @property
+    def exclude(self):
+        """The paths config.json "exclude" leaves out of the model."""
+        from .exclude import Exclude, patterns_of
+        return Exclude(self.root, patterns_of(self.config))
+
     # export
 
     def export_command(self) -> str | None:
@@ -361,6 +368,10 @@ class Project:
         m = read_json(self.model_path)
         if not m or m.get("format") != "archmodel/1":
             raise ProjectError(f"export did not produce an archmodel/1 file at {self.model_path}")
+        from .exclude import filter_model  # for exporters that do not read the exclude list
+        from .grouping import apply as apply_grouping  # config.json components and layers
+        if filter_model(m, self.exclude, self.root) | apply_grouping(m, self.config, self.root):
+            write_json(self.model_path, m)
         if not m.get("vocabulary"):
             from .vocab import enrich  # the vocabulary step for exporters that have none
             enrich(self)

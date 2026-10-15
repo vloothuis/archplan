@@ -245,6 +245,8 @@ def cmd_status(a):
     print(f"editor   {running(p) or 'not running (archplan up)'}")
     m = s["model"]
     print("model    " + (", ".join(f"{v} {k}" for k, v in m.items()) if isinstance(m, dict) else m))
+    if s["exclude"]:
+        print(f"exclude  {', '.join(s['exclude'])}")
     if s["intent"]:
         print(f"intent   {s['intent']}")
     print(f"plan     {s['plan_tasks']} tasks, {s['target']['violations']} policy violations in the target")
@@ -609,7 +611,10 @@ def write_model(m: dict, output: str | None) -> None:
 def cmd_export_python(a):
     from .pyexport import export
     root = Path(a.root or ".").resolve()
-    m = export(root, a.package, a.granularity, a.tests)
+    try:
+        m = export(root, a.package, a.granularity, a.tests)
+    except ValueError as e:
+        die(str(e))
     text = json.dumps(m, indent=2, ensure_ascii=False) + "\n"
     if a.output:
         Path(a.output).parent.mkdir(parents=True, exist_ok=True)
@@ -620,14 +625,22 @@ def cmd_export_python(a):
 
 
 def cmd_export_ts(a):
-    """Run the shipped Node exporter. It loads the project's own typescript package."""
+    """Run the shipped Node exporter. It loads the project's own typescript
+    package. Sequences come from .archplan/sequences.json, read here as in
+    export-python."""
     import shutil
+
+    from .pyexport import read_sequences
     node = shutil.which("node")
     if not node:
         die("export-ts needs Node.js (node on the PATH); install it, then run npm install in the project")
+    try:
+        sequences = read_sequences(Path(a.root or ".").resolve())
+    except ValueError as e:
+        die(str(e))
     script = Path(__file__).resolve().parent / "ts" / "archplan_export.mjs"
     args = [node, str(script), "-C", a.C]
-    if a.output:
+    if a.output and not sequences:
         args += ["-o", a.output]
     if a.root:
         args += ["--root", a.root]
@@ -635,7 +648,20 @@ def cmd_export_ts(a):
         args += ["--depth", str(a.depth)]
     if a.tests:
         args.append("--tests")
-    sys.exit(subprocess.run(args).returncode)
+    from .exclude import load
+    ex = load(Path(a.root or ".").resolve())
+    if ex:
+        args += ["--exclude-base", str(ex.base)] + [x for pat in ex.patterns for x in ("--exclude", pat)]
+    if not sequences:
+        sys.exit(subprocess.run(args).returncode)
+    r = subprocess.run(args, stdout=subprocess.PIPE, text=True, encoding="utf-8")
+    if r.returncode:
+        sys.exit(r.returncode)
+    m = json.loads(r.stdout)
+    m["sequences"] = sequences
+    if "calls" not in m["source"]["capabilities"]:
+        m["source"]["capabilities"].append("calls")
+    write_model(m, a.output)
 
 
 INTRO = """\
