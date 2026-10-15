@@ -273,11 +273,7 @@ def cmd_threads(a):
 
 def cmd_mcp(a):
     from . import mcp
-    try:
-        p = Project.find(dir=a.dir)
-    except ProjectError as e:
-        return mcp.serve_unconfigured(str(e))
-    mcp.serve(p)
+    mcp.serve(lambda: Project.find(dir=a.dir))
 
 
 def cmd_watch(a):
