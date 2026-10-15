@@ -317,6 +317,96 @@ class ExcludeTest(TempProject):
         self.assertEqual(m["dependencies"], [{"from": "a", "to": "x", "weight": 2, "evidence": ["a/1.go:1"]}])
 
 
+class GroupingTest(TempProject):
+    def model(self):
+        files = {"src/core/a.ts": ["src/core/b.ts", "src/ui/v.ts"], "src/core/b.ts": [],
+                 "src/core/probe/p.ts": ["src/core/a.ts", "src/ui/v.ts"],
+                 "src/core/probe/q.ts": ["src/core/probe/p.ts"],
+                 "src/core/probe/p.test.ts": ["src/ui/v.ts"], "src/ui/v.ts": [], "src/ui/w.ts": ["src/ui/v.ts"]}
+        comp = {f: "ui" if "/ui/" in f else "core" for f in files}
+        return {"components": {"core": {"name": "core", "path": "src/core", "match": ["src/core/**"]},
+                               "ui": {"name": "ui", "path": "src/ui", "match": ["src/ui/**"]},
+                               "react": {"name": "react", "kind": "external"}},
+                "files": {f: {"component": comp[f], "refs": [{"to": t, "line": 1} for t in refs]}
+                          for f, refs in files.items()},
+                "types": {"core/probe/p.P": {"component": "core", "file": "src/core/probe/p.ts"},
+                          "core/a.A": {"component": "core", "file": "src/core/a.ts"}},
+                "literals": [{"value": "x", "component": "core", "file": "src/core/probe/q.ts"}],
+                "dependencies": [
+                    {"from": "core", "to": "ui", "weight": 2, "evidence": ["src/core/a.ts:1", "src/core/probe/p.ts:1"]},
+                    {"from": "core", "to": "react", "weight": 4, "typeOnly": 1,
+                     "evidence": ["src/core/a.ts:3", "src/core/probe/p.ts:2", "src/core/probe/q.ts:2"]},
+                    {"from": "ui", "to": "react", "weight": 2, "evidence": ["src/ui/v.ts:1"]}]}
+
+    def test_regroup(self):
+        from archplan.grouping import apply
+        m = self.model()
+        cfg = {"components": {"probe": {"match": ["src/core/probe"], "name": "probe core", "layer": "framework"},
+                              "never": {"match": ["nowhere/**"]}}}
+        self.assertTrue(apply(m, cfg, self.root))
+        self.assertEqual(m["components"]["probe"], {"name": "probe core", "path": "src/core/probe",
+                                                    "match": ["src/core/probe/**"], "kind": "internal",
+                                                    "layer": "framework"})
+        self.assertNotIn("never", m["components"])
+        self.assertEqual(m["files"]["src/core/probe/q.ts"]["component"], "probe")
+        self.assertEqual(m["types"]["core/probe/p.P"]["component"], "probe")
+        self.assertEqual(m["types"]["core/a.A"]["component"], "core")
+        self.assertEqual(m["literals"][0]["component"], "probe")
+        deps = {(d["from"], d["to"]): d for d in m["dependencies"]}
+        self.assertEqual(set(deps), {("core", "ui"), ("probe", "core"), ("probe", "ui"), ("core", "react"),
+                                     ("probe", "react"), ("ui", "react")})
+        self.assertEqual(deps[("probe", "ui")], {"from": "probe", "to": "ui", "weight": 1,
+                                                 "evidence": ["src/core/probe/p.ts:1"]})  # the test file is left out
+        self.assertEqual(deps[("probe", "core")]["evidence"], ["src/core/probe/p.ts:1"])
+        # the external edge splits by its evidence; the uncounted weight stays with core
+        self.assertEqual((deps[("core", "react")]["weight"], deps[("probe", "react")]["weight"]), (2, 2))
+        self.assertEqual(deps[("ui", "react")],
+                         {"from": "ui", "to": "react", "weight": 2, "evidence": ["src/ui/v.ts:1"]})
+        self.assertEqual(m["layers"], [{"id": "framework", "name": "framework"}])
+
+    def test_whole_component_moves(self):
+        from archplan.grouping import apply
+        m = self.model()
+        self.assertTrue(apply(m, {"components": {"app/ui": {"match": ["src/ui/**"]},
+                                                 "app/all": {"match": ["src/**"]}}}, self.root))
+        self.assertEqual(sorted(c for c, v in m["components"].items() if v.get("kind") != "external"),
+                         ["app/all", "app/ui"])  # core and ui lost all their files
+        self.assertEqual(m["components"]["app/ui"]["name"], "ui")
+        deps = {(d["from"], d["to"]): d["weight"] for d in m["dependencies"]}
+        self.assertEqual(deps, {("app/all", "app/ui"): 2, ("app/all", "react"): 4, ("app/ui", "react"): 2})
+        self.assertFalse(apply(m, {}, self.root))
+
+    def test_bad_config(self):
+        from archplan.grouping import GroupingError, apply
+        for cfg in [{"components": []}, {"components": {"a": {"match": "x/**"}}}, {"components": {"a": {}}},
+                    {"layers": {}}, {"layers": [{"components": ["a"]}]}]:
+            with self.assertRaises(GroupingError):
+                apply(self.model(), cfg, self.root)
+
+    def test_export_and_profile_layers(self):
+        from archplan.architecture import seed_layers
+        write(self.root, {"shop/billing/tax.py": "from shop.orders.model import Order\n"})
+        p = project.init(self.root)
+        set_config(self.root, components={"money": {"match": ["shop/billing/invoice.py"], "layer": "domain"}},
+                   layers=[{"name": "app", "components": ["shop.*"]}, {"name": "domain"}])
+        p = project.Project(self.root)
+        self.assertTrue(p.trusted())
+        p.export()
+        m = json.loads(p.model_path.read_text())
+        self.assertEqual(m["files"]["shop/billing/invoice.py"]["component"], "money")
+        self.assertEqual(m["types"]["shop.billing.invoice.Invoice"]["component"], "money")
+        deps = {(d["from"], d["to"]) for d in m["dependencies"]}
+        self.assertEqual(deps, {("money", "shop.orders"), ("shop.orders", "money"), ("shop.billing", "shop.orders")})
+        self.assertEqual(m["layers"], [{"id": "app", "name": "app"}, {"id": "domain", "name": "domain"}])
+        self.assertEqual(m["components"]["money"]["layer"], "domain")
+        self.assertEqual(seed_layers({"layers": []}, m, p.dir)["layers"],
+                         [{"name": "app", "components": ["shop.billing", "shop.orders"]},
+                          {"name": "domain", "components": ["money"]}])
+        set_config(self.root, components={"money": {"match": "shop"}})
+        with self.assertRaisesRegex(project.ProjectError, "components.money.match"):
+            project.Project(self.root).export()
+
+
 TS_MODULES = Path(os.environ.get("ARCHPLAN_TS_MODULES", "/Users/jeroen/Work/sourcehaven/rela/frontend/node_modules"))
 TS_SAMPLE = {
     "package.json": '{"name": "shop", "dependencies": {"react": "*"}}',

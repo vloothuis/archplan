@@ -462,7 +462,22 @@ def infer(model: dict, root: Path | None = None, project_dir: Path | None = None
         if not fw:
             raise
         gen = None
-    return frameworks.choose(fw, gen, files) or gen
+    return seed_layers(frameworks.choose(fw, gen, files) or gen, model, project_dir)
+
+
+def seed_layers(proposal: dict, model: dict, project_dir: Path | None) -> dict:
+    """Use the layers from config.json ("layers", and "layer" on configured
+    components) in a proposal, when there are any."""
+    from .grouping import GroupingError, config_layers
+    if not proposal or project_dir is None:
+        return proposal
+    try:
+        layers = config_layers(model, read_json(Path(project_dir) / "config.json", {}) or {})
+    except (GroupingError, OSError, ValueError):
+        return proposal
+    if layers:
+        proposal["layers"] = [{"name": x["name"], "components": x["components"]} for x in layers]
+    return proposal
 
 
 def use(model: dict, name: str, root: Path | None = None, project_dir: Path | None = None) -> dict:
@@ -470,11 +485,11 @@ def use(model: dict, name: str, root: Path | None = None, project_dir: Path | No
     from . import frameworks
     files = source_files(model, root)
     if name == "inferred":
-        return generic(model, files)
+        return seed_layers(generic(model, files), model, project_dir)
     ts, _ = frameworks.load(project_dir)
     if name not in ts:
         raise ArchitectureError(f"no profile named {name}; see `archplan profile list`")
-    return frameworks.apply(ts[name], model, files)
+    return seed_layers(frameworks.apply(ts[name], model, files), model, project_dir)
 
 
 def generic(model: dict, files: list) -> dict:
