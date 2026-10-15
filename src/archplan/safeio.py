@@ -142,20 +142,24 @@ def is_file(path) -> bool:
         return False
 
 
-def walk(root, skip=(), hidden: bool = False):
+def walk(root, skip=(), hidden: bool = False, exclude=None):
     """os.walk that never follows symlinked directories, sorted, leaving out
-    the folder names in skip and, unless hidden, names starting with a dot."""
+    the folder names in skip and, unless hidden, names starting with a dot.
+    exclude (an exclude.Exclude) leaves out the folders and files it matches."""
     for d, dirs, names in os.walk(root, followlinks=False):
         dirs[:] = sorted(x for x in dirs if x not in skip and (hidden or not x.startswith("."))
                          and not os.path.islink(os.path.join(d, x)))
+        if exclude:
+            exclude.prune(d, dirs)
+            names = [n for n in names if not exclude(os.path.join(d, n))]
         yield d, dirs, sorted(names)
 
 
-def files(root, suffix: str, skip=()) -> list:
+def files(root, suffix: str, skip=(), exclude=None) -> list:
     """Regular files under root whose name ends with suffix, as walk finds them:
     a safe replacement for Path.rglob."""
     out = []
-    for d, _, names in walk(root, skip):
+    for d, _, names in walk(root, skip, exclude=exclude):
         out.extend(Path(d) / n for n in names if n.endswith(suffix) and is_file(os.path.join(d, n)))
     return out
 

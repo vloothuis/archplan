@@ -245,6 +245,8 @@ def cmd_status(a):
     print(f"editor   {running(p) or 'not running (archplan up)'}")
     m = s["model"]
     print("model    " + (", ".join(f"{v} {k}" for k, v in m.items()) if isinstance(m, dict) else m))
+    if s["exclude"]:
+        print(f"exclude  {', '.join(s['exclude'])}")
     if s["intent"]:
         print(f"intent   {s['intent']}")
     print(f"plan     {s['plan_tasks']} tasks, {s['target']['violations']} policy violations in the target")
@@ -650,6 +652,10 @@ def cmd_export_ts(a):
         args += ["--depth", str(a.depth)]
     if a.tests:
         args.append("--tests")
+    from .exclude import load
+    ex = load(Path(a.root or ".").resolve())
+    if ex:
+        args += ["--exclude-base", str(ex.base)] + [x for pat in ex.patterns for x in ("--exclude", pat)]
     if not sequences:
         sys.exit(subprocess.run(args).returncode)
     r = subprocess.run(args, stdout=subprocess.PIPE, text=True, encoding="utf-8")

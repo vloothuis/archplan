@@ -53,8 +53,8 @@ def source_root(root: Path) -> Path:
 TESTS = {"tests", "test", "testing"}
 
 
-def files(base: Path, tests: bool = False):
-    for p in safe_files(base, ".py", SKIP):
+def files(base: Path, tests: bool = False, exclude=None):
+    for p in safe_files(base, ".py", SKIP, exclude):
         rel = p.relative_to(base).parts
         if any(x in SKIP or x.startswith(".") or (not tests and x in TESTS) for x in rel[:-1]):
             continue
@@ -156,9 +156,10 @@ class Module:
 def export(root: Path, packages: list[str] | None = None, granularity: str = "auto", tests: bool = False) -> dict:
     """granularity: 'package' (one component per package), 'module' (one per
     module) or 'auto' (modules when the project has fewer than three packages)."""
+    from .exclude import load
     base = source_root(root)
     mods: dict[str, Module] = {}
-    for f in files(base, tests):
+    for f in files(base, tests, load(root)):
         name = module_name(base, f)
         if not name or (packages and name.split(".")[0] not in packages):
             continue

@@ -45,6 +45,11 @@ asks a person before a command runs for the first time in a directory.
 - `{root}` or `{chdir}` name the folder to read when the code sits in a
   subfolder, such as `frontend/`.
 - Progress and warnings go to standard error.
+- archplan does not pass the `exclude` list from `.archplan/config.json` to
+  plugin exporters. After the export, it removes the excluded paths from the
+  model: files, refs, types, signatures, literals, enums, components whose
+  `path` is excluded, and the dependencies and evidence that came from them.
+  An exporter that reads the list itself gives exact dependency weights.
 - The command must not change the source files, and must not need the network
   after its install step.
 

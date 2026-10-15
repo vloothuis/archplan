@@ -147,7 +147,7 @@ Everything is stored in `.archplan/` in the repository:
 
 | File | What it holds |
 |---|---|
-| `config.json` | export command, model path, port, auto suggestion mode |
+| `config.json` | export command, model path, paths to exclude, port, auto suggestion mode |
 | `model.archmodel.json` | the as-is model, written by the exporter |
 | `target.archmodel.json` | the target model |
 | `base.archmodel.json` | the as-is model the target was last edited against, for rebasing |
@@ -516,6 +516,30 @@ them to find concepts the code has no type for.
   `require` and Zeitwerk constants, Rust `mod` and `use`) and lists types
   with simple fields. It misses calls and anything a compiler would infer;
   see [its limits](src/archplan/format/archmodel.md).
+
+### Excluding paths
+
+To leave folders or files out of the model, list glob patterns under
+`exclude` in `.archplan/config.json`:
+
+```json
+"exclude": ["prototype/**", "research/", "**/fixtures"]
+```
+
+Patterns are relative to the project root, the folder that holds
+`.archplan` (normally the repository root). `**` matches any number of
+folders; `*` and `?` match within one name. A pattern that matches a folder
+excludes everything in it, so `prototype`, `prototype/` and `prototype/**`
+do the same. Patterns are anchored at the root: use `**/fixtures` for a
+folder name at any depth.
+
+Excluded files give no components, types, dependencies, files, signatures,
+literals or findings. The built-in Python, TypeScript and lite exporters skip
+them while reading. For other exporters, `archplan export` removes them from
+the model afterwards. Hotspots, the architecture profile, glossary candidates,
+schema detection and `archplan init`'s exporter detection skip them too.
+`archplan status` and `archplan exporters` list the active patterns. Changing
+`exclude` does not need a new `archplan trust`: it only narrows what is read.
 
 These exporters are entries in a registry,
 [`src/archplan/contrib/exporters`](src/archplan/contrib/exporters).

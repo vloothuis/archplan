@@ -192,6 +192,99 @@ class DetectTest(unittest.TestCase):
             self.assertEqual(project.detect_export(root), "archplan export-ts -o .archplan/model.archmodel.json")
 
 
+def set_config(root: Path, **kw) -> None:
+    cfg_path = root / ".archplan" / "config.json"
+    cfg = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(json.dumps({**cfg, **kw}))
+
+
+class ExcludeTest(TempProject):
+    def test_matcher(self):
+        from archplan.exclude import Exclude
+        ex = Exclude(self.root, ["prototype/**", "./research/", "**/fixtures", "gen/*.py", "", 3])
+        self.assertEqual(ex.patterns, ["prototype/**", "research", "**/fixtures", "gen/*.py"])
+        for path in ["prototype", "prototype/a/b.py", "research/x.ts", "a/b/fixtures/c.json", "fixtures",
+                     "gen/x.py", "gen/x.py/y"]:
+            self.assertTrue(ex.match(path), path)
+        for path in ["prototypes/a.py", "src/research/x.ts", "gen/sub/x.py", "src/fixtures.py", ""]:
+            self.assertFalse(ex.match(path), path)
+        self.assertTrue(ex(self.root / "prototype" / "x.py"))
+        self.assertFalse(ex(self.root.parent / "prototype" / "x.py"))  # outside the project
+        self.assertFalse(Exclude(self.root))
+
+    def test_python_export_and_trust(self):
+        write(self.root, {"shop/legacy/__init__.py": "from shop.orders import model\nclass Old:\n    pass\n",
+                          "prototype/__init__.py": "", "prototype/x.py": "import shop.billing\n"})
+        p = project.init(self.root)
+        self.assertTrue(p.trusted())
+        set_config(self.root, exclude=["shop/legacy/**", "prototype"])
+        p = project.Project(self.root)
+        self.assertTrue(p.trusted())  # excludes only narrow what is read
+        p.export()
+        m = json.loads(p.model_path.read_text())
+        self.assertEqual(set(m["components"]), {"shop", "shop.orders", "shop.billing"})
+        self.assertFalse([f for f in m["files"] if "legacy" in f or "prototype" in f])
+        self.assertFalse([t for t in m["types"] if "legacy" in t])
+        self.assertEqual(Agent(p).status()["exclude"], ["shop/legacy/**", "prototype"])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            cli.main(["status", "--dir", str(self.root)])
+        self.assertIn("exclude  shop/legacy/**, prototype", out.getvalue())
+
+    def test_lite_export(self):
+        from archplan.liteexport import export as lite
+        write(self.root, {"app/src/a/A.java": "package a;\nimport b.B;\npublic class A { B b; }\n",
+                          "app/src/b/B.java": "package b;\npublic class B {}\n",
+                          "prototype/c/C.java": "package c;\nimport a.A;\npublic class C { A a; }\n"})
+        self.assertIn("prototype/c/C.java", {t["file"] for t in lite(self.root)["types"].values()})
+        set_config(self.root, exclude=["prototype/"])
+        m = lite(self.root)
+        self.assertNotIn("prototype/c/C.java", {t["file"] for t in m["types"].values()})
+        self.assertFalse([d for d in m["dependencies"] if any("prototype" in e for e in d.get("evidence", []))])
+
+    def test_walkers(self):
+        from archplan import exporters, schema
+        from archplan.architecture import source_files
+        from archplan.frameworks import Context
+        write(self.root, {"prototype/package.json": "{}", "prototype/tsconfig.json": "{}", "prototype/src/a.ts": "",
+                          "prototype/schema.prisma": "model A { id Int @id }\n"})
+        project.init(self.root)
+        self.assertIn("prototype/src/a.ts", source_files({}, self.root))
+        self.assertEqual(next(r for r in exporters.survey(self.root)["exporters"]
+                              if r["name"] == "typescript")["match"], "prototype")
+        self.assertIn({"kind": "prisma", "path": "prototype/schema.prisma"}, schema.detect(self.root))
+        set_config(self.root, exclude=["prototype/**"])
+        self.assertFalse([f for f in source_files({}, self.root) if f.startswith("prototype")])
+        self.assertIn("shop/orders/model.py", source_files({}, self.root))
+        self.assertFalse([f for f in source_files({"files": {"prototype/src/a.ts": {}, "shop/x.py": {}}}, self.root)
+                          if f.startswith("prototype")])
+        res = exporters.survey(self.root)
+        self.assertIsNone(next(r for r in res["exporters"] if r["name"] == "typescript")["match"])
+        self.assertIn("excluded (config.json): prototype/**", exporters.text(res))
+        self.assertNotIn({"kind": "prisma", "path": "prototype/schema.prisma"}, schema.detect(self.root))
+        self.assertFalse([x for x in Context([], self.root).paths if x.startswith("prototype")])
+
+    def test_filter_model(self):
+        from archplan.exclude import Exclude, filter_model
+        m = {"components": {"a": {"path": "a"}, "p": {"path": "prototype"}, "x": {"path": "x", "kind": "external"}},
+             "files": {"a/1.go": {"component": "a", "refs": [{"to": "prototype/2.go"}, {"to": "a/3.go"}]},
+                       "prototype/2.go": {"component": "p", "refs": []}},
+             "types": {"a.T": {"component": "a", "file": "a/1.go"},
+                       "p.T": {"component": "p", "file": "prototype/2.go"}},
+             "signatures": [{"component": "a", "file": "a/1.go"}, {"component": "p", "file": "prototype/2.go"}],
+             "dependencies": [{"from": "a", "to": "p", "weight": 1}, {"from": "a", "to": "x", "weight": 3,
+                                                                       "evidence": ["a/1.go:1", "a/gen/y.go:2"]},
+                              {"from": "a", "to": "x", "weight": 1, "evidence": ["a/gen/z.go:4"]}]}
+        n = filter_model(m, Exclude(self.root, ["prototype", "a/gen"]), self.root)
+        self.assertEqual(n, 6)
+        self.assertEqual(set(m["components"]), {"a", "x"})
+        self.assertEqual(m["files"], {"a/1.go": {"component": "a", "refs": [{"to": "a/3.go"}]}})
+        self.assertEqual(list(m["types"]), ["a.T"])
+        self.assertEqual(len(m["signatures"]), 1)
+        self.assertEqual(m["dependencies"], [{"from": "a", "to": "x", "weight": 2, "evidence": ["a/1.go:1"]}])
+
+
 TS_MODULES = Path(os.environ.get("ARCHPLAN_TS_MODULES", "/Users/jeroen/Work/sourcehaven/rela/frontend/node_modules"))
 TS_SAMPLE = {
     "package.json": '{"name": "shop", "dependencies": {"react": "*"}}',
@@ -309,6 +402,20 @@ class TsExportTest(TempProject):
         out = self.export_ts(root)
         self.assertEqual(out.returncode, 1)
         self.assertIn("expected archplan-sequences/1", out.stderr)
+
+
+    def test_exclude(self):
+        root = Path(self.tmp.name) / "web"
+        write(root, TS_SAMPLE)
+        set_config(root, exclude=["src/components/**", "src/models/status.ts"])
+        out = self.export_ts(root)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        m = json.loads(out.stdout)
+        self.assertEqual({c for c, v in m["components"].items() if v["kind"] == "internal"}, {"src", "models"})
+        self.assertNotIn("react", m["components"])
+        self.assertEqual(m["dependencies"], [])
+        self.assertFalse([f for f in m["files"] if "components" in f or "status" in f])
+        self.assertFalse([x for x in m["literals"] + m["signatures"] + m["enums"] if "status" in x["file"]])
 
 
 class TrustTest(TempProject):
@@ -578,6 +685,10 @@ class HotspotTest(unittest.TestCase):
             self.assertEqual(hotspots.hotspots(p, 30, max_files=5, min_together=3), r1)
             self.assertEqual(hotspots.info(sub)["head"], r1["head"][:len(hotspots.info(sub)["head"])])
             self.assertIn("billing <-> orders", hotspots.text(r1))
+            write(sub, {".archplan/config.json": json.dumps({"exclude": ["lib/billing"]})})
+            r2 = hotspots.hotspots(project.Project(sub), 30, max_files=5, min_together=3)
+            self.assertNotIn("billing", r2["components"])
+            self.assertEqual(r2["pairs"], [])
         with tempfile.TemporaryDirectory() as d:
             self.assertIsNone(hotspots.info(Path(d)))
 

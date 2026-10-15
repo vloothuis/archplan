@@ -102,14 +102,19 @@ def source_files(model: dict, root: Path | None = None) -> list:
     relative to the folder the model's paths are relative to."""
     fs = set((model.get("files") or {}).keys())
     fs |= {t["file"] for t in (model.get("types") or {}).values() if t.get("file")}
-    if fs or root is None:
+    if root is None:
         return sorted(fs)
+    from .exclude import load
+    ex = load(root)
     pre = prefix_of(root, model_base(root, model))
+    if fs:
+        return sorted(f for f in fs if not ex.model_path(f, pre))
     out = []
     for d, dirs, names in os.walk(root):
         dirs[:] = [x for x in dirs if x not in SKIP_DIRS and not x.startswith(".")]
+        ex.prune(d, dirs)
         for n in names:
-            if os.path.splitext(n)[1] in SOURCE_EXT:
+            if os.path.splitext(n)[1] in SOURCE_EXT and not ex(os.path.join(d, n)):
                 out.append(pre + os.path.relpath(os.path.join(d, n), root).replace(os.sep, "/"))
     return sorted(out)
 

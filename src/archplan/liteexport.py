@@ -154,9 +154,9 @@ class Src:
         self.visible: dict = {}  # type name -> file, for names used without qualification
 
 
-def walk(root: Path, tests: bool) -> list:
+def walk(root: Path, tests: bool, exclude=None) -> list:
     out = []
-    for d, dirs, names in walk_dirs(root, SKIP):
+    for d, dirs, names in walk_dirs(root, SKIP, exclude=exclude):
         dirs[:] = [x for x in dirs if tests or x not in TEST_DIRS]
         for n in names:
             lang = LANGS.get(os.path.splitext(n)[1])
@@ -554,8 +554,10 @@ def export(root: Path, tests: bool = False, languages: list | None = None, rel_t
     if base != root and base not in root.parents:
         raise ValueError(f"{root} is not inside {base}")
     prefix = "" if base == root else root.relative_to(base).as_posix() + "/"
+    from .exclude import load
+    exclude = load(root)
     srcs = []
-    for p, lang in walk(root, tests):
+    for p, lang in walk(root, tests, exclude):
         if languages and lang not in languages:
             continue
         try:
