@@ -99,28 +99,56 @@ function loadTs(dir) {
 // The same matching as archplan's exclude.py: patterns are relative to a base
 // folder, ** spans folders, and a match on a folder excludes all under it.
 
+// A glob segment as tokens: "*", "?", a literal character, or {neg, body}.
+// Matching walks the tokens with one backtrack point for the last *, without
+// regular expressions, so a hostile pattern stays cheap.
 function segment(pat) {
-  let re = "";
+  const toks = [];
   for (let i = 0; i < pat.length; i++) {
     const c = pat[i];
-    if (c === "*") re += "[^/]*";
-    else if (c === "?") re += "[^/]";
-    else if (c === "[") {
+    if (c === "[") {
       let j = i + 1;
       if (pat[j] === "!") j++;
       if (pat[j] === "]") j++;
       while (j < pat.length && pat[j] !== "]") j++;
-      if (j >= pat.length) { re += "\\["; continue; }
-      let body = pat.slice(i + 1, j).replace(/\\/g, "\\\\");
-      const neg = body[0] === "!";
-      if (neg) body = body.slice(1);
-      if (body[0] === "]" || body[0] === "^") body = "\\" + body;
-      if (neg) body = "^" + body;
-      re += "[" + body + "]";
-      i = j;
-    } else re += c.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+      if (j < pat.length) {
+        const body = pat.slice(i + 1, j);
+        toks.push(body[0] === "!" ? { neg: true, body: body.slice(1) } : { neg: false, body });
+        i = j;
+        continue;
+      }
+    }
+    if (!(c === "*" && toks[toks.length - 1] === "*")) toks.push(c);
   }
-  return new RegExp("^" + re + "$", "s");
+  return { test: (name) => wildcard(name, toks) };
+}
+
+function inClass(ch, body) {
+  for (let i = 0; i < body.length;) {
+    if (i + 2 < body.length && body[i + 1] === "-") {
+      if (body[i] <= ch && ch <= body[i + 2]) return true;
+      i += 3;
+    } else {
+      if (ch === body[i]) return true;
+      i++;
+    }
+  }
+  return false;
+}
+
+function wildcard(name, toks) {
+  let i = 0, j = 0, starJ = -1, starI = 0;
+  while (i < name.length) {
+    const t = j < toks.length ? toks[j] : undefined;
+    if (t === "*") { starJ = j; starI = i; j++; continue; }
+    if (t !== undefined && (t === "?" || (typeof t === "object" && inClass(name[i], t.body) !== t.neg) || t === name[i])) {
+      i++; j++; continue;
+    }
+    if (starJ < 0) return false;
+    i = ++starI; j = starJ + 1;
+  }
+  while (j < toks.length && toks[j] === "*") j++;
+  return j === toks.length;
 }
 
 function compileGlob(pattern) {

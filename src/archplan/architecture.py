@@ -25,7 +25,6 @@ with a slash matches the path inside the unit."""
 
 from __future__ import annotations
 
-import fnmatch
 import os
 import re
 from collections import Counter, defaultdict
@@ -62,6 +61,72 @@ class ArchitectureError(ProjectError):
 
 # ---------- paths and globs ----------
 
+def _tokens(pat: str) -> list:
+    """A glob as tokens: "*", "?", a literal character, or (negated, class text)."""
+    out, i = [], 0
+    while i < len(pat):
+        c = pat[i]
+        if c == "[":
+            j = i + 1
+            if j < len(pat) and pat[j] == "!":
+                j += 1
+            if j < len(pat) and pat[j] == "]":
+                j += 1
+            while j < len(pat) and pat[j] != "]":
+                j += 1
+            if j < len(pat):
+                body = pat[i + 1:j]
+                neg = body.startswith("!")
+                out.append((neg, body[1:] if neg else body))
+                i = j + 1
+                continue
+        if not (c == "*" and out and out[-1] == "*"):  # ** within a name is the same as *
+            out.append(c)
+        i += 1
+    return out
+
+
+def _in_class(ch: str, body: str) -> bool:
+    i = 0
+    while i < len(body):
+        if i + 2 < len(body) and body[i + 1] == "-":
+            if body[i] <= ch <= body[i + 2]:
+                return True
+            i += 3
+        else:
+            if ch == body[i]:
+                return True
+            i += 1
+    return False
+
+
+def wildcard(name: str, pattern: str) -> bool:
+    """fnmatchcase for one name, without regular expressions: the two-pointer
+    match with one backtrack point for the last *, so a hostile pattern takes
+    at most len(name) * len(pattern) steps."""
+    toks = _tokens(pattern)
+    i = j = 0
+    star_j, star_i = -1, 0
+    while i < len(name):
+        t = toks[j] if j < len(toks) else None
+        if t == "*":
+            star_j, star_i = j, i
+            j += 1
+            continue
+        if t is not None and (t == "?" or (isinstance(t, tuple) and _in_class(name[i], t[1]) != t[0])
+                              or t == name[i]):
+            i += 1
+            j += 1
+            continue
+        if star_j < 0:
+            return False
+        star_i += 1
+        i, j = star_i, star_j + 1
+    while j < len(toks) and toks[j] == "*":
+        j += 1
+    return j == len(toks)
+
+
 def glob_match(path: str, pattern: str) -> bool:
     """Match path against a glob, one folder at a time; ** spans folders."""
     parts, pats = path.split("/"), []
@@ -80,7 +145,7 @@ def glob_match(path: str, pattern: str) -> bool:
             if pats[j] == "**":
                 ok[j] = ok[j + 1] or nxt[j]
             else:
-                ok[j] = nxt[j + 1] and fnmatch.fnmatchcase(parts[i], pats[j])
+                ok[j] = nxt[j + 1] and wildcard(parts[i], pats[j])
         nxt = ok
     return nxt[0]
 
@@ -93,7 +158,7 @@ def literal(pattern: str) -> int:
 def role_match(rel: str, pattern: str) -> bool:
     if "/" in pattern:
         return glob_match(rel, pattern)
-    return fnmatch.fnmatchcase(rel.rsplit("/", 1)[-1], pattern)
+    return wildcard(rel.rsplit("/", 1)[-1], pattern)
 
 
 def source_files(model: dict, root: Path | None = None) -> list:

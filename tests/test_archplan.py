@@ -213,6 +213,38 @@ class ExcludeTest(TempProject):
         self.assertFalse(ex(self.root.parent / "prototype" / "x.py"))  # outside the project
         self.assertFalse(Exclude(self.root))
 
+    def test_hostile_pattern_is_fast(self):
+        from archplan.architecture import wildcard
+        from archplan.exclude import Exclude
+        t = time.monotonic()
+        self.assertFalse(wildcard("a" * 5000, "*a*a*a*a*a*a*a*a*a*a*b"))
+        self.assertFalse(Exclude(self.root, ["**/*a*a*a*a*a*a*a*a*a*a*b"]).match("x/" + "a" * 250))
+        self.assertLess(time.monotonic() - t, 1)
+        self.assertTrue(wildcard("model.py", "[lm]o*.p?"))
+        self.assertFalse(wildcard("model.py", "[!m]*"))
+
+    @unittest.skipUnless(shutil.which("node"), "needs node")
+    def test_node_matcher_agrees(self):
+        import random
+        from archplan.exclude import Exclude
+        src = (ROOT / "src/archplan/ts/archplan_export.mjs").read_text()
+        code = src[src.index("// A glob segment as tokens"):src.index("function readJson(")]
+        rnd = random.Random(7)
+        pats = ["".join(rnd.choice("ab*?[]!/") for _ in range(rnd.randint(1, 8))) for _ in range(300)]
+        pats += ["**/fixtures", "prototype/", "a/**/b", "*a*a*a*a*a*a*a*a*a*a*b"]
+        paths = ["/".join("".join(rnd.choice("ab!]") for _ in range(rnd.randint(1, 4)))
+                          for _ in range(rnd.randint(1, 3))) for _ in range(60)] + ["a/" * 60 + "a" * 250]
+        script = code + textwrap.dedent("""
+            const path = await import("node:path");
+            const [pats, paths, base] = JSON.parse(process.argv[1]);
+            console.log(JSON.stringify(pats.map((p) => paths.map((f) => makeExclude([p], base)(path.join(base, f))))));
+            """)
+        r = subprocess.run(["node", "--input-type=module", "-e", script, json.dumps([pats, paths, str(self.root)])],
+                           capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        want = [[Exclude(self.root, [p]).match(f) for f in paths] for p in pats]
+        self.assertEqual(json.loads(r.stdout), want)
+
     def test_python_export_and_trust(self):
         write(self.root, {"shop/legacy/__init__.py": "from shop.orders import model\nclass Old:\n    pass\n",
                           "prototype/__init__.py": "", "prototype/x.py": "import shop.billing\n"})
