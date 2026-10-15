@@ -14,6 +14,7 @@ Tests and Django migrations are left out.
 from __future__ import annotations
 
 import ast
+import json
 import subprocess
 import sys
 import time
@@ -91,6 +92,27 @@ def git_ref(root: Path) -> tuple[str, bool]:
         return ref or "?", dirty
     except (OSError, subprocess.SubprocessError):
         return "?", False
+
+
+def read_sequences(root: Path) -> dict:
+    """Read test-recorded call sequences from .archplan/sequences.json."""
+    path = root / ".archplan" / "sequences.json"
+    try:
+        data = json.loads(read_file(path))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as e:
+        raise ValueError(f"cannot read {path}: {e}") from e
+    if (not isinstance(data, dict) or data.get("format") != "archplan-sequences/1"
+            or not isinstance(data.get("sequences"), dict)):
+        raise ValueError(f"{path}: expected archplan-sequences/1 with a sequences object")
+    sequences = data["sequences"]
+    for sid, seq in sequences.items():
+        if (not isinstance(sid, str) or not isinstance(seq, dict)
+                or not isinstance(seq.get("participants"), list)
+                or not isinstance(seq.get("messages"), list)):
+            raise ValueError(f"{path}: sequence {sid!r} needs participants and messages lists")
+    return sequences
 
 
 def import_linter_rules(root: Path) -> list:
@@ -358,13 +380,17 @@ def export(root: Path, packages: list[str] | None = None, granularity: str = "au
         r["from"], r["to"] = comp_for(r["from"]), comp_for(r["to"])
     signatures, literals, enums = values_of(mods, comp_of_mod)
     ref, dirty = git_ref(root)
+    sequences = read_sequences(root)
+    capabilities = ["components", "types", "fields", "deps", "files", "signatures", "literals"]
+    if sequences:
+        capabilities.append("calls")
     return {
         "format": "archmodel/1",
         "source": {"repo": root.name, "ref": ref, "dirty": dirty, "languages": ["python"],
                    "generator": "archplan export-python",
                    "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                    "commands": {"test": "python -m pytest"},
-                   "capabilities": ["components", "types", "fields", "deps", "files", "signatures", "literals"]},
+                   "capabilities": capabilities},
         "layers": [],
         "components": comps,
         "dependencies": deps,
@@ -372,7 +398,7 @@ def export(root: Path, packages: list[str] | None = None, granularity: str = "au
         "policy": {"default": "allow", "rules": rules,
                    **({"enforcer": {"tool": "import-linter", "command": "lint-imports"}} if rules else {})},
         "types": types,
-        "sequences": {},
+        "sequences": sequences,
         "signatures": signatures,
         "literals": literals,
         "enums": enums,

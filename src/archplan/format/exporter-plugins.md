@@ -79,6 +79,14 @@ Optional, in order of value to archplan:
 
 archplan computes the vocabulary itself when a model has none.
 
+The built-in Python and TypeScript exporters also read test-recorded sequences
+from `.archplan/sequences.json` in the project root. The file has format
+`archplan-sequences/1` and a `sequences` object using the model's sequence
+shape. Each sequence needs `participants` and `messages` lists. Keep argument
+values out of labels. A missing file means no sequences; a malformed file stops
+the export with an error. When the file has sequences, the model lists the
+`calls` capability.
+
 ## Capabilities
 
 `source.capabilities` lists what the model contains:

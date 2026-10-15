@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from archplan import cli, hotspots, model, project  # noqa: E402
 from archplan.mcp import Agent, record, snapshot_text  # noqa: E402
 from archplan.suggestions import Conflict, Suggestions  # noqa: E402
-from archplan.pyexport import export  # noqa: E402
+from archplan.pyexport import export, read_sequences  # noqa: E402
 from archplan.store import Store, mentions, needs, who_next  # noqa: E402
 
 
@@ -63,6 +63,14 @@ SAMPLE = {
     "tests/__init__.py": "",
     "tests/test_x.py": "import shop\n",
 }
+
+
+SEQUENCE = {"participants": ["Caller", "shop"],
+            "messages": [{"id": "Caller>shop:pay#1", "from": "Caller", "to": "shop", "label": "pay()", "depth": 0}]}
+
+
+def write_sequences(root: Path, data) -> None:
+    write(root, {".archplan/sequences.json": data if isinstance(data, str) else json.dumps(data)})
 
 
 class TempProject(unittest.TestCase):
@@ -122,6 +130,26 @@ class PyExportTest(TempProject):
     def test_tests_are_skipped_by_default(self):
         self.assertNotIn("tests", export(self.root)["components"])
         self.assertIn("tests.test_x", export(self.root, tests=True, granularity="module")["components"])
+
+    def test_sequences_file(self):
+        m = export(self.root)
+        self.assertEqual(m["sequences"], {})
+        self.assertNotIn("calls", m["source"]["capabilities"])
+        write_sequences(self.root, {"format": "archplan-sequences/1", "sequences": {"pay": SEQUENCE}})
+        m = export(self.root)
+        self.assertEqual(m["sequences"], {"pay": SEQUENCE})
+        self.assertIn("calls", m["source"]["capabilities"])
+
+    def test_malformed_sequences_file(self):
+        for bad in ["{", {"format": "other/1", "sequences": {}}, {"format": "archplan-sequences/1"},
+                    {"format": "archplan-sequences/1", "sequences": {"pay": {"participants": []}}}]:
+            write_sequences(self.root, bad)
+            with self.assertRaisesRegex(ValueError, "sequences.json"):
+                read_sequences(self.root)
+        err = io.StringIO()
+        with redirect_stderr(err), self.assertRaises(SystemExit):
+            cli.main(["export-python", str(self.root)])
+        self.assertIn("needs participants and messages lists", err.getvalue())
 
 
 class ProjectTest(TempProject):
@@ -256,6 +284,31 @@ class TsExportTest(TempProject):
         self.assertIn({"name": "Status", "component": "models", "file": "src/models/status.ts", "line": 1,
                        "values": ["open", "closed"]}, m["enums"])
         self.assertIn("literals", m["source"]["capabilities"])
+
+    def export_ts(self, root: Path, *args):
+        return subprocess.run([sys.executable, "-m", "archplan", "export-ts", *args], cwd=root, capture_output=True,
+                              text=True, env={**os.environ, "NODE_PATH": str(TS_MODULES), "PYTHONPATH": str(ROOT / "src")})
+
+    def test_sequences_file(self):
+        root = Path(self.tmp.name) / "web"
+        write(root, TS_SAMPLE)
+        out = self.export_ts(root)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        m = json.loads(out.stdout)
+        self.assertEqual(m["sequences"], {})
+        self.assertNotIn("calls", m["source"]["capabilities"])
+        write_sequences(root, {"format": "archplan-sequences/1", "sequences": {"pay": SEQUENCE}})
+        for args in [(), ("-o", "out/m.json")]:
+            out = self.export_ts(root, *args)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            m = json.loads((root / args[1]).read_text() if args else out.stdout)
+            self.assertEqual(m["sequences"], {"pay": SEQUENCE})
+            self.assertIn("calls", m["source"]["capabilities"])
+            self.assertIn("models", m["components"])
+        write_sequences(root, {"format": "archplan-sequences/1", "sequences": []})
+        out = self.export_ts(root)
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("expected archplan-sequences/1", out.stderr)
 
 
 class TrustTest(TempProject):
