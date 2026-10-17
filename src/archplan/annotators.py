@@ -349,6 +349,8 @@ def check_change(c) -> str | None:
     r = c.get("reason")
     if r is not None and (not isinstance(r, str) or len(r) > REASON_MAX or BREAKS.search(r)):
         return f"reason must be one line of text, at most {REASON_MAX} characters"
+    if r is not None and "?>" in r:
+        return "reason must not contain ?>, which ends a PHP comment"
     return None
 
 

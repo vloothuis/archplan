@@ -145,6 +145,9 @@ class AnnotatorTest(unittest.TestCase):
         self.assertEqual([r["status"] for r in res["results"]],
                          ["applied", "applied", "applied", "applied", "unsupported", "unsupported"])
         self.assertIn("one line", res["results"][5]["note"])
+        self.assertIn("PHP", annotators.check_change({"op": "set", "target": {"kind": "entrypoint", "id": "x"},
+                                                     "key": "auth", "value": "none", "reason": "a ?> b"}))
+        self.assertNotIn("?>", markers.token_of("entrypoint.auth", "none", "a ?> b"))
         self.assertFalse(res["applied"])
         self.assertEqual((self.root / "shop/ops/views.py").read_text(), before)  # nothing changed yet
         self.assertIn("+# archplan: guard\n def orders", res["patch"])
