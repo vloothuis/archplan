@@ -509,6 +509,18 @@ a scratch git worktree, read them back to check them, and return a patch;
 `--apply` applies it. The contract is in
 [`annotator-plugins.md`](src/archplan/format/annotator-plugins.md).
 
+The security detectors read the declarations:
+
+| Kind | Finds |
+|---|---|
+| `security.unguarded_entry` | a traced entry point whose calls pass no guard: strong when it is declared `auth=required`, weak when it has no auth declaration. Needs sequences. |
+| `security.open_entry` | an entry point declared `auth=none` without a reason |
+| `security.zone_dependency` | a dependency from a more trusted zone to a less trusted one, or one that skips a declared zone |
+
+Zones are ordered by the `order` setting of `security.zone_dependency`,
+from the least trusted: `internet`, `dmz`, `internal`, `restricted` by
+default.
+
 ## Exporters
 
 An exporter writes an [archmodel/1](src/archplan/format/archmodel.md) file.

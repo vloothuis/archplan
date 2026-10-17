@@ -9,7 +9,7 @@ import re
 from collections import Counter
 
 GROUPS = ["profile", "structure", "layers", "vocabulary", "types", "history", "concepts", "boundaries", "data",
-          "evolution"]
+          "evolution", "security"]
 STRENGTHS = ["strong", "medium", "weak"]
 EXAMPLES = 20            # breaks, files or fields kept as evidence
 COMMON_FIELDS = {"id", "uuid", "pk", "inserted_at", "updated_at", "created_at", "modified_at", "deleted_at",

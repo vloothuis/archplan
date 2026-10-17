@@ -5,7 +5,7 @@ A built-in detector is a module in this package with
   ID      the finding kind it reports, "group.name"
   NAME    a short label
   GROUP   profile, structure, layers, vocabulary, types, history, concepts,
-          boundaries, data or evolution
+          boundaries, data, evolution or security
   NEEDS   the model capabilities or sections it reads (see REASONS)
   PARAMS  its settings and their defaults
   run(ctx, params) -> [finding dict]
@@ -38,7 +38,8 @@ BUILTIN = ["profile_rule", "profile_pair", "structure_cycle", "structure_tangle"
            "concepts_units_in_names", "concepts_string_enum", "concepts_bool_params",
            "boundaries_stability", "boundaries_unused_public", "boundaries_balance", "evolution_ownership",
            "data_shared_table", "data_cross_fk", "data_polymorphic", "data_json_bag", "data_flag_columns",
-           "data_repeated_columns", "data_enum_mismatch", "data_orphan_table"]
+           "data_repeated_columns", "data_enum_mismatch", "data_orphan_table",
+           "security_unguarded_entry", "security_open_entry", "security_zone_dependency"]
 
 REASONS = {
     "components": "the model has no components",
@@ -54,6 +55,8 @@ REASONS = {
     "signatures": "the model has no signatures section; the exporter does not provide it",
     "literals": "the model has no literals section; the exporter does not provide it",
     "schema": "the model has no schema section",
+    "declarations": "the model has no declarations; declare zones, guards and auth in the code (archplan annotators)",
+    "sequences": "the model has no sequences; the exporter or a trace import provides them",
 }
 KNOWN_NEEDS = set(REASONS) | {"profile"}
 READ_MAX = 1 << 20  # bytes ctx.read returns at most
@@ -108,6 +111,10 @@ class CapabilityChecker:
             ok = bool(ctx.literals)
         elif need == "schema":
             ok = bool(ctx.schema)
+        elif need == "declarations":
+            ok = bool(model.get("declarations"))
+        elif need == "sequences":
+            ok = bool(model.get("sequences"))
         else:
             return f"unknown need {need!r}"
         return None if ok else REASONS[need]

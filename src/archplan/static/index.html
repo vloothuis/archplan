@@ -3390,8 +3390,8 @@ function focusTargets(f, has) {
   return out;
 }
 // ---------- end finding focus ----------
-const FGROUPS = [['profile', 'Profile'], ['structure', 'Structure'], ['layers', 'Layers'], ['vocabulary', 'Vocabulary'], ['types', 'Types'], ['history', 'History'], ['concepts', 'Concepts'], ['boundaries', 'Boundaries'], ['data', 'Data'], ['evolution', 'Evolution']];
-const FCOL = {profile: ['var(--rem)', 'var(--rem-ink)'], structure: ['var(--chg)', 'var(--warn-ink)'], layers: ['var(--acc)', 'var(--sel-ink)'], vocabulary: ['var(--agent)', 'var(--agent-ink)'], types: ['var(--mute)', 'var(--ink)'], history: ['var(--mute)', 'var(--ink)'], concepts: ['var(--agent)', 'var(--agent-ink)'], boundaries: ['var(--acc)', 'var(--sel-ink)'], data: ['var(--mute)', 'var(--ink)'], evolution: ['var(--mute)', 'var(--ink)']};
+const FGROUPS = [['profile', 'Profile'], ['structure', 'Structure'], ['layers', 'Layers'], ['vocabulary', 'Vocabulary'], ['types', 'Types'], ['history', 'History'], ['concepts', 'Concepts'], ['boundaries', 'Boundaries'], ['data', 'Data'], ['evolution', 'Evolution'], ['security', 'Security']];
+const FCOL = {profile: ['var(--rem)', 'var(--rem-ink)'], structure: ['var(--chg)', 'var(--warn-ink)'], layers: ['var(--acc)', 'var(--sel-ink)'], vocabulary: ['var(--agent)', 'var(--agent-ink)'], types: ['var(--mute)', 'var(--ink)'], history: ['var(--mute)', 'var(--ink)'], concepts: ['var(--agent)', 'var(--agent-ink)'], boundaries: ['var(--acc)', 'var(--sel-ink)'], data: ['var(--mute)', 'var(--ink)'], evolution: ['var(--mute)', 'var(--ink)'], security: ['var(--rem)', 'var(--rem-ink)']};
 const FKIND = {'profile.rule': 'call rule', 'profile.pair': 'missing pair', 'structure.cycle': 'cycle', 'structure.tangle': 'tangle', 'layers.upward': 'upward dependency', 'vocabulary.leak': 'leak', 'vocabulary.synonyms': 'synonyms', 'types.fields': 'field clusters', 'types.synonyms': 'synonyms', 'history.coupling': 'changes together', 'history.modularity_violation': 'modularity violation', 'boundaries.balance': 'unbalanced coupling'};
 const FLDBG = ['#fef3c7', '#e0e7ff', '#dcfce7', '#fce7f3', '#e0f2fe', '#f1f5f9'];
 const findings = () => FIND?.findings || [];
