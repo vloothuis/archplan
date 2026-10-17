@@ -35,7 +35,7 @@ from .core.project import trust_state as project_trust_state
 from .core.safeio import read_file
 from .detectors.external import NotRun, run_json, safe_path, text_of
 
-KEYS = ("component.zone", "function.guard", "entrypoint.auth")
+KEYS = ("component.zone", "function.guard", "function.sink", "entrypoint.auth")
 KINDS = ("component", "function", "entrypoint")
 BUILTIN = "builtin"
 ID = re.compile(r"[a-z][a-z0-9_-]{0,40}")
@@ -46,6 +46,8 @@ MAX_CHANGES = 500
 MAX_TIMEOUT = 600
 REASON_MAX, NAME_MAX, ID_MAX = 300, 200, 400
 STATUSES = ("applied", "unsupported", "conflict")
+GUARDS = ("authn", "authz")  # a guard without a value is both
+SINKS = ("write", "read")
 BREAKS = re.compile(r"[\x00-\x1f\x7f\x85  ]")  # a reason goes into a source line
 
 
@@ -53,7 +55,9 @@ def valid_value(key: str, v) -> bool:
     if key == "component.zone":
         return isinstance(v, str) and bool(ZONE.fullmatch(v))
     if key == "function.guard":
-        return v is True
+        return v is True or v in GUARDS
+    if key == "function.sink":
+        return v in SINKS
     if key == "entrypoint.auth":
         return v in ("required", "none")
     return False

@@ -20,7 +20,8 @@ A key names a kind of target and a property of it.
 | Key | Target | Value | Meaning |
 |---|---|---|---|
 | `component.zone` | a component id | a zone id: lower case letters, digits, `_` and `-` | the trust zone the component is in, such as `internet` or `internal` |
-| `function.guard` | a function or type | `true` | the function or type authenticates, authorizes or validates input |
+| `function.guard` | a function or type | `true`, `authn` or `authz` | the function or type checks who the caller is (`authn`), what the caller may do (`authz`), or both, or validates input (`true`) |
+| `function.sink` | a function or type | `write` or `read` | the function changes (`write`) or returns (`read`) data that only some callers may change or see |
 | `entrypoint.auth` | a function that handles outside input | `required` or `none` | whether the entry point needs an authenticated caller |
 
 A declaration can have a `reason`: one line on why, at most 300 characters,
@@ -250,8 +251,9 @@ def require_user(conn, _opts), do: ...
   and Elixir; `//` in Go, JavaScript, TypeScript, Java, Kotlin, Scala, C#,
   Rust, Swift, PHP, Dart, C and C++. In Go the writer uses the directive form
   `//archplan:`, which `gofmt` keeps and `go doc` does not show.
-- `guard` declares `function.guard`. `auth=required` or `auth=none`
-  declares `entrypoint.auth`. `reason="…"` gives the reason for the keys on
+- `guard`, `guard=authn` or `guard=authz` declares `function.guard`.
+  `sink=write` or `sink=read` declares `function.sink`. `auth=required` or
+  `auth=none` declares `entrypoint.auth`. `reason="…"` gives the reason for the keys on
   the same line.
 - The writer puts one key on each marker line, with the indentation of the
   declaration, above its decorators. In Go it goes directly above `func`,
@@ -279,6 +281,6 @@ JSON result, at most 4 MB.
 - The model holds the declarations, but the editor does not show them or
   send changes to them yet. The agent's `annotate` tool and
   `archplan annotators write` do.
-- The security detectors use the declarations (see the README). A key for
-  sensitive data, and a detector for paths to it that pass no guard, are
-  planned.
+- The security detectors use the declarations (see the README).
+  `function.sink` marks the functions that reach sensitive data; a key for
+  sensitive types or fields is not there yet.

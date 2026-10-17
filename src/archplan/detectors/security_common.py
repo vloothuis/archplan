@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 
+from ..core.hotspots import Mapper
 from .common import namer
 
 CALL = re.compile(r"^(?:\([^)]*\)\.)?([^(#]*)")
@@ -21,6 +22,13 @@ def zones(ctx) -> dict:
     return {d["target"]["id"]: d.get("value") for d in decls(ctx, "component", "zone") if d["target"].get("id")}
 
 
+def guards(ctx, level: str | None = None) -> list:
+    """The declared guards as targets; with level ("authn" or "authz"), those
+    of that level. A guard declared without a level counts as both."""
+    return [target(ctx, d) for d in decls(ctx, "function", "guard")
+            if d.get("value") is True or d.get("value") in ("authn", "authz") and level in (None, d["value"])]
+
+
 def short(fid: str) -> str:
     """The bare name of a function id: `a/b.go:Name`, `pkg.(*T).Name`, `M.f/2` give Name or f."""
     s = fid.rsplit(":", 1)[-1] if ":" in fid and "/" in fid.split(":")[0] else fid
@@ -28,16 +36,18 @@ def short(fid: str) -> str:
     return re.split(r"[.#]", s)[-1]
 
 
+_mappers = {}
+
+
 def component_of(ctx, file: str | None) -> str | None:
-    """The component whose path holds file, the longest match."""
+    """The component that owns file: its match patterns first, then the longest path."""
     if not file:
         return None
-    best = None
-    for cid, c in ctx.components.items():
-        path = ((c or {}).get("path") or "").strip("/")
-        if path and (file == path or file.startswith(path + "/")) and (not best or len(path) > len(best[1])):
-            best = (cid, path)
-    return best[0] if best else None
+    key = id(ctx.components)
+    if key not in _mappers or _mappers[key][0] is not ctx.components:
+        _mappers.clear()
+        _mappers[key] = (ctx.components, Mapper(ctx.components))
+    return _mappers[key][1](file.strip("/"))
 
 
 def target(ctx, d: dict) -> dict:

@@ -7,7 +7,8 @@ attributes and other comments allowed in between:
   @require_GET
   def health(request): ...
 
-`guard` declares function.guard, `auth=required|none` entrypoint.auth. A
+`guard` (or `guard=authn`, `guard=authz`) declares function.guard, `sink=write`
+or `sink=read` function.sink, `auth=required|none` entrypoint.auth. A
 component's zone is the `zone:` line in the front matter of the GLOSSARY.md
 in its folder. See format/annotator-plugins.md.
 
@@ -131,8 +132,10 @@ def parse_marker(body: str) -> tuple:
         k, v = m.group(1), m.group(2)
         if v is not None and v.startswith('"'):
             v = _scalar(v)
-        if k == "guard" and v is None:
-            keys["function.guard"] = True
+        if k == "guard" and v in (None, "authn", "authz"):
+            keys["function.guard"] = v or True
+        elif k == "sink" and v in ("write", "read"):
+            keys["function.sink"] = v
         elif k == "auth" and v in AUTH:
             keys["entrypoint.auth"] = v
         elif k == "reason" and v:
@@ -294,7 +297,7 @@ def read(root: Path, model: dict, keys, exclude=None) -> tuple:
             if z:
                 decls.append({"target": {"kind": "component", "id": cid}, "key": "zone", "value": z[0],
                               "file": rel, "line": z[1]})
-    if keys & {"function.guard", "entrypoint.auth"}:
+    if keys & {"function.guard", "function.sink", "entrypoint.auth"}:
         for f in list_files(root, exclude):
             prefix = comment_prefix(f)
             try:
@@ -331,7 +334,8 @@ def marker_line(indent: str, prefix: str, path: str, body: str) -> str:
 
 
 def token_of(key: str, value, reason) -> str:
-    token = "guard" if key == "function.guard" else f"auth={value}"
+    token = {"function.guard": "guard" if value is True else f"guard={value}",
+             "function.sink": f"sink={value}"}.get(key, f"auth={value}")
     if reason:
         token += ' reason="' + UNSAFE.sub(" ", str(reason)) + '"'
     return token
@@ -349,7 +353,7 @@ def write_one(base: Path, model: dict, ch: dict) -> dict:
     try:
         if full == "component.zone":
             return write_zone(base, model, ch)
-        if full in ("function.guard", "entrypoint.auth"):
+        if full in ("function.guard", "function.sink", "entrypoint.auth"):
             return write_marker(base, ch, full)
     except (OSError, UnicodeDecodeError) as e:
         return {"status": "conflict", "note": str(e)[:200]}
@@ -421,7 +425,7 @@ def write_marker(base: Path, ch: dict, full: str) -> dict:
     j = find_declaration(lines, at)
     if j is None:
         return {"status": "conflict", "note": f"{at.get('name') or 'the declaration'} is not in {rel} anymore"}
-    top, word = preamble(lines, j, prefix), "guard" if full == "function.guard" else "auth"
+    top, word = preamble(lines, j, prefix), {"function.guard": "guard", "function.sink": "sink"}.get(full, "auth")
     go = rel.endswith(".go")
     existing = []
     for k in range(top, j):

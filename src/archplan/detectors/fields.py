@@ -64,7 +64,7 @@ def is_bag(f: dict) -> bool:
     t = type_text(f)
     if not t:
         return False
-    if re.search(r"\b(any|unknown|jsonb?|hstore)\b", t) or "interface{}" in t or "interface {}" in t:
+    if re.search(r"\b(any|unknown|jsonb?|hstore)\b(?!\.)", t) or "interface{}" in t or "interface {}" in t:
         return True
     inner = re.sub(r"^(\{:array,\s*|\[|list\[|array<|set\[)", "", t)
     inner = re.sub(r"(\}|\]|>)$", "", inner).strip()
@@ -74,4 +74,4 @@ def is_bag(f: dict) -> bool:
 
 def plain_names(t: dict) -> set:
     """A type's field names without the ones every record has (id, timestamps)."""
-    return {f["name"] for f in t.get("fields") or [] if f.get("name") and f["name"] not in COMMON_FIELDS}
+    return {f["name"] for f in t.get("fields") or [] if f.get("name") and key(f["name"]) not in COMMON_FIELDS}

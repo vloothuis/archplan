@@ -489,7 +489,9 @@ mark as noise go into `.archplan/vocabulary.json`.
 
 Some facts are decisions, not something an exporter can find: the trust zone
 a component is in, which functions are guards (they authenticate, authorize
-or validate), and which entry points need an authenticated caller. These
+or validate), which functions are sinks (they write or read data that needs
+a permission check first), and which entry points need an authenticated
+caller. These
 declarations live in the repository, next to the code. After every export,
 archplan reads them into the model's `declarations` section.
 
@@ -514,6 +516,8 @@ The security detectors read the declarations:
 | Kind | Finds |
 |---|---|
 | `security.unguarded_entry` | a traced entry point whose calls pass no guard: strong when it is declared `auth=required`, weak when it has no auth declaration. Needs sequences. |
+| `security.unguarded_sink` | a trace that calls a write sink before any authorization guard (`guard` or `guard=authz`), strong; or a read sink with no such guard anywhere in the trace, medium. Calls inside a guard are its own. A `guard=authn` guard does not count. Needs sequences. |
+| `security.untraced` | a declared guard or entry point that no trace calls, in a component the traces do visit: a guard wired nowhere, or a route nothing reaches. Weak. Needs sequences. |
 | `security.open_entry` | an entry point declared `auth=none` without a reason |
 | `security.zone_dependency` | a dependency from a more trusted zone to a less trusted one, or one that skips a declared zone |
 

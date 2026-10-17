@@ -22,7 +22,9 @@ def owners(ctx) -> dict:
     from the type names."""
     by_type = defaultdict(set)
     for t in ctx.types.values():
-        if t.get("kind") in CONCEPT_KINDS and t.get("component") in ctx.internal and t.get("name"):
+        # Only a type with an id of its own can be what a foo_id points to.
+        if t.get("kind") in CONCEPT_KINDS and t.get("component") in ctx.internal and t.get("name") \
+                and any(key(f.get("name") or "") in ("id", "uuid") for f in t.get("fields") or []):
             by_type[key(t["name"])].add(t["component"])
     by_vocab = {}
     for c in (ctx.vocabulary.get("concepts") or {}).values():

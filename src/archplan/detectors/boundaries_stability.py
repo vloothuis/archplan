@@ -3,7 +3,8 @@
   Ca  afferent coupling: components that depend on it
   Ce  efferent coupling: components it depends on
   I   instability, Ce / (Ca + Ce): 0 is stable, 1 is unstable
-  A   abstractness: interfaces (and behaviours, protocols) / types
+  A   abstractness: interfaces (and behaviours, protocols) / types, without
+      structs and records that only hold data
   D   distance from the main sequence, |A + I - 1|
 
 A stable, concrete component (low I, low A) is in the zone of pain: many
@@ -26,6 +27,20 @@ ABSTRACT = ("interface",)
 COUNTED = ("class", "struct", "record", "interface", "module")
 
 
+def data_only(t: dict) -> bool:
+    """A struct or record with fields and no methods: a value, not something to put behind an interface."""
+    return t.get("kind") in ("struct", "record") and bool(t.get("fields")) and not t.get("methods")
+
+
+def ports(model: dict, c: str) -> bool:
+    """Whether most of the interfaces of c are implemented in other components:
+    c declares what it needs (as Go does), so its abstractions are in use."""
+    types = model.get("types") or {}
+    own = {tid for tid, t in types.items() if t.get("component") == c and t.get("kind") in ABSTRACT}
+    used = {i for t in types.values() if t.get("component") != c for i in t.get("implements") or [] if i in own}
+    return bool(own) and len(used) * 2 >= len(own)
+
+
 def metrics(model: dict, min_types: int = 3) -> dict:
     """{component: {ca, ce, i, a, d, types, abstract}}; a and d are None for
     components with fewer than min_types types, i for isolated ones."""
@@ -37,7 +52,7 @@ def metrics(model: dict, min_types: int = 3) -> dict:
     n, ab = defaultdict(int), defaultdict(int)
     for t in (model.get("types") or {}).values():
         c = t.get("component")
-        if c in comps and t.get("kind") in COUNTED:
+        if c in comps and t.get("kind") in COUNTED and not data_only(t):
             n[c] += 1
             ab[c] += t.get("kind") in ABSTRACT or bool(t.get("abstract"))
     out = {}
@@ -59,7 +74,9 @@ def run(ctx, params) -> list:
         if m["d"] is None or m["d"] < params["distance"]:
             continue
         nums = f"Ca {m['ca']}, Ce {m['ce']}, I {m['i']:.2f}, A {m['a']:.2f}, D {m['d']:.2f}"
-        if m["i"] <= params["low"] and m["a"] <= params["low"] and m["ca"] >= params["pain_dependents"]:
+        # A component that depends on nothing (Ce 0) is a foundation, such as value types:
+        # it changes for its own reasons only, so being stable and concrete costs little.
+        if m["i"] <= params["low"] and m["a"] <= params["low"] and m["ca"] >= params["pain_dependents"] and m["ce"]:
             out.append(ctx.finding(
                 (c, "pain"),
                 f"{ctx.name(c)} is in the zone of pain: {m['ca']} components depend on it, and it has "
@@ -74,7 +91,7 @@ def run(ctx, params) -> list:
                 weight=Weight(30, "zone of pain").spread(m["ca"], "dependents", per=5, cap=15,
                                                           free=params["pain_dependents"])
                 .add("distance", m["d"], 20 * (m["d"] - params["distance"]))))
-        elif m["i"] >= params["high"] and m["a"] >= params["high"]:
+        elif m["i"] >= params["high"] and m["a"] >= params["high"] and not ports(ctx.model, c):
             out.append(ctx.finding(
                 (c, "uselessness"),
                 f"{ctx.name(c)} is in the zone of uselessness: mostly abstractions, and few components depend "

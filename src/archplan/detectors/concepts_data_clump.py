@@ -6,13 +6,14 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 
 from .common import EXAMPLES, Weight, plural, types_focus
-from .fields import key, plain_names
+from .fields import key, plain_names, type_text
 
 ID = "concepts.data_clump"
 NAME = "Data clumps"
 GROUP = "concepts"
 NEEDS = {"fields"}
-PARAMS = {"min_fields": 3, "min_components": 2, "max_findings": 30, "common_share": 0.05, "synonym_share": 0.7}
+PARAMS = {"min_fields": 3, "min_components": 2, "max_findings": 20, "common_share": 0.05, "synonym_share": 0.7,
+          "holder_share": 0.3, "same_type_share": 0.5}
 SKIP_KINDS = ("enum", "function", "module", "alias")
 
 
@@ -21,10 +22,31 @@ def associations(names: set) -> set:
     return {n for n in names if not (n.endswith("_id") and n[:-3] in names)}
 
 
+def holder(ctx, t: dict, share: float) -> bool:
+    """A type whose fields are mostly interfaces: it holds services (Deps, App), not data."""
+    fs = [f for f in t.get("fields") or [] if f.get("name")]
+    n = sum(1 for f in fs if (ctx.types.get(f.get("ref")) or {}).get("kind") == "interface")
+    return bool(fs) and n / len(fs) >= share
+
+
+def field_type(t: dict, name: str) -> str:
+    """The type of a field by its key: the referenced type's id, or the type text."""
+    for f in t.get("fields") or []:
+        if f.get("name") and key(f["name"]) == name:
+            return f.get("ref") or type_text(f)
+    return ""
+
+
+def same_types(ctx, s: set, support: list) -> int:
+    """How many of the field names have one type in all the types."""
+    return sum(1 for n in s if len({field_type(ctx.types[t], n) for t in support}) == 1)
+
+
 def clumps(ctx, params) -> list:
     """[(field names, [type ids])], biggest first."""
     types = {tid: t for tid, t in ctx.types.items()
-             if t.get("component") in ctx.internal and t.get("kind") not in SKIP_KINDS}
+             if t.get("component") in ctx.internal and t.get("kind") not in SKIP_KINDS
+             and not holder(ctx, t, params["holder_share"])}
     names = {tid: associations({key(n) for n in plain_names(t)} - {""}) for tid, t in types.items()}
     freq = Counter(n for ns in names.values() for n in ns)
     cap = max(20, params["common_share"] * len(types))
@@ -49,6 +71,9 @@ def clumps(ctx, params) -> list:
             continue
         # Types that are mostly this group are synonyms (types.synonyms), not a clump.
         if all(len(s) / len(names[t]) >= params["synonym_share"] for t in support):
+            continue
+        # The same names with other types are a naming habit, not one value.
+        if same_types(ctx, s, support) < params["same_type_share"] * len(s):
             continue
         out.append((s, support, comps))
     out.sort(key=lambda x: (-len(x[0]) * len(x[2]), -len(x[0]), sorted(x[0])))

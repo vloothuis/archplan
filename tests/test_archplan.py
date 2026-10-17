@@ -1221,9 +1221,9 @@ def findings_model(ab=5):
                    "fields": fld("id", "payout_iban", "payout_name", "payout_status", "verified_email", "verified_phone",
                                  "verified_at", "notify_mail", "notify_sms", "notify_push", "name")},
         "B.Member": {"name": "Member", "component": "B", "kind": "struct", "file": "lib/b/member.ex",
-                     "fields": fld("id", "user_id", "public_id", "status", "role", "joined_at", "inserted_at")},
+                     "fields": fld("id", "user_id", "public_id", "status", "role", "joined_at", "nickname", "inserted_at")},
         "C.Participant": {"name": "Participant", "component": "C", "kind": "struct", "file": "lib/c/participant.ex",
-                          "fields": fld("id", "user_id", "public_id", "status", "role", "joined_at", "updated_at")},
+                          "fields": fld("id", "user_id", "public_id", "status", "role", "joined_at", "nickname", "updated_at")},
     }
     return {"format": "archmodel/1", "components": comps, "types": types,
             "dependencies": [{"from": a, "to": b, "weight": w, "evidence": [f"lib/{a.lower()}/x.ex:{w}"]}
@@ -2300,7 +2300,8 @@ def concept_model():
                                     f("street"), f("city"), f("zip_code"), f("timeout_ms", "integer"),
                                     f("amount", "integer"), f("meta", "map")]},
         "billing.Invoice": {"name": "Invoice", "component": "billing", "kind": "struct", "file": "lib/billing/invoice.ex",
-                            "fields": [f("street"), f("city"), f("zip_code"), f("total"), f("amount_cents", "integer"),
+                            "fields": [f("id", "integer"), f("street"), f("city"), f("zip_code"), f("total"),
+                                       f("amount_cents", "integer"),
                                        f("order", None, ref="orders.Order")]},
         "shipping.Parcel": {"name": "Parcel", "component": "shipping", "kind": "struct", "file": "lib/shipping/parcel.ex",
                             "fields": [f("street"), f("city"), f("zip_code"), f("weight"), f("label"),
@@ -2384,7 +2385,7 @@ class DetectorsTest(TempProject):
         self.assertEqual(json.loads(self.p.path("config.json").read_text())["detectors"]["types.fields"],
                          {"enabled": True, "params": {"large_type": 5, "cluster_size": 2}})
         titles = [f["title"] for f in F.listing()["findings"] if f["kind"] == "types.fields"]
-        self.assertIn("B.Member has 7 fields.", titles)
+        self.assertIn("B.Member has 8 fields.", titles)
         with self.assertRaises(detectors.DetectorError):
             detectors.configure(self.p, "types.fields", params={"large_type": "many"})
         with self.assertRaises(detectors.DetectorError):
@@ -2535,10 +2536,18 @@ class NewDetectorsTest(TempProject):
         self.assertEqual([], fs["findings"])  # core has 3 dependents, fewer than pain_dependents
         detectors.configure(self.p, "boundaries.stability", params={"pain_dependents": 3})
         res = detectors.run(self.p, only={"boundaries.stability"})
+        self.assertEqual([], res["findings"])  # core depends on nothing: a foundation
+        m = res["extras"]["metrics"]["core"]
+        self.assertEqual((m["ca"], m["ce"], m["i"], m["a"], m["d"]), (3, 0, 0.0, 0.0, 1.0))
+        model = concept_model()
+        model["dependencies"].append({"from": "core", "to": "shipping", "weight": 1, "evidence": []})
+        self.p.model_path.write_text(json.dumps(model))
+        os.utime(self.p.model_path, (3, 3))
+        res = detectors.run(self.p, only={"boundaries.stability"})
         (f,) = res["findings"]
         self.assertEqual((f["evidence"]["component"], f["evidence"]["zone"]), ("core", "pain"))
         m = res["extras"]["metrics"]["core"]
-        self.assertEqual((m["ca"], m["ce"], m["i"], m["a"], m["d"]), (3, 0, 0.0, 0.0, 1.0))
+        self.assertEqual((m["ca"], m["ce"], m["i"], m["a"], m["d"]), (3, 1, 0.25, 0.0, 0.75))
 
     def test_balance(self):
         """billing and shipping use orders' Order type; orders changes most. Only billing has
@@ -2725,7 +2734,10 @@ class FocusTest(TempProject):
         return f["focus"]
 
     def test_every_family_has_a_focus(self):
-        fs = self.run_all(concept_model()) + self.run_all(findings_model())
+        cm = concept_model()
+        cm["components"]["infra"] = {"name": "infra", "path": "lib/infra", "match": ["lib/infra/**"]}
+        cm["dependencies"].append({"from": "core", "to": "infra", "weight": 1, "evidence": []})  # not a foundation
+        fs = self.run_all(cm) + self.run_all(findings_model())
         kinds = set()
         for f in fs:
             fc = self.check(f)

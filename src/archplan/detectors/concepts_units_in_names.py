@@ -4,10 +4,11 @@ timeout_seconds. The move is one type that carries its unit."""
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 
 from .common import EXAMPLES, Weight, focus, plural, types_focus
-from .fields import words
+from .fields import type_text, words
 
 ID = "concepts.units_in_names"
 NAME = "Units in names"
@@ -21,6 +22,7 @@ UNITS = {"ms": "ms", "millis": "ms", "milliseconds": "ms", "msec": "ms", "msecs"
          "bytes": "bytes", "kb": "kb", "mb": "mb", "gb": "gb", "pct": "percent", "percent": "percent",
          "percentage": "percent", "px": "px"}
 NONE = "no unit"
+NUMBER = re.compile(r"\b(u?int\d*|integer|float\d*|double|decimal|number|numeric|long|short|bigint|real)\b")
 
 
 def split(name: str):
@@ -34,29 +36,38 @@ def split(name: str):
     return "_".join(w), None
 
 
+def bare_number(f: dict) -> bool:
+    """Whether a name without a unit needs one: a plain number, or a value of
+    unknown type. A string, or a type such as time.Duration, is not a bare number."""
+    if f.get("ref"):
+        return False
+    t = type_text(f)
+    return not t or bool(NUMBER.search(t))
+
+
 def names(ctx):
-    """(name, component, where, type id or None) for every field and, when
-    present, every parameter."""
+    """(name, component, where, type id or None, field or parameter) for every
+    field and, when present, every parameter."""
     for tid, t in ctx.types.items():
         c = t.get("component")
         if c in ctx.internal:
             for f in t.get("fields") or []:
                 if f.get("name"):
-                    yield f["name"], c, f"{t.get('name') or tid}.{f['name']}", tid
+                    yield f["name"], c, f"{t.get('name') or tid}.{f['name']}", tid, f
     for s in ctx.signatures:
         c = s.get("component")
         if c in ctx.internal:
             for p in s.get("params") or []:
                 if isinstance(p, dict) and isinstance(p.get("name"), str):
-                    yield p["name"], c, f"{s.get('id')}({p['name']})", None
+                    yield p["name"], c, f"{s.get('id')}({p['name']})", None, p
 
 
 def run(ctx, params) -> list:
     seen = defaultdict(lambda: defaultdict(dict))  # base -> unit -> {component: example}
     fields = defaultdict(lambda: defaultdict(list))  # base -> {type id: [field names]}
-    for n, c, where, tid in names(ctx):
+    for n, c, where, tid, f in names(ctx):
         base, unit = split(n)
-        if base and not base.isdigit():
+        if base and not base.isdigit() and (unit or bare_number(f)):
             seen[base][unit or NONE].setdefault(c, where)
             if tid:
                 fields[base][tid].append(n)
