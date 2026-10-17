@@ -488,15 +488,16 @@ mark as noise go into `.archplan/vocabulary.json`.
 ## Declarations in the code
 
 Some facts are decisions, not something an exporter can find: the trust zone
-a component is in, which functions are guards (they authenticate, authorize
+a component is in, the components through which others must reach it (its
+gateways), which functions are guards (they authenticate, authorize
 or validate), which functions are sinks (they write or read data that needs
 a permission check first), and which entry points need an authenticated
 caller. These
 declarations live in the repository, next to the code. After every export,
 archplan reads them into the model's `declarations` section.
 
-By default they are marker comments above a declaration, and a `zone:` line
-in the front matter of a component's `GLOSSARY.md`:
+By default they are marker comments above a declaration, and `zone:` and
+`gateway:` lines in the front matter of a component's `GLOSSARY.md`:
 
 ```python
 # archplan: auth=none reason="load balancer health check"
@@ -520,6 +521,8 @@ The security detectors read the declarations:
 | `security.untraced` | a declared guard or entry point that no trace calls, in a component the traces do visit: a guard wired nowhere, or a route nothing reaches. Weak. Needs sequences. |
 | `security.open_entry` | an entry point declared `auth=none` without a reason |
 | `security.zone_dependency` | a dependency from a more trusted zone to a less trusted one, or one that skips a declared zone |
+| `security.gateway_bypass` | a dependency on a component that declares gateways (`gateway: [a, b]`) from a component that is none of them and does not implement its interfaces. Weak; strong when a trace shows the call. |
+| `security.unguarded_path` | a dependency path from an entry point's component, through other components, to a `restricted` zone component, on which no component is a guard's, depends on one or is a declared gateway of the target. Static, so it covers code no trace runs. Weak. |
 
 Zones are ordered by the `order` setting of `security.zone_dependency`,
 from the least trusted: `internet`, `dmz`, `internal`, `restricted` by

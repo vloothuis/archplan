@@ -20,6 +20,7 @@ A key names a kind of target and a property of it.
 | Key | Target | Value | Meaning |
 |---|---|---|---|
 | `component.zone` | a component id | a zone id: lower case letters, digits, `_` and `-` | the trust zone the component is in, such as `internet` or `internal` |
+| `component.gateway` | a component id | a list of 1 to 20 component ids | the components through which others must reach this one, such as the repository in front of a store |
 | `function.guard` | a function or type | `true`, `authn` or `authz` | the function or type checks who the caller is (`authn`), what the caller may do (`authz`), or both, or validates input (`true`) |
 | `function.sink` | a function or type | `write` or `read` | the function changes (`write`) or returns (`read`) data that only some callers may change or see |
 | `entrypoint.auth` | a function that handles outside input | `required` or `none` | whether the entry point needs an authenticated caller |
@@ -208,21 +209,23 @@ the next read shows whether it worked.
 
 The built-in annotator owns every key no project annotator owns.
 
-### Component zones
+### Component zones and gateways
 
-A component's zone is in the front matter of the `GLOSSARY.md` in its
-folder, the same file the glossaries use:
+A component's zone and gateways are in the front matter of the `GLOSSARY.md`
+in its folder, the same file the glossaries use:
 
 ```markdown
 ---
-zone: internal
+zone: restricted
+gateway: [billing.repo, billing.admin]
 owns:
   Invoice: [bill]
 ---
 ```
 
-The writer adds, changes or removes the `zone:` line. It creates the file
-when there is none, and deletes a file that held nothing but the zone.
+The writer adds, changes or removes the `zone:` and `gateway:` lines. It
+creates the file when there is none, and deletes a file that held nothing
+but those lines.
 
 ### Marker comments
 

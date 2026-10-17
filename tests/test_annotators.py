@@ -207,6 +207,25 @@ class AnnotatorTest(unittest.TestCase):
         self.assertEqual(res["results"][0]["status"], "applied", res)
         self.assertNotIn("sink", (self.root / "shop/ops/views.py").read_text())
 
+    def test_gateways(self):
+        for value, ok in ((["shop.ops"], True), (["shop/ops", "a.b"], True), ("shop.ops", False), ([], False),
+                          (["a b"], False), (["a]"], False)):
+            self.assertEqual(annotators.check_change({"op": "set", "target": {"kind": "component", "id": "x"},
+                                                      "key": "gateway", "value": value}) is None, ok, value)
+        res = self.changes({"op": "set", "target": {"kind": "component", "id": "shop.accounts"}, "key": "gateway",
+                            "value": ["shop.ops", "shop"]}, apply=True)
+        self.assertEqual(res["results"][0]["status"], "applied", res)
+        glossary = self.root / "shop/accounts/GLOSSARY.md"
+        self.assertTrue(glossary.read_text().startswith(
+            "---\nzone: internal\nowns:\n  Account: [user]\ngateway: [shop.ops, shop]\n---\n"))
+        d = self.declared()
+        self.assertEqual(d[("component", "shop.accounts", "gateway")]["value"], ["shop.ops", "shop"])
+        self.assertEqual(d[("component", "shop.accounts", "zone")]["value"], "internal")
+        res = self.changes({"op": "remove", "target": {"kind": "component", "id": "shop.accounts"},
+                            "key": "gateway"}, apply=True)
+        self.assertEqual(res["results"][0]["status"], "applied", res)
+        self.assertEqual(glossary.read_text(), SAMPLE["shop/accounts/GLOSSARY.md"])
+
     def plugin(self, read_out, write_out=None, keys=("function.guard",), touch=None):
         script = self.root / "tools" / "ann.py"
         write(self.root, {"tools/ann.py": f"""\

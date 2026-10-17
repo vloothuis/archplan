@@ -84,7 +84,8 @@ TOOLS = [
          "thread": {"type": "string", "description": "Id of the thread this suggestion answers (optional)."}},
          "required": ["ops"]}},
     {"name": "annotate",
-     "description": "Change declarations in the code: a component's trust zone (component.zone), a function "
+     "description": "Change declarations in the code: a component's trust zone (component.zone), the components "
+                    "through which others must reach it (component.gateway: a list of component ids), a function "
                     "that authenticates (guard authn), authorizes (guard authz) or both (guard true) "
                     "(function.guard), a function that writes or reads data that needs an authorization "
                     "check first (function.sink: write or read), or whether an entry point "
@@ -102,8 +103,9 @@ TOOLS = [
                  "id": {"type": "string", "description": "a component id, or a function's id from the model's "
                                                          "signatures or types, or <file>:<name>"}},
                  "required": ["kind", "id"]},
-             "key": {"type": "string", "enum": ["zone", "guard", "sink", "auth"]},
-             "value": {"description": "zone: an id such as internal; guard: true, authn or authz; "
+             "key": {"type": "string", "enum": ["zone", "gateway", "guard", "sink", "auth"]},
+             "value": {"description": "zone: an id such as internal; gateway: a list of component ids; "
+                                      "guard: true, authn or authz; "
                                       "sink: write or read; auth: required or none"},
              "reason": {"type": "string"}},
              "required": ["op", "target", "key"]}},

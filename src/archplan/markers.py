@@ -10,7 +10,8 @@ attributes and other comments allowed in between:
 `guard` (or `guard=authn`, `guard=authz`) declares function.guard, `sink=write`
 or `sink=read` function.sink, `auth=required|none` entrypoint.auth. A
 component's zone is the `zone:` line in the front matter of the GLOSSARY.md
-in its folder. See format/annotator-plugins.md.
+in its folder, and its gateways the `gateway:` line (`gateway: [a, b]`).
+See format/annotator-plugins.md.
 
 read() returns declarations in the plugin output shape; write() changes
 files under a root (the scratch copy) and returns one result per change.
@@ -28,7 +29,7 @@ import tokenize
 from pathlib import Path
 
 from .core.safeio import inside, model_base, prefix_of, read_file
-from .core.vocab import GLOSSARY, _scalar
+from .core.vocab import GLOSSARY, _flow, _scalar
 
 MAX_FILE = 1 << 20
 MAX_FILES = 50_000
@@ -231,7 +232,7 @@ def scan(text: str, prefix: str, python: bool = False) -> list:
     return out
 
 
-# ---------- GLOSSARY.md zones ----------
+# ---------- GLOSSARY.md zones and gateways ----------
 
 def glossary_path(base: Path, comp: dict) -> str | None:
     """The GLOSSARY.md next to a component's code, relative to base."""
@@ -257,20 +258,29 @@ def front_bounds(lines: list) -> tuple | None:
     return None
 
 
-ZONE_LINE = re.compile(r"^zone:\s*(.*?)\s*(?:#.*)?$")
+FRONT = {"component.zone": "zone", "component.gateway": "gateway"}  # key -> front matter word
 
 
-def zone_of(text: str) -> tuple | None:
-    """(zone, line number) from GLOSSARY.md front matter."""
+def front_line(word: str):
+    return re.compile(rf"^{word}:\s*(.*?)\s*(?:#.*)?$")
+
+
+def front_of(text: str, word: str) -> tuple | None:
+    """(raw value, line number) of a line in GLOSSARY.md front matter."""
     lines = split(text)[0]
     b = front_bounds(lines)
     if not b:
         return None
+    line = front_line(word)
     for j in range(1, b[1]):
-        m = ZONE_LINE.match(lines[j])
+        m = line.match(lines[j])
         if m:
-            return _scalar(m.group(1)), j + 1
+            return m.group(1), j + 1
     return None
+
+
+def front_text(key: str, value) -> str:
+    return "[" + ", ".join(value) + "]" if key == "component.gateway" else str(value)
 
 
 # ---------- read ----------
@@ -282,7 +292,8 @@ def read(root: Path, model: dict, keys, exclude=None) -> tuple:
     pre = prefix_of(root, base)
     decls, warnings = [], []
     keys = set(keys)
-    if "component.zone" in keys:
+    front = [k for k in FRONT if k in keys]
+    if front:
         for cid, c in sorted((model.get("components") or {}).items()):
             if (c or {}).get("kind") == "external":
                 continue
@@ -291,12 +302,15 @@ def read(root: Path, model: dict, keys, exclude=None) -> tuple:
             if not fp or not fp.is_file():
                 continue
             try:
-                z = zone_of(read_file(fp, MAX_FILE, errors="strict"))
+                text = read_file(fp, MAX_FILE, errors="strict")
             except (OSError, UnicodeDecodeError):
                 continue
-            if z:
-                decls.append({"target": {"kind": "component", "id": cid}, "key": "zone", "value": z[0],
-                              "file": rel, "line": z[1]})
+            for k in front:
+                v = front_of(text, FRONT[k])
+                if v:
+                    value = _flow(v[0]) if k == "component.gateway" else _scalar(v[0])
+                    decls.append({"target": {"kind": "component", "id": cid}, "key": FRONT[k], "value": value,
+                                  "file": rel, "line": v[1]})
     if keys & {"function.guard", "function.sink", "entrypoint.auth"}:
         for f in list_files(root, exclude):
             prefix = comment_prefix(f)
@@ -351,8 +365,8 @@ def write(root: Path, model: dict, changes: list) -> list:
 def write_one(base: Path, model: dict, ch: dict) -> dict:
     full = f"{ch['target']['kind']}.{ch['key']}"
     try:
-        if full == "component.zone":
-            return write_zone(base, model, ch)
+        if full in FRONT:
+            return write_front(base, model, ch, full)
         if full in ("function.guard", "function.sink", "entrypoint.auth"):
             return write_marker(base, ch, full)
     except (OSError, UnicodeDecodeError) as e:
@@ -360,7 +374,7 @@ def write_one(base: Path, model: dict, ch: dict) -> dict:
     return {"status": "unsupported", "note": f"the built-in annotator does not write {full}"}
 
 
-def write_zone(base: Path, model: dict, ch: dict) -> dict:
+def write_front(base: Path, model: dict, ch: dict, full: str) -> dict:
     comp = (model.get("components") or {}).get(ch["target"]["id"])
     rel = glossary_path(base, comp) if comp else None
     fp = rel and inside(base, rel)
@@ -371,9 +385,9 @@ def write_zone(base: Path, model: dict, ch: dict) -> dict:
     b = front_bounds(lines)
     at = None
     if b:
-        at = next((j for j in range(1, b[1]) if ZONE_LINE.match(lines[j])), None)
+        at = next((j for j in range(1, b[1]) if front_line(FRONT[full]).match(lines[j])), None)
     if ch["op"] == "set":
-        line = f"zone: {ch['value']}{cr}"
+        line = f"{FRONT[full]}: {front_text(full, ch['value'])}{cr}"
         if at is not None:
             lines[at] = line
         elif b:
@@ -382,7 +396,7 @@ def write_zone(base: Path, model: dict, ch: dict) -> dict:
             lines = [f"---{cr}", line, f"---{cr}"] + lines
     else:
         if at is None:
-            return {"status": "applied", "note": "no zone was set"}
+            return {"status": "applied", "note": f"no {FRONT[full]} was set"}
         del lines[at]
         b = front_bounds(lines)
         if b and all(not x.strip() for x in lines[1:b[1]]):
