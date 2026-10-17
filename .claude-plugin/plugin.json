@@ -1,6 +1,6 @@
 {
   "name": "archplan",
-  "version": "26.10.6",
+  "version": "26.10.7",
   "description": "Plan architecture changes with a human in a browser editor: edit the target model, comment on components, types and calls, and let Claude answer and implement the plan.",
   "author": {
     "name": "Jeroen Vloothuis"
