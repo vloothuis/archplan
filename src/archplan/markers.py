@@ -39,7 +39,9 @@ SLASH = {".go", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".
 
 MARKER = re.compile(r"^(?P<indent>[ \t]*)(?:#|//)[ \t]*archplan:[ \t]*(?P<body>.*?)\s*$")
 TOKEN = re.compile(r'([a-z_]+)(?:=("(?:[^"\\]|\\.)*"|\S+))?')
-BREAKS = re.compile("[\x00-\x1f\x7f\x85  ]")
+# What a written reason may not hold: line breaks, and : = < > * " \, so it
+# cannot become a magic comment (coding:, frozen_string_literal:) or end a PHP comment (?>).
+UNSAFE = re.compile(r"[^\w .,;'()/?!&+%#@-]")
 AUTH = ("required", "none")
 NOT_NAMES = frozenset("if for while switch return catch elif else when case unless until match new".split())
 STATEMENTS = frozenset("return await yield throw raise new else elif if for while do case when not and or in is "
@@ -330,9 +332,7 @@ def marker_line(indent: str, prefix: str, path: str, body: str) -> str:
 def token_of(key: str, value, reason) -> str:
     token = "guard" if key == "function.guard" else f"auth={value}"
     if reason:
-        reason = BREAKS.sub(" ", str(reason))  # never a second line
-        reason = re.sub(r"coding([:=])", r"coding \1", re.sub(r"[<>]", " ", reason))  # see check_change
-        token += ' reason="' + reason.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        token += ' reason="' + UNSAFE.sub(" ", str(reason)) + '"'
     return token
 
 

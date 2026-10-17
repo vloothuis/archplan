@@ -24,7 +24,8 @@ A key names a kind of target and a property of it.
 | `entrypoint.auth` | a function that handles outside input | `required` or `none` | whether the entry point needs an authenticated caller |
 
 A declaration can have a `reason`: one line on why, at most 300 characters,
-without `<`, `>` or `coding:`. archplan keeps it next
+of letters, digits, spaces and `. , ; ' ( ) / ? ! & + % # @ -`. Without `:` and
+`=`, a reason cannot become a magic comment such as `coding:`. archplan keeps it next
 to the value. Give a reason for `entrypoint.auth` `none`, such as "load
 balancer health check".
 

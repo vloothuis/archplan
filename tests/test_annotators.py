@@ -145,11 +145,14 @@ class AnnotatorTest(unittest.TestCase):
         self.assertEqual([r["status"] for r in res["results"]],
                          ["applied", "applied", "applied", "applied", "unsupported", "unsupported"])
         self.assertIn("one line", res["results"][5]["note"])
-        self.assertIn("PHP", annotators.check_change({"op": "set", "target": {"kind": "entrypoint", "id": "x"},
-                                                     "key": "auth", "value": "none", "reason": "a ?> b"}))
-        self.assertNotIn(">", markers.token_of("entrypoint.auth", "none", "a ?> %> b"))
-        self.assertIsNotNone(annotators.check_change({"op": "set", "target": {"kind": "entrypoint", "id": "x"},
-                                                      "key": "auth", "value": "none", "reason": "coding: rot13"}))
+        for bad in ("a ?> b", "coding: rot13", "frozen_string_literal: true", "-*- coding=latin-1 -*-"):
+            self.assertIn("may hold only", annotators.check_change(
+                {"op": "set", "target": {"kind": "entrypoint", "id": "x"}, "key": "auth", "value": "none",
+                 "reason": bad}))
+        self.assertEqual(markers.token_of("entrypoint.auth", "none", 'a ?> "b": c'), 'auth=none reason="a ?   b   c"')
+        self.assertIsNone(annotators.check_change(
+            {"op": "set", "target": {"kind": "entrypoint", "id": "x"}, "key": "auth", "value": "none",
+             "reason": "load-balancer health check (k8s), café"}))
         self.assertFalse(res["applied"])
         self.assertEqual((self.root / "shop/ops/views.py").read_text(), before)  # nothing changed yet
         self.assertIn("+# archplan: guard\n def orders", res["patch"])
