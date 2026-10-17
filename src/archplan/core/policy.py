@@ -24,6 +24,8 @@ def leaks(m: dict) -> list:
             continue
         if k in comps.get(c, {}).get("avoid", []):
             why = "avoid"
+        elif concepts[k].get("kind") == "vendor":
+            continue  # a vendor name is an everyday word too; layers.policy reports the imports
         elif owner and c in m.get("components", {}) and owner in m.get("components", {}) and not allowed(m, c, owner):
             why = "policy"
         else:

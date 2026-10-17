@@ -17,6 +17,7 @@ Only git itself runs. Settings that would make git run other programs
 from __future__ import annotations
 
 import fnmatch
+import re
 import subprocess
 import time
 from collections import Counter, defaultdict
@@ -32,7 +33,9 @@ MIN_TOGETHER = 3
 MIN_DEGREE = 0.3
 MAX_PAIRS = 200
 MAX_OWNERS = 30  # authors kept per component, with their commit counts, for the ownership detector
-VERSION = 3      # of the cached result: 2 added owners, 3 added cochange
+VERSION = 4      # of the cached result: 2 added owners, 3 added cochange, 4 left tests out of pairs
+# Test files: a commit that changes only tests in two components says little about their coupling.
+TEST = re.compile(r"(^|/)(tests?|spec|__tests__)/|_test\.\w+$|(^|/)test_[^/]*\.py$|\.(test|spec)\.\w+$|_spec\.rb$")
 
 # File-level co-change (cochange in the result). A commit with more files is a
 # bulk change for this purpose; ignored files do not count towards its size.
@@ -179,7 +182,7 @@ def analyse(commits: list, model: dict, prefix: str | None = None, hint: str = "
     n_commits, authors, files, last = Counter(), defaultdict(Counter), defaultdict(set), {}
     together, unmapped = Counter(), set()
     for sha, email, date, paths, *_ in used:
-        comps = set()
+        comps, code = set(), set()
         for f in paths:
             cid = mapper(f[len(prefix):]) if f.startswith(prefix) else None
             if cid is None:
@@ -187,11 +190,13 @@ def analyse(commits: list, model: dict, prefix: str | None = None, hint: str = "
                 continue
             comps.add(cid)
             files[cid].add(f)
+            if not TEST.search(f):
+                code.add(cid)
         for cid in comps:
             n_commits[cid] += 1
             authors[cid][email] += 1
             last.setdefault(cid, date)  # newest first
-        together.update(combinations(sorted(comps), 2))
+        together.update(combinations(sorted(code), 2))
     deps = {(d["from"], d["to"]) for d in model.get("dependencies") or []}
     pairs = []
     for (a, b), n in together.items():
