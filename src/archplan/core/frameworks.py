@@ -57,12 +57,17 @@ class ProfileError(ValueError):
 
 def manifest_files(root: Path, depth: int = 3) -> list:
     """Manifest paths under root, at most depth folders down."""
+    from .exclude import load
+    ex = load(root)
     out = []
     for d, dirs, names in os.walk(root):
         rel = os.path.relpath(d, root)
         level = 0 if rel == "." else rel.count(os.sep) + 1
         dirs[:] = [x for x in dirs if x not in SKIP_DIRS and not x.startswith(".")] if level < depth else []
+        ex.prune(d, dirs)
         for n in names:
+            if ex(os.path.join(d, n)):
+                continue
             if n in MANIFESTS or n.endswith(".csproj") or (n.startswith("requirements") and n.endswith(".txt")) \
                     or (os.path.basename(d) == "requirements" and n.endswith(".txt")):
                 out.append(Path(d) / n)
@@ -127,12 +132,16 @@ class Context:
         self.deps = set()
         if root is not None and Path(root).is_dir():
             root = Path(root)
+            from .exclude import load
+            ex = load(root)
             n = 0
             for d, dirs, names in os.walk(root):
                 dirs[:] = [x for x in dirs if x not in SKIP_DIRS and not x.startswith(".")]
+                ex.prune(d, dirs)
                 rel = os.path.relpath(d, root).replace(os.sep, "/")
                 for x in names:
-                    self.paths.add(x if rel == "." else rel + "/" + x)
+                    if not ex(os.path.join(d, x)):
+                        self.paths.add(x if rel == "." else rel + "/" + x)
                 n += len(names)
                 if n > WALK_CAP:
                     break

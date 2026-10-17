@@ -270,8 +270,9 @@ def hotspots(p: Project, since_days: int = 365, *, refresh: bool = False, **kw) 
     outside a git repository."""
     top = toplevel(p.root)
     head = git(top, "rev-parse", "HEAD").strip()
+    ex = p.exclude
     key = {"v": VERSION, "head": head, "since_days": int(since_days), "model": etag(p.model_path),
-           **{k: kw[k] for k in sorted(kw)}}
+           **({"exclude": ex.patterns} if ex else {}), **{k: kw[k] for k in sorted(kw)}}
     cache = p.path("hotspots.json")
     old = read_json(cache) or {}
     if not refresh and old.get("key") == key:
@@ -280,6 +281,11 @@ def hotspots(p: Project, since_days: int = 365, *, refresh: bool = False, **kw) 
     t = time.monotonic()
     commits = history(top, since_days)
     rel = p.root.relative_to(top).as_posix() if p.root != top else ""
+    if ex:
+        pre = rel + "/" if rel else ""
+        kept = [(*c[:3], [f for f in c[3] if not ex.model_path(f, pre)], *c[4:]) for c in commits]
+        # a commit that only touched excluded paths does not count
+        commits = [k for c, k in zip(commits, kept) if k[3] or not c[3]]
     res = {"head": head, "since_days": int(since_days),
            **analyse(commits, model, hint=rel + "/" if rel else "", **kw),
            "seconds": round(time.monotonic() - t, 2)}

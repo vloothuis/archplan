@@ -55,8 +55,9 @@ def db_type(v) -> str:
 def source_files(root: Path, files: list | None = None) -> list:
     if files is not None:
         return [f for f in files if f.endswith(".ex")]
+    from ..exclude import load
     out = []
-    for d, dirs, names in safe_walk(root, SKIP_DIRS):
+    for d, dirs, names in safe_walk(root, SKIP_DIRS, exclude=load(root)):
         out += [os.path.relpath(os.path.join(d, n), root) for n in names if n.endswith(".ex")]
     return sorted(out)
 
@@ -349,8 +350,9 @@ def resolve_pending(found: dict, root: Path, module_files: dict) -> None:
 # ---------- migrations ----------
 
 def migration_dirs(root: Path) -> list:
+    from ..exclude import load
     out = []
-    for d, dirs, _ in safe_walk(root, SKIP_DIRS - {"priv"}):
+    for d, dirs, _ in safe_walk(root, SKIP_DIRS - {"priv"}, exclude=load(root)):
         if d.endswith(os.path.join("priv", "repo", "migrations")) or re.search(r"priv/\w*repo\w*/migrations$", d):
             out.append(Path(d))
             dirs[:] = []

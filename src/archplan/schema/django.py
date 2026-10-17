@@ -39,8 +39,9 @@ ON_DELETE = {"CASCADE": "CASCADE", "SET_NULL": "SET NULL", "PROTECT": "PROTECT",
 
 
 def py_files(root: Path) -> list:
+    from ..exclude import load
     out = []
-    for d, dirs, names in safe_walk(root, SKIP_DIRS):
+    for d, dirs, names in safe_walk(root, SKIP_DIRS, exclude=load(root)):
         out += [Path(d) / n for n in names if n.endswith(".py") and not n.startswith("test_")]
     return sorted(out)
 

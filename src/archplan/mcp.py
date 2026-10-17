@@ -262,6 +262,7 @@ class Agent:
         return {"project": p.name, "root": str(p.root),
                 "editor": srv["url"] if srv else "not running (run `archplan up`)",
                 "model": counts(model) if model else "none yet (call refresh_model)",
+                "exclude": p.exclude.patterns,
                 "target": {"edited": bool(target), "violations": len(violations(target)) if target else 0},
                 "export_approved": p.trusted(),
                 "intent": p.state().get("intent", ""),
@@ -583,8 +584,21 @@ class UpdateNotice:
                 "Restart Claude Code to load it.")
 
 
-def serve(p: Project) -> None:
-    agent = Agent(p)
+UNCONFIGURED = "This repository has no archplan project yet. The status tool explains how to start one."
+
+
+def serve(find=Project.find) -> None:
+    """Serve the tools on stdio for the project that find() returns. Without a
+    project, offer only the status tool, which explains how to set one up, so
+    the plugin's MCP server does not fail in repositories that do not use
+    archplan. Until a project exists, look for it again on each request: after
+    `archplan init` the full tools work without a restart, and the client is
+    told that the tool list changed."""
+    try:
+        agent, err = Agent(find()), ""
+    except ProjectError as e:
+        agent, err = None, str(e)
+    late = agent is None  # the tool list can still change
     names = {t["name"] for t in TOOLS}
     notice = UpdateNotice()
 
@@ -602,16 +616,27 @@ def serve(p: Project) -> None:
         rid, method = req.get("id"), req.get("method")
         if rid is None:
             continue  # a notification
+        if agent is None and method != "initialize":
+            try:
+                agent = Agent(find())
+                send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+            except ProjectError as e:
+                err = str(e)
         if method == "initialize":
             result = {"protocolVersion": req.get("params", {}).get("protocolVersion", "2025-06-18"),
-                      "capabilities": {"tools": {}},
+                      "capabilities": {"tools": {"listChanged": True} if late else {}},
                       "serverInfo": {"name": "archplan", "version": __version__},
-                      "instructions": INSTRUCTIONS}
+                      "instructions": INSTRUCTIONS if agent else UNCONFIGURED}
         elif method == "ping":
             result = {}
         elif method == "tools/list":
-            result = {"tools": TOOLS}
+            result = {"tools": TOOLS if agent else TOOLS[:1]}
+        elif method == "tools/call" and agent is None:
+            result = {"content": [{"type": "text", "text": f"{err}. Start one with `archplan init` (then "
+                                   "`archplan export` and `archplan up`), or use the /archplan skill."}],
+                      "isError": True}
         elif method == "tools/call":
+            p = agent.p
             prm = req.get("params", {})
             name = prm.get("name", "")
             if name not in names:
@@ -635,32 +660,3 @@ def serve(p: Project) -> None:
             send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": f"no method {method}"}})
             continue
         send({"jsonrpc": "2.0", "id": rid, "result": result})
-
-
-def serve_unconfigured(err: str) -> None:
-    """Without a project, answer every tool call with how to set one up, so the
-    plugin's MCP server does not fail in repositories that do not use archplan."""
-    def send(obj):
-        sys.stdout.write(json.dumps(obj) + "\n")
-        sys.stdout.flush()
-    for line in sys.stdin:
-        try:
-            req = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        rid, method = req.get("id"), req.get("method")
-        if rid is None:
-            continue
-        if method == "initialize":
-            send({"jsonrpc": "2.0", "id": rid, "result": {
-                "protocolVersion": req.get("params", {}).get("protocolVersion", "2025-06-18"),
-                "capabilities": {"tools": {}}, "serverInfo": {"name": "archplan", "version": __version__},
-                "instructions": "This repository has no archplan project yet. The status tool explains how to start one."}})
-        elif method == "tools/list":
-            send({"jsonrpc": "2.0", "id": rid, "result": {"tools": [TOOLS[0]]}})
-        elif method == "tools/call":
-            send({"jsonrpc": "2.0", "id": rid, "result": {"content": [{"type": "text", "text":
-                f"{err}. Start one with `archplan init` (then `archplan export` and `archplan up`), or use the /archplan skill."}],
-                "isError": True}})
-        else:
-            send({"jsonrpc": "2.0", "id": rid, "result": {}})
