@@ -53,7 +53,7 @@ def check(m, root: Path | None = None) -> dict:
     sections = {"source": dict, "layers": list, "components": dict, "dependencies": list, "files": dict,
                 "policy": dict, "types": dict, "sequences": dict, "vocabulary": dict, "notes": dict,
                 "signatures": list, "literals": list, "enums": list,
-                "schema": dict}
+                "schema": dict, "declarations": list}
     for k, t in sections.items():
         if k in m and m[k] is not None and not isinstance(m[k], t):
             r.err(f"{k} must be {'an object' if t is dict else 'a list'}")

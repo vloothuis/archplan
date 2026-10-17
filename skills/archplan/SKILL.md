@@ -223,6 +223,10 @@ progress.
 - After a change, call `refresh_model`. The editor reloads the code's model,
   rebases the target onto it, and the plan shrinks by what you did. Report in
   the thread what changed and what is left.
+- To declare a component's trust zone, a guard function or whether an entry
+  point needs auth, call `annotate` instead of editing marker comments by
+  hand. It writes in the project's own form and checks the result. Make a
+  change it reports as unsupported, conflict or failed by hand.
 
 ## Commands
 

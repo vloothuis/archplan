@@ -83,6 +83,29 @@ TOOLS = [
          "note": {"type": "string", "description": "One or two sentences: what the change does and why."},
          "thread": {"type": "string", "description": "Id of the thread this suggestion answers (optional)."}},
          "required": ["ops"]}},
+    {"name": "annotate",
+     "description": "Change declarations in the code: a component's trust zone (component.zone), a function "
+                    "that authenticates, authorizes or validates (function.guard), or whether an entry point "
+                    "needs an authenticated caller (entrypoint.auth: required or none, with a reason for none). "
+                    "The project's annotator writes them in its own form (marker comments by default) in a "
+                    "scratch copy and reads them back; you get one result per change and the patch. With "
+                    "apply, the patch goes into the working tree. A change with status unsupported, conflict "
+                    "or failed is not in the patch: make it by hand, then call refresh_model. The model's "
+                    "declarations section shows the current ones.",
+     "inputSchema": {"type": "object", "properties": {
+         "changes": {"type": "array", "items": {"type": "object", "properties": {
+             "op": {"type": "string", "enum": ["set", "remove"]},
+             "target": {"type": "object", "properties": {
+                 "kind": {"type": "string", "enum": ["component", "function", "entrypoint"]},
+                 "id": {"type": "string", "description": "a component id, or a function's id from the model's "
+                                                         "signatures or types, or <file>:<name>"}},
+                 "required": ["kind", "id"]},
+             "key": {"type": "string", "enum": ["zone", "guard", "auth"]},
+             "value": {"description": "zone: an id such as internal; guard: true; auth: required or none"},
+             "reason": {"type": "string"}},
+             "required": ["op", "target", "key"]}},
+         "apply": {"type": "boolean", "default": False}},
+         "required": ["changes"]}},
     {"name": "get_hotspots",
      "description": "Hotspots and coupling from git history: the components that change most, and pairs that change "
                     "in the same commits. hidden_coupling lists pairs with no dependency in the model; they often "
@@ -324,6 +347,10 @@ class Agent:
         return {**out, "message": "The human reviews this in the editor and accepts all, some or none of the ops. "
                                   "The target is unchanged until then. `archplan watch` reports the outcome."}
 
+    def annotate(self, changes, apply=False):
+        from . import annotators
+        return annotators.write(self.p, changes, apply=bool(apply))
+
     def get_hotspots(self, since_days=365, limit=20):
         return hotspots.summary(hotspots.hotspots(self.p, int(since_days)), min(int(limit), 100))
 
@@ -510,6 +537,7 @@ ACTIVITY = {
     "find": "Searching the model for {query}",
     "edit_target": "Proposed {n} change(s)",
     "refresh_model": "Re-exporting the model",
+    "annotate": "Writing {n} declaration change(s)",
     "wait_for_comments": "Waiting for comments",
     "get_hotspots": "Analysing git history for hotspots",
     "get_handover": "Reading the planned refactors",
@@ -526,13 +554,14 @@ ACTIVITY = {
 }
 DONE = {"refresh_model": "Re-exported the model"}  # long calls: a second entry when they finish
 AFTER = ("reply", "open_thread", "edit_target", "propose_batches", "set_refactor_state", "update_profile",
-         "label_finding", "propose_glossary", "propose_refactor")  # recorded only when they succeed
+         "label_finding", "propose_glossary", "propose_refactor", "annotate")  # recorded only when they succeed
 
 
 def record(p: Project, store: Store, tool: str, args: dict, done: bool = False) -> None:
     """Write what the agent does now to .archplan/activity.json for the editor."""
     a = {k: str(v)[:80] for k, v in args.items() if isinstance(v, (str, int))}
-    a["n"] = len(args.get("ops") or []) if isinstance(args.get("ops"), list) else 0
+    lst = args.get("ops", args.get("changes"))
+    a["n"] = len(lst) if isinstance(lst, list) else 0
     hs = Handovers(p.dir)
     h = hs.current() or (hs.history(1) or [None])[0]
     a["progress"] = progress(h, store.read()) if h else "Updated a refactor"

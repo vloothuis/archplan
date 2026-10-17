@@ -14,6 +14,8 @@
   archplan check [--format github] [--tighten]  new findings (cycles, rule breaks, ...) and the ratchet;
                                  exit 1 when there are new findings or a ratchet metric got worse
   archplan detectors [enable|disable|trust|run ID]  the checks behind the findings, and their settings
+  archplan annotators [trust ID|read|write FILE [--apply]]  declarations in the code (zones, guards, auth):
+                                 who reads and writes them, and changes to them as a patch
   archplan schema [show|tables] [--json] [--sqlite FILE] [--postgres --url-env VAR]
                                  database tables, their owners and who reads or writes them
   archplan glossary candidates   candidate glossary terms per component, from tf-idf over the code
@@ -501,6 +503,82 @@ def cmd_detectors(a):
     print(detectors.text(res))
 
 
+def cmd_annotators(a):
+    """List the annotators and their keys, approve one, read the declarations
+    or write changes to them."""
+    from . import annotators
+    p = project(a)
+    specs, errors = annotators.load(p)
+    if a.action == "trust":
+        if not a.arg or a.arg not in specs:
+            die(f"usage: archplan annotators trust <id>; ids: {', '.join(sorted(specs)) or 'none'}")
+        spec = specs[a.arg]
+        ok, changed = annotators.trust_state(p.root, spec)
+        if ok:
+            return print(f"{a.arg}: nothing to approve")
+        what = "was approved, but files it runs changed since:\n  " + "\n  ".join(shown(f) for f in changed) \
+            if changed else "is new on this machine:"
+        print(f"The annotator {a.arg} ({spec['file']}) {what}\nCommands:\n  "
+              + "\n  ".join(shown(c) for c in (spec["read"], spec.get("write")) if c), file=sys.stderr)
+        if not (sys.stdin.isatty() and sys.stderr.isatty()):
+            die("not approved; run `archplan annotators trust` in a terminal after reading the commands")
+        sys.stderr.write("Allow archplan to run them from now on? [y/N] ")
+        sys.stderr.flush()
+        if sys.stdin.readline().strip().lower() not in ("y", "yes"):
+            die("not approved")
+        annotators.trust(p.root, spec)
+        return print(f"approved: {a.arg}")
+    if a.action == "write":
+        if not a.arg:
+            die("usage: archplan annotators write FILE|- [--apply]; FILE holds {\"changes\": [...]}")
+        try:
+            data = json.loads(sys.stdin.read() if a.arg == "-" else Path(a.arg).read_text())
+        except (OSError, ValueError) as e:
+            die(f"cannot read the changes: {e}")
+        changes = data.get("changes") if isinstance(data, dict) else data
+        try:
+            res = annotators.write(p, changes, apply=a.apply)
+        except ProjectError as e:
+            die(str(e))
+        if a.json:
+            return print(json.dumps(res, indent=2, ensure_ascii=False))
+        for r in res["results"]:
+            c = r["change"] if isinstance(r["change"], dict) else {}
+            t = c.get("target") if isinstance(c.get("target"), dict) else {}
+            print(f"  {r['status']:<11} {c.get('op', '?')} {t.get('kind', '?')}.{c.get('key', '?')} "
+                  f"of {t.get('id', '?')}" + (f": {r['note']}" if r.get("note") else ""), file=sys.stderr)
+        if res["applied"]:
+            return print(f"applied to {', '.join(res['files'])}", file=sys.stderr)
+        if res["patch"]:
+            sys.stdout.write(res["patch"])
+            print("not applied; run again with --apply", file=sys.stderr)
+        return
+    if a.action == "read":
+        res = annotators.read(p)
+        if a.json:
+            return print(json.dumps(res, indent=2, ensure_ascii=False))
+        for d in res["declarations"]:
+            where = f"  ({d['file']}:{d.get('line', '?')})" if d.get("file") else ""
+            print(f"  {d['target']['kind']}.{d['key']} = {json.dumps(d['value'])}  {d['target']['id']}{where}"
+                  + (f"  reason: {d['reason']}" if d.get("reason") else ""))
+        for w in res["warnings"]:
+            print(f"warning: {w}", file=sys.stderr)
+        return print(f"{len(res['declarations'])} declarations", file=sys.stderr)
+    own, conflicts = annotators.owners(p, specs)
+    if a.json:
+        return print(json.dumps({"owners": own, "conflicts": conflicts,
+                                 "annotators": [dict(s, approved=annotators.trust_state(p.root, s)[0])
+                                                for s in specs.values()],
+                                 "errors": [{"file": f, "error": e} for f, e in errors]}, indent=2))
+    for k in annotators.KEYS:
+        aid = own.get(k)
+        state = "" if aid in (None, annotators.BUILTIN) else \
+            "" if annotators.trust_state(p.root, specs[aid])[0] else "  (not approved)"
+        print(f"  {k:<16} {aid or 'not read'}{state}")
+    for m in conflicts + [f"{f}: {e}" for f, e in errors]:
+        print(f"warning: {m}", file=sys.stderr)
+
+
 def plural_findings(n: int) -> str:
     return f"{n} finding{'' if n == 1 else 's'}"
 
@@ -764,6 +842,12 @@ def main(argv=None):
     s = add("detectors", cmd_detectors, "list the detectors; enable, disable, trust or run one")
     s.add_argument("action", nargs="?", choices=["list", "enable", "disable", "trust", "run"], default="list")
     s.add_argument("id", nargs="?", help="a detector id, such as concepts.data_clump")
+    s.add_argument("--json", action="store_true")
+    s = add("annotators", cmd_annotators, "who reads and writes the declarations in the code; approve one, "
+                                          "read them, or write changes as a patch")
+    s.add_argument("action", nargs="?", choices=["list", "trust", "read", "write"], default="list")
+    s.add_argument("arg", nargs="?", help="for trust: an annotator id; for write: a JSON file of changes, or -")
+    s.add_argument("--apply", action="store_true", help="for write: apply the patch to the working tree")
     s.add_argument("--json", action="store_true")
     s = add("schema", cmd_schema, "database tables, their owners and who reads or writes them")
     s.add_argument("action", nargs="?", choices=["show", "tables"], default="show")

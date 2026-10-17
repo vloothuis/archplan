@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from .core.project import *  # noqa: F401,F403
@@ -14,6 +15,12 @@ class Project(_Project):
 
     def export(self, timeout: float = 600, require_trust: bool = False) -> dict:
         counts = super().export(timeout=timeout, require_trust=require_trust)
+        from . import annotators
+        try:
+            for w in annotators.enrich(self)["warnings"]:
+                sys.stderr.write(f"archplan: {w}\n")
+        except Exception as e:  # noqa: BLE001 - declarations are optional enrichment
+            sys.stderr.write(f"archplan: declarations step failed: {e!r}\n")
         if not read_json(self.model_path, {}).get("vocabulary"):
             from .vocab import enrich as vocabulary_enrich
             vocabulary_enrich(self)
@@ -21,7 +28,6 @@ class Project(_Project):
         try:
             schema.enrich(self)
         except Exception as e:  # noqa: BLE001 - schema is optional enrichment
-            import sys
             sys.stderr.write(f"archplan: schema step failed: {e!r}\n")
         return counts
 
