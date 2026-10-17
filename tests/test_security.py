@@ -4,8 +4,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from archplan.detectors import (security_open_entry, security_unguarded_entry,  # noqa: E402
-                                security_unguarded_sink, security_untraced, security_zone_dependency)
+from archplan.detectors import (security_gateway, security_open_entry, security_unguarded_entry,  # noqa: E402
+                                security_unguarded_path, security_unguarded_sink, security_untraced,
+                                security_zone_dependency)
 from archplan.detectors.common import graph  # noqa: E402
 from archplan.detectors.security_common import called, short  # noqa: E402
 
@@ -178,6 +179,59 @@ class SecurityTest(unittest.TestCase):
         self.assertEqual(fs, {("guard", "internal/auth/policy.go:CanEdit"), ("entry", "internal/web/admin.go:admin"),
                               ("entry", "internal/web/hook.go:hook")})
         self.assertEqual(len(run(security_untraced, m, report_entries=False)), 1)
+
+    def paths_model(self):
+        m = model()
+        for c in ("export", "audit", "memvault"):
+            m["components"][c] = {"name": c.title(), "path": f"internal/{c}", "kind": "internal"}
+        m["dependencies"] += [{"from": "web", "to": "export"}, {"from": "export", "to": "vault"},
+                              {"from": "web", "to": "audit"}, {"from": "audit", "to": "auth"},
+                              {"from": "audit", "to": "vault"}, {"from": "memvault", "to": "vault"}]
+        m["types"].update({"internal/vault.Store": {"name": "Store", "component": "vault", "kind": "interface"},
+                           "internal/memvault.Mem": {"name": "Mem", "component": "memvault",
+                                                     "implements": ["internal/vault.Store"]}})
+        return m
+
+    def test_gateway_bypass(self):
+        m = self.paths_model()
+        self.assertEqual(run(security_gateway, m), [])  # no gateways declared
+        m["declarations"].append(decl("component", "vault", "gateway", ["audit", "nowhere"]))
+        m["sequences"]["seal"] = {"entry": "internal/web.(*App).seal", "messages": [
+            msg("Caller", "web", "(*App).seal(w, r)", 0), msg("web", "vault", "Seal()", 1)]}
+        fs = {(f["evidence"]["from"], f["evidence"]["to"]): f for f in run(security_gateway, m)}
+        # audit is the gateway; memvault implements vault's interface.
+        self.assertEqual(sorted(fs), [("export", "vault"), ("web", "vault")])
+        self.assertEqual(fs[("export", "vault")]["strength"], "weak")
+        self.assertEqual(fs[("web", "vault")]["strength"], "strong")  # a trace shows the call
+        self.assertEqual(fs[("web", "vault")]["evidence"]["sequences"], ["seal"])
+        self.assertEqual(fs[("web", "vault")]["evidence"]["gateways"], ["audit"])
+        self.assertEqual(fs[("export", "vault")]["title"], "Export depends on Vault directly, not through Audit.")
+
+    def test_unguarded_path(self):
+        m = self.paths_model()
+        fs = run(security_unguarded_path, m)
+        # web → vault is the entry component's own call; audit depends on the guard's component.
+        self.assertEqual([(f["evidence"]["from"], f["evidence"]["to"]) for f in fs], [("export", "vault")])
+        self.assertEqual(fs[0]["evidence"]["path"], ["export", "vault"])
+        self.assertEqual(fs[0]["evidence"]["entries"], ["web"])
+        self.assertEqual(fs[0]["strength"], "weak")
+        m["dependencies"] = [d for d in m["dependencies"] if d != {"from": "export", "to": "vault"}]
+        m["dependencies"] += [{"from": "export", "to": "orders"}, {"from": "orders", "to": "vault"}]
+        # web also calls orders, so orders → vault is the finding and export's path repeats it.
+        self.assertEqual([f["evidence"]["path"] for f in run(security_unguarded_path, m)], [["orders", "vault"]])
+        m["dependencies"] = [d for d in m["dependencies"] if d not in ({"from": "web", "to": "orders"},
+                                                                     {"from": "orders", "to": "web"})]
+        self.assertEqual([f["evidence"]["path"] for f in run(security_unguarded_path, m)],
+                         [["export", "orders", "vault"]])
+        self.assertEqual(run(security_unguarded_path, m, max_hops=1), [])
+        m["declarations"].append(decl("component", "vault", "gateway", ["orders"]))
+        self.assertEqual(run(security_unguarded_path, m), [])  # the path passes a gateway
+        m["declarations"] = [d for d in m["declarations"] if d["key"] not in ("zone", "gateway")]
+        self.assertEqual(run(security_unguarded_path, m), [])  # no restricted zone: no targets
+        m["declarations"].append(decl("function", "internal/vault/seal.go:Seal", "sink", "write",
+                                      file="internal/vault/seal.go"))
+        self.assertEqual(run(security_unguarded_path, m), [])
+        self.assertEqual(len(run(security_unguarded_path, m, sink_targets=True)), 1)
 
 
 if __name__ == "__main__":

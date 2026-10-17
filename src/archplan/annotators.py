@@ -35,11 +35,13 @@ from .core.project import trust_state as project_trust_state
 from .core.safeio import read_file
 from .detectors.external import NotRun, run_json, safe_path, text_of
 
-KEYS = ("component.zone", "function.guard", "function.sink", "entrypoint.auth")
+KEYS = ("component.zone", "component.gateway", "function.guard", "function.sink", "entrypoint.auth")
 KINDS = ("component", "function", "entrypoint")
 BUILTIN = "builtin"
 ID = re.compile(r"[a-z][a-z0-9_-]{0,40}")
 ZONE = re.compile(r"[a-z][a-z0-9_-]{0,40}")
+COMPONENT = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./@-]{0,199}")
+MAX_GATEWAYS = 20
 MAX_ENTRY = 64 * 1024
 MAX_DECLARATIONS = 5000
 MAX_CHANGES = 500
@@ -54,6 +56,9 @@ BREAKS = re.compile(r"[\x00-\x1f\x7f\x85  ]")  # a reason goes into a source
 def valid_value(key: str, v) -> bool:
     if key == "component.zone":
         return isinstance(v, str) and bool(ZONE.fullmatch(v))
+    if key == "component.gateway":
+        return (isinstance(v, list) and 0 < len(v) <= MAX_GATEWAYS
+                and all(isinstance(c, str) and COMPONENT.fullmatch(c) for c in v))
     if key == "function.guard":
         return v is True or v in GUARDS
     if key == "function.sink":
