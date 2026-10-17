@@ -243,6 +243,21 @@ class AnnotatorTest(unittest.TestCase):
             self.changes({"op": "set", "target": {"kind": "function", "id": "shop.ops.views.orders"},
                           "key": "guard", "value": True})
 
+    def test_go_markers_go_where_gofmt_puts_directives(self):
+        src = "package auth\n\n// Require checks the token.\nfunc Require() {}\n\n// Health says ok.\n//\n" \
+              "//nolint:funlen\nfunc Health() {}\n"
+        fp = self.root / "shop/auth.go"
+        fp.write_text(src)
+        guard = {"op": "set", "target": {"kind": "function", "id": "shop/auth.go:Require"}, "key": "guard", "value": True}
+        auth = {"op": "set", "target": {"kind": "entrypoint", "id": "shop/auth.go:Health"}, "key": "auth", "value": "none"}
+        res = self.changes(guard, auth, apply=True)
+        self.assertEqual([r["status"] for r in res["results"]], ["applied", "applied"], res)
+        self.assertEqual(fp.read_text(), "package auth\n\n// Require checks the token.\n//\n//archplan:guard\n"
+                                         "func Require() {}\n\n// Health says ok.\n//\n//nolint:funlen\n"
+                                         "//archplan:auth=none\nfunc Health() {}\n")
+        res = self.changes(dict(guard, op="remove"), dict(auth, op="remove"), apply=True)
+        self.assertEqual(fp.read_text(), src)
+
     def test_write_keeps_line_endings_and_finds_declarations(self):
         (self.root / "shop/ops/crlf.py").write_bytes(b"def a():\r\n    pass\r\n\r\nhealth(1)\r\n@app.route(\r\n"
                                                      b"    \"/h\",\r\n)\r\ndef health():\r\n    pass\r\n")

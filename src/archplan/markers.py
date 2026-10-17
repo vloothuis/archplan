@@ -38,6 +38,7 @@ SLASH = {".go", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".
          ".cs", ".rs", ".swift", ".php", ".dart", ".c", ".h", ".cc", ".cpp", ".hpp", ".m", ".groovy"}
 
 MARKER = re.compile(r"^(?P<indent>[ \t]*)(?:#|//)[ \t]*archplan:[ \t]*(?P<body>.*?)\s*$")
+GO_DIRECTIVE = re.compile(r"^//(?:line |extern |export |[a-z0-9]+:[a-z0-9])")
 TOKEN = re.compile(r'([a-z_]+)(?:=("(?:[^"\\]|\\.)*"|\S+))?')
 # What a written reason may not hold: line breaks, and : = < > * " \, so it
 # cannot become a magic comment (coding:, frozen_string_literal:) or end a PHP comment (?>).
@@ -421,6 +422,7 @@ def write_marker(base: Path, ch: dict, full: str) -> dict:
     if j is None:
         return {"status": "conflict", "note": f"{at.get('name') or 'the declaration'} is not in {rel} anymore"}
     top, word = preamble(lines, j, prefix), "guard" if full == "function.guard" else "auth"
+    go = rel.endswith(".go")
     existing = []
     for k in range(top, j):
         m = is_marker(lines[k], prefix)
@@ -431,6 +433,8 @@ def write_marker(base: Path, ch: dict, full: str) -> dict:
             rest = [t.group(0) for t in TOKEN.finditer(m.group("body")) if t.group(1) != word]
             if all(t.startswith("reason=") for t in rest):
                 del lines[i]
+                if go and i > 0 and lines[i - 1].strip() == "//" and not lines[i].lstrip().startswith("//"):
+                    del lines[i - 1]  # the separator gofmt wanted before it
             else:
                 lines[i] = marker_line(m.group("indent"), prefix, rel, " ".join(rest)) + cr
     else:
@@ -440,6 +444,11 @@ def write_marker(base: Path, ch: dict, full: str) -> dict:
             lines[existing[0][0]] = new
         elif existing:
             return {"status": "conflict", "note": f"{rel}:{existing[0][0] + 1} has several keys on one marker line"}
+        elif go:
+            # gofmt puts directives at the end of the doc comment, after a `//` line.
+            above = lines[j - 1].strip() if j > 0 else ""
+            doc = above.startswith("//") and above != "//" and not GO_DIRECTIVE.match(above)
+            lines[j:j] = [f"{indent}//{cr}", new] if doc else [new]
         else:
             lines.insert(top, new)
     save(fp, lines, trailing)

@@ -254,7 +254,9 @@ def require_user(conn, _opts), do: ...
   declares `entrypoint.auth`. `reason="…"` gives the reason for the keys on
   the same line.
 - The writer puts one key on each marker line, with the indentation of the
-  declaration, above its decorators. It keeps the file's line endings.
+  declaration, above its decorators. In Go it goes directly above `func`,
+  after the doc comment, where `gofmt` puts directives. It keeps the file's
+  line endings.
 - A declaration is a `def`, `func`, `fn`, `function`, `class` and the like,
   or a name with a modifier or type before it, such as `public User find(`.
   A call such as `find(x)` is not.
