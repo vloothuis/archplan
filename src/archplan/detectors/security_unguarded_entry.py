@@ -14,6 +14,7 @@ from collections import defaultdict
 
 from .common import Weight, finding, focus, plural
 from .security_common import called, decls, matches, name, participant, short, target
+from .security_common import guards as all_guards
 
 ID = "security.unguarded_entry"
 NAME = "Entry point without a guard on its traced path"
@@ -33,7 +34,7 @@ def entry_auth(ctx, entry: str, comp: str | None, auth: list) -> dict | None:
 
 
 def run(ctx, params) -> list:
-    guards = [target(ctx, d) for d in decls(ctx, "function", "guard") if d.get("value") is True]
+    guards = all_guards(ctx)
     auth = decls(ctx, "entrypoint", "auth")
     by_entry = defaultdict(list)  # entry -> [(sequence id, components on its path)]
     declared, guarded = {}, set()

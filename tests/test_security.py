@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from archplan.detectors import (security_open_entry, security_unguarded_entry,  # noqa: E402
-                                security_zone_dependency)
+                                security_unguarded_sink, security_untraced, security_zone_dependency)
 from archplan.detectors.common import graph  # noqa: E402
 from archplan.detectors.security_common import called, short  # noqa: E402
 
@@ -120,6 +120,64 @@ class SecurityTest(unittest.TestCase):
         self.assertIn("past the internal zone", fs[("web", "vault")]["title"])
         self.assertEqual(len(run(security_zone_dependency, report_skip=False)), 1)
         self.assertEqual(run(security_zone_dependency, order=["a", "b"]), [])
+
+    def test_unguarded_sink(self):
+        m = model()
+        seqs = m["sequences"]
+        seqs["save-order"] = {"entry": "internal/web.(*App).saveOrder", "messages": [
+            msg("Caller", "web", "(*App).saveOrder(w, r)", 0),
+            msg("web", "internal/auth.Verifier", "(*Verifier).VerifySubject(ctx, raw)", 1),
+            msg("web", "auth", "CanEdit(p, id)", 1), msg("web", "orders", "Save(o)", 1)]}
+        seqs["save-settings"] = {"entry": "internal/web.(*App).saveSettings", "messages": [
+            msg("Caller", "web", "(*App).saveSettings(w, r)", 0),
+            msg("web", "internal/auth.Verifier", "(*Verifier).VerifySubject(ctx, raw)", 1),
+            msg("web", "orders", "Save(o)", 1), msg("web", "auth", "CanEdit(p, id)", 1)]}
+        m["declarations"][0]["value"] = "authn"
+        m["declarations"] += [
+            decl("function", "internal/auth/policy.go:CanEdit", "guard", "authz", file="internal/auth/policy.go"),
+            decl("function", "internal/orders/store.go:Save", "sink", "write", file="internal/orders/store.go"),
+            decl("function", "internal/orders/store.go:Find", "sink", "read", file="internal/orders/store.go")]
+        fs = {(f["evidence"]["entry"], f["evidence"]["sink_kind"]): f for f in run(security_unguarded_sink, m)}
+        # saveOrder checks before it saves; saveSettings checks after. getOrder only authenticates.
+        self.assertEqual(sorted(fs), [("internal/web.(*App).getOrder", "read"),
+                                      ("internal/web.(*App).saveSettings", "write")])
+        self.assertEqual(fs[("internal/web.(*App).saveSettings", "write")]["strength"], "strong")
+        self.assertEqual(fs[("internal/web.(*App).saveSettings", "write")]["components"], ["web", "orders"])
+        self.assertEqual(fs[("internal/web.(*App).getOrder", "read")]["strength"], "medium")
+        self.assertEqual(len(run(security_unguarded_sink, m, report_read=False)), 1)
+        m["declarations"][0]["value"] = True  # a guard without a level also authorizes
+        self.assertEqual(run(security_unguarded_sink, m), [])
+        self.assertEqual(run(security_unguarded_sink), [])  # no sinks declared
+
+    def test_sink_rules(self):
+        m = model()
+        m["sequences"] = {"login": {"entry": "internal/web.(*App).login", "messages": [
+            msg("Caller", "web", "(*App).login(w, r)", 0),
+            msg("web", "internal/auth.Verifier", "(*Verifier).VerifySubject(ctx, raw)", 1),
+            msg("auth", "orders", "Find(id)", 2),  # the guard's own lookup
+            msg("web", "orders", "List()", 1),  # read first, filter after
+            msg("web", "auth", "CanEdit(p, id)", 1)]}}
+        m["declarations"][0]["value"] = "authn"
+        m["declarations"] += [
+            decl("function", "internal/auth/policy.go:CanEdit", "guard", "authz", file="internal/auth/policy.go"),
+            decl("function", "internal/orders/store.go:Find", "sink", "write", file="internal/orders/store.go"),
+            decl("function", "internal/orders/store.go:List", "sink", "read", file="internal/orders/store.go")]
+        self.assertEqual(run(security_unguarded_sink, m), [])
+        del m["sequences"]["login"]["messages"][-1]
+        self.assertEqual([f["title"] for f in run(security_unguarded_sink, m)],
+                         ["login reads through List without any authorization check."])
+
+    def test_untraced(self):
+        m = model()
+        m["declarations"] += [
+            decl("function", "internal/auth/policy.go:CanEdit", "guard", "authz", file="internal/auth/policy.go"),
+            decl("function", "internal/vault/seal.go:Seal", "guard", True, file="internal/vault/seal.go"),
+            decl("entrypoint", "internal/web/admin.go:admin", "auth", "required", file="internal/web/admin.go")]
+        fs = {(f["evidence"]["what"], f["evidence"]["target"]) for f in run(security_untraced, m)}
+        # vault is in no trace: no finding for Seal. health has a trace; hook is in web, which the traces visit.
+        self.assertEqual(fs, {("guard", "internal/auth/policy.go:CanEdit"), ("entry", "internal/web/admin.go:admin"),
+                              ("entry", "internal/web/hook.go:hook")})
+        self.assertEqual(len(run(security_untraced, m, report_entries=False)), 1)
 
 
 if __name__ == "__main__":

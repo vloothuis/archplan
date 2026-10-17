@@ -184,6 +184,29 @@ class AnnotatorTest(unittest.TestCase):
         out = subprocess.run(["git", "-C", str(self.root), "worktree", "list"], capture_output=True, text=True)
         self.assertEqual(len(out.stdout.strip().splitlines()), 1)  # the scratch worktree is gone
 
+    def test_guard_levels_and_sinks(self):
+        text = "# archplan: guard=authz\ndef can_edit(): ...\n# archplan: sink=write guard=root\ndef save(): ...\n"
+        found = markers.scan(text, "#", python=True)
+        self.assertEqual([x[2] for x in found], [{"function.guard": "authz"}, {"function.sink": "write"}])
+        self.assertEqual(found[1][4], ["guard=root"])
+        for value, ok in (("authn", True), ("authz", True), ("root", False)):
+            self.assertEqual(annotators.check_change({"op": "set", "target": {"kind": "function", "id": "x"},
+                                                      "key": "guard", "value": value}) is None, ok)
+        self.assertIn("cannot be", annotators.check_change(
+            {"op": "set", "target": {"kind": "function", "id": "x"}, "key": "sink", "value": "delete"}))
+        res = self.changes(
+            {"op": "set", "target": {"kind": "function", "id": "shop.ops.views.orders"}, "key": "sink", "value": "read"},
+            {"op": "set", "target": {"kind": "function", "id": "shop.accounts.guards.require_user"}, "key": "guard",
+             "value": "authn"}, apply=True)
+        self.assertEqual([r["status"] for r in res["results"]], ["applied", "applied"], res)
+        self.assertIn("# archplan: sink=read\ndef orders", (self.root / "shop/ops/views.py").read_text())
+        self.assertIn("# archplan: guard=authn\n", (self.root / "shop/accounts/guards.py").read_text())
+        self.assertNotIn("# archplan: guard\n", (self.root / "shop/accounts/guards.py").read_text())
+        res = self.changes({"op": "remove", "target": {"kind": "function", "id": "shop.ops.views.orders"},
+                            "key": "sink"}, apply=True)
+        self.assertEqual(res["results"][0]["status"], "applied", res)
+        self.assertNotIn("sink", (self.root / "shop/ops/views.py").read_text())
+
     def plugin(self, read_out, write_out=None, keys=("function.guard",), touch=None):
         script = self.root / "tools" / "ann.py"
         write(self.root, {"tools/ann.py": f"""\
