@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..model import allowed
+from ..core.policy import allowed
 from .common import EXAMPLES, Weight, comp_name, evidence_file, finding, focus, graph, plural
 
 ID = "layers.policy"

@@ -19,10 +19,16 @@ threads lock."""
 from __future__ import annotations
 
 import uuid
+from enum import Enum
 
 from .store import Conflict, JsonStore, NotFound, Store, find, stamp
 
-MODES = ("all", "batches")
+class HandoverMode(str, Enum):
+    ALL = "all"
+    BATCHES = "batches"
+
+
+MODES = tuple(mode.value for mode in HandoverMode)
 STATES = ("planned", "in-progress", "done")
 ACTIVE = ("sent", "proposed", "approved", "in-progress")
 
@@ -47,9 +53,11 @@ class Handovers(JsonStore):
 
     # --- the human ---
 
-    def create(self, store: Store, mode: str, note: str = "") -> dict:
+    def create(self, store: Store, mode: HandoverMode | str, note: str = "") -> dict:
         """Send all planned refactors that are not done yet, in order."""
-        if mode not in MODES:
+        try:
+            mode = HandoverMode(mode)
+        except ValueError:
             raise ValueError(f"mode must be one of {', '.join(MODES)}")
 
         def fn(d):
@@ -58,7 +66,7 @@ class Handovers(JsonStore):
             ids = [t["id"] for t in planned(store.read())]
             if not ids:
                 raise ValueError("no planned refactors to send")
-            h = {"id": "ho-" + uuid.uuid4().hex[:8], "created": stamp(), "mode": mode, "note": note or "",
+            h = {"id": "ho-" + uuid.uuid4().hex[:8], "created": stamp(), "mode": mode.value, "note": note or "",
                  "refactors": ids, "status": "sent", "batches": [], "decided": None}
             d["handovers"].append(h)
             return h
@@ -99,7 +107,7 @@ class Handovers(JsonStore):
             h = self.current(d)
             if not h:
                 raise Conflict("no active handover")
-            if h["mode"] != "batches" or h["status"] not in ("sent", "proposed"):
+            if handover_mode(h) is not HandoverMode.BATCHES or h["status"] not in ("sent", "proposed"):
                 raise Conflict(f"handover {h['id']} ({h['mode']}, {h['status']}) takes no batch proposal")
             h["batches"] = check_batches(h, batches)
             h["status"] = "proposed"
@@ -116,7 +124,7 @@ class Handovers(JsonStore):
             h = self.current(d)
             if not h or tid not in h["refactors"]:
                 raise Conflict(f"thread {tid} is not part of an active handover")
-            if h["status"] in ("sent", "proposed") and h["mode"] == "batches":
+            if h["status"] in ("sent", "proposed") and handover_mode(h) is HandoverMode.BATCHES:
                 raise Conflict("the batches are not approved yet: call propose_batches, then wait for the human")
 
             def upd(td):
@@ -135,6 +143,11 @@ def get(d: dict, hid: str) -> dict:
         if h["id"] == hid:
             return h
     raise NotFound(f"no handover {hid}")
+
+
+def handover_mode(h: dict) -> HandoverMode:
+    """Parse the persisted/API string at the handover boundary."""
+    return HandoverMode(h["mode"])
 
 
 def check_batches(h: dict, batches) -> list:
@@ -245,7 +258,8 @@ def progress(h: dict, d: dict) -> str:
     if h["status"] == "done":
         return f"Finished all {n} refactors"
     if h["status"] == "sent":
-        return f"{n} planned refactors sent" + (", waiting for a batch proposal" if h["mode"] == "batches" else "")
+        return f"{n} planned refactors sent" + (", waiting for a batch proposal"
+                                                 if handover_mode(h) is HandoverMode.BATCHES else "")
     if h["status"] == "proposed":
         return f"Batches proposed for {n} refactors, waiting for approval"
     return f"{done} of {n} refactors done"

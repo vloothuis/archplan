@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from ..hotspots import Mapper
+from ..core.hotspots import Mapper
 from .common import EXAMPLES, Weight, comp_name, finding, focus, plural, strength_of
 
 ID = "profile.rule"

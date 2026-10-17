@@ -7,6 +7,7 @@ import json
 import re
 
 from .project import Project, ProjectError, etag, read_json
+from .core.policy import allowed, leaks
 
 ANCHORS = ("Anchors name what a thread is about: type:<type id>, comp:<component id>, "
            "cedge:<from>-><to> (a component dependency), msg:<sequence id>:<message id>, "
@@ -15,36 +16,6 @@ ANCHORS = ("Anchors name what a thread is about: type:<type id>, comp:<component
            "task:<plan task key>, step:<plan task key>#<step index>, finding:<finding id>, glossary (a request to draft glossaries), suggest (a request for refactor proposals), "
            "suggestion:<suggestion id> (a proposal under discussion or planned), and group:<anchor>|<anchor>|... "
            "for one comment on several items, such as an import cycle.")
-
-
-def allowed(m: dict, f: str, t: str) -> bool:
-    """The editor's policy check: a deny rule wins, then the default or an allow rule."""
-    p = m.get("policy", {})
-    rules = p.get("rules", [])
-    hits = lambda r: r.get("from") in ("*", f) and r.get("to") in ("*", t)
-    if any(r.get("effect") == "deny" and hits(r) for r in rules):
-        return False
-    return p.get("default", "allow") == "allow" or any(r.get("effect") == "allow" and hits(r) for r in rules)
-
-
-def leaks(m: dict) -> list:
-    """Usage rows where a component uses terms of a concept it should not:
-    one it lists under avoid, or one owned by a component the policy forbids."""
-    v = m.get("vocabulary") or {}
-    concepts, comps, out = v.get("concepts", {}), v.get("components", {}), []
-    for u in v.get("usage", []):
-        c, k = u.get("component"), u.get("concept")
-        o = concepts.get(k, {}).get("owner")
-        if k not in concepts or c == o or k in comps.get(c, {}).get("uses", []):
-            continue
-        if k in comps.get(c, {}).get("avoid", []):
-            why = "avoid"
-        elif o and c in m.get("components", {}) and o in m.get("components", {}) and not allowed(m, c, o):
-            why = "policy"
-        else:
-            continue
-        out.append({**u, "owner": o, "why": why})
-    return out
 
 
 def violations(m: dict) -> list:

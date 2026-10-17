@@ -14,8 +14,8 @@ import os
 import re
 from pathlib import Path
 
-from ..safeio import is_file, read_file, read_text
-from ..safeio import walk as safe_walk
+from ..core.safeio import is_file, read_file, read_text
+from ..core.safeio import walk as safe_walk
 from . import ddl
 from .core import add_check, add_fk, add_index, drop_col, find_col, get_table, set_col, set_pk, snake
 from .exterm import atom, atoms, call, statements

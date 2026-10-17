@@ -42,7 +42,7 @@ import math
 import re
 from collections import defaultdict
 
-from ..hotspots import Mapper
+from ..core.hotspots import Mapper
 from .common import EXAMPLES, Weight, finding, focus, namer, plural
 
 ID = "history.modularity_violation"

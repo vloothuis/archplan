@@ -2540,6 +2540,47 @@ class NewDetectorsTest(TempProject):
         m = res["extras"]["metrics"]["core"]
         self.assertEqual((m["ca"], m["ce"], m["i"], m["a"], m["d"]), (3, 0, 0.0, 0.0, 1.0))
 
+    def test_balance(self):
+        """billing and shipping use orders' Order type; orders changes most. Only billing has
+        another owner than orders, which puts it far enough away."""
+        res = {"since_days": 365, "head": "abc", "pairs": [],
+               "components": {"orders": {"commits": 30}, "billing": {"commits": 10},
+                              "shipping": {"commits": 8}, "core": {"commits": 40}},
+               "owners": {"orders": {"o@x": 30}, "shipping": {"o@x": 8}, "billing": {"b@x": 9, "o@x": 1}}}
+        self.p.path("hotspots.json").write_text(json.dumps({"key": {}, "result": res}))
+        from archplan import detectors
+        self.assertEqual(self.found("boundaries.balance"), [])  # model coupling only: below min_strength
+        detectors.configure(self.p, "boundaries.balance", params={"min_strength": "model"})
+        out = detectors.run(self.p, only={"boundaries.balance"})
+        (f,) = out["findings"]
+        self.assertEqual(f["components"], ["billing", "orders"])
+        self.assertEqual((f["evidence"]["strength"], f["evidence"]["distance"], f["evidence"]["steps"]),
+                         ("model", 4, 2))
+        self.assertIn("uses type Order", f["detail"])
+        self.assertEqual(f["files"], ["lib/billing/invoice.ex"])
+        rows = {(r["from"], r["to"]): r for r in out["extras"]["balance"]}
+        self.assertTrue(rows[("shipping", "orders")]["balanced"])  # same owner: close
+        self.assertEqual(rows[("orders", "core")]["strength"], "contract")
+        # reading orders' table is intrusive; changing together is functional
+        m = concept_model()
+        m["schema"] = {"tables": {"orders": {"columns": []}}, "maps": {"orders": {"component": "orders"}},
+                       "access": [{"component": "shipping", "table": "orders", "mode": "read", "weight": 1,
+                                   "evidence": ["lib/shipping/q.ex:3"]}]}
+        self.p.model_path.write_text(json.dumps(m))
+        res["pairs"] = [{"a": "billing", "b": "orders", "together": 9, "degree": 0.8}]
+        self.p.path("hotspots.json").write_text(json.dumps({"key": {}, "result": res}))
+        detectors.configure(self.p, "boundaries.balance", params={"min_strength": "functional", "owner_distance": 0,
+                                                                  "far": 2})
+        rows = {(r["from"], r["to"]): r for r in detectors.run(self.p, only={"boundaries.balance"})["extras"]["balance"]}
+        self.assertEqual(rows[("shipping", "orders")]["strength"], "intrusive")
+        self.assertEqual(rows[("billing", "orders")]["strength"], "functional")
+        self.assertNotIn(("orders", "billing"), rows)  # changing together alone is not a dependency
+        fs = {tuple(f["components"]) for f in self.found("boundaries.balance")}
+        self.assertEqual(fs, {("billing", "orders"), ("shipping", "orders")})  # core is volatile, but contract only
+        from archplan.detectors.boundaries_balance import hops
+        self.assertEqual((hops(["a", "b"], ["a", "c"]), hops(["x"], ["a", "b", "c"]), hops(["a"], ["a", "b"])),
+                         (2, 4, 1))
+
     def test_unused_public(self):
         (f,) = self.found("boundaries.unused_public")
         self.assertEqual(f["components"], ["core"])

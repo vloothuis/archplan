@@ -363,6 +363,17 @@ class EctoTest(TempDir):
 
 
 class RailsPrismaTest(TempDir):
+    def test_discovery_skips_test_and_fixture_trees(self):
+        write(self.root, {
+            "mix.exs": 'defp deps, do: [{:ecto_sql, "~> 3.0"}]\n',
+            "lib/shop/orders/order.ex": ECTO_SCHEMA,
+            "exporters/elixir/test/fixture/mix.exs": 'defp deps, do: [{:ecto_sql, "~> 3.0"}]\n',
+            "exporters/elixir/test/fixture/lib/shop/orders/order.ex": ECTO_SCHEMA,
+            "tests/fixture/schema.sql": "CREATE TABLE fake (id integer);\n",
+        })
+
+        self.assertEqual(schema.detect(self.root), [{"kind": "ecto"}])
+
     def test_rails(self):
         write(self.root, {
             "db/schema.rb": """\

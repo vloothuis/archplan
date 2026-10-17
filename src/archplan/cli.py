@@ -17,7 +17,7 @@
   archplan schema [show|tables] [--json] [--sqlite FILE] [--postgres --url-env VAR]
                                  database tables, their owners and who reads or writes them
   archplan glossary candidates   candidate glossary terms per component, from tf-idf over the code
-  archplan hook                  Claude Code hook: tell the agent about new comments
+  archplan hook                  tell the agent about new comments
   archplan export-python         built-in exporter for Python projects
   archplan export-lite           approximate exporter for Java, Kotlin, Scala, C#, PHP, Ruby, Rust and Swift
   archplan exporters             which exporters match this repository, and whether they are installed
@@ -42,7 +42,7 @@ from pathlib import Path
 
 from . import __version__
 from .project import Project, ProjectError, changed_note, counts, find_root, init, read_json, write_json
-from .handover import Handovers
+from .handover import Handovers, HandoverMode, handover_mode
 from .store import Store, mentions, needs, who_next
 
 
@@ -295,7 +295,7 @@ def cmd_watch(a):
 
 
 def cmd_hook(a):
-    """For Claude Code SessionStart and UserPromptSubmit hooks. Prints (into the
+    """For SessionStart and UserPromptSubmit hooks. Prints (into the
     agent's context) the threads waiting on the agent that it was not told
     about yet in this session. Silent outside archplan projects."""
     try:
@@ -332,7 +332,7 @@ def cmd_hook(a):
     lines = []
     if ho_new:
         what = ("the batches are approved: work batch by batch" if h["status"] == "approved"
-                else "implement them in order" if h["mode"] == "all" else "propose batches first")
+                else "implement them in order" if handover_mode(h) is HandoverMode.ALL else "propose batches first")
         lines.append(f"archplan: the human sent {len(h['refactors'])} planned refactors in {p.name} "
                      f"(handover {h['id']}); {what}. Call get_handover for the details.")
     if new:
@@ -741,7 +741,7 @@ def main(argv=None):
     add("mcp", cmd_mcp, "MCP server on stdio")
     s = add("watch", cmd_watch, "print human comments and plan changes as they happen")
     s.add_argument("--interval", type=float, default=2)
-    add("hook", cmd_hook, "Claude Code hook (reads the hook event on stdin)")
+    add("hook", cmd_hook, "hook (reads the hook event on stdin)")
     s = add("profile", cmd_profile, "show or infer the architecture profile (roles, rules, breaks)")
     s.add_argument("action", nargs="?", choices=["show", "infer", "list", "use"], default="show")
     s.add_argument("name", nargs="?", help="for use: a profile name from `archplan profile list`, or inferred")

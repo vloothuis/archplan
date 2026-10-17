@@ -17,7 +17,7 @@ import time
 
 from .project import Project, read_json
 from .store import Store, mentions
-from .handover import Handovers
+from .handover import Handovers, HandoverMode, handover_mode
 from .suggestions import Suggestions
 
 
@@ -91,7 +91,7 @@ def handover_line(h: dict, was: str | None) -> str | None:
         return None
     note = " ".join((h.get("note") or "").split())[:300]
     if was is None and h["status"] == "sent":
-        how = "all in one go" if h["mode"] == "all" else "ask for a split first"
+        how = "all in one go" if handover_mode(h) is HandoverMode.ALL else "ask for a split first"
         return (f"handover {h['id']} sent: {len(h['refactors'])} planned refactors, {how}"
                 + (f": {note}" if note else "") + ". Call get_handover.")
     if h["status"] == "approved":

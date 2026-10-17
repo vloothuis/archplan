@@ -43,9 +43,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from ..project import append_ignore, changed_note, command_hash, etag, read_json, record_trust, write_json
-from ..project import trust_state as project_trust_state
-from ..safeio import read_file
+from ..core.project import append_ignore, changed_note, command_hash, etag, read_json, record_trust, write_json
+from ..core.project import trust_state as project_trust_state
+from ..core.safeio import read_file
 from .common import EXAMPLES, GROUPS, STRENGTHS, Weight, clean_focus, clean_weight, fingerprint, set_weight
 
 BUILTIN = Path(__file__).resolve().parent.parent / "contrib" / "detectors"

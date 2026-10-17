@@ -10,7 +10,7 @@ import sys
 from . import __version__, architecture, hotspots, reload
 from .model import ANCHORS, EDIT_OPS, dumps, find_items, get_item, violations
 from .project import Project, ProjectError, counts, read_json, write_json
-from .handover import Handovers, progress
+from .handover import Handovers, HandoverMode, handover_mode, progress
 from .store import MENTION, Store, find, mentions, stamp, needs, wait, who_next
 from .suggestions import Suggestions, propose
 
@@ -427,11 +427,11 @@ class Agent:
                          "state": r.get("state"), "note": r.get("note"), "anchor": th["anchor"],
                          "mentions": list(dict.fromkeys(items[1:])),
                          "discussion": digest(th)})
-        todo = {"all": "Implement the refactors in order.",
-                "batches": "Call propose_batches first, then wait for the human's approval."}[h["mode"]]
+        todo = {HandoverMode.ALL: "Implement the refactors in order.",
+                HandoverMode.BATCHES: "Call propose_batches first, then wait for the human's approval."}[handover_mode(h)]
         if h["status"] == "proposed":
             todo = "Wait: the human reviews your batches. `archplan watch` reports the approval."
-        elif h["status"] in ("approved", "in-progress") and h["mode"] == "batches":
+        elif h["status"] in ("approved", "in-progress") and handover_mode(h) is HandoverMode.BATCHES:
             todo = "Work batch by batch, in the approved order."
         return {**{k: h[k] for k in ("id", "mode", "note", "status", "batches", "created")},
                 "progress": progress(h, d), "todo": todo,
