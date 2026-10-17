@@ -257,6 +257,33 @@
         }
       }
     },
+    "declarations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["target", "key", "value"],
+        "properties": {
+          "target": {
+            "type": "object",
+            "required": ["kind", "id"],
+            "properties": {
+              "kind": { "enum": ["component", "function", "entrypoint"] },
+              "id": { "type": "string" }
+            }
+          },
+          "key": { "enum": ["zone", "guard", "auth"] },
+          "value": { "type": ["string", "boolean"] },
+          "reason": { "type": "string" },
+          "at": {
+            "type": "object",
+            "properties": { "file": { "type": "string" }, "line": { "type": "integer" }, "name": { "type": "string" } }
+          },
+          "file": { "type": "string" },
+          "line": { "type": "integer" },
+          "annotator": { "type": "string" }
+        }
+      }
+    },
     "notes": { "type": "object", "additionalProperties": { "type": "string" } }
   }
 }

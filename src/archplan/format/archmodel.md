@@ -30,6 +30,7 @@ JSON Schema: [`archmodel.schema.json`](archmodel.schema.json).
   "enums": [ ... ],
   "schema": { ... },
   "vocabulary": { ... },
+  "declarations": [ ... ],
   "notes": { "<target>": "text" }
 }
 ```
@@ -401,6 +402,30 @@ component's use of a concept is:
 3. fine when the concept is in the component's `uses`;
 4. otherwise a leak when the policy does not allow a dependency from the
    component to the concept's owner.
+
+## declarations
+
+Facts a person decides, read from the code by the annotators after every
+export (see [`annotator-plugins.md`](annotator-plugins.md)). Exporters do
+not write this section.
+
+```json
+"declarations": [
+  { "target": { "kind": "component", "id": "billing" }, "key": "zone", "value": "internal",
+    "file": "billing/GLOSSARY.md", "line": 2, "annotator": "builtin" },
+  { "target": { "kind": "entrypoint", "id": "ops.views.health" }, "key": "auth", "value": "none",
+    "reason": "load balancer health check", "at": { "file": "ops/views.py", "line": 9, "name": "health" },
+    "file": "ops/views.py", "line": 8, "annotator": "builtin" }
+]
+```
+
+- `target.kind` and `key` form the key: `component.zone`, `function.guard`
+  or `entrypoint.auth`.
+- A function or entry point id is the model's id from `signatures` or
+  `types`, or `<file>:<name>` when the model has none.
+- `at` is where the target is declared. `file` and `line` are where the
+  declaration is written.
+- `annotator` is the annotator that read it.
 
 ## notes
 

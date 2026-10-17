@@ -196,25 +196,35 @@ def gitignore(p) -> None:
 
 
 def execute_command(ctx, spec: dict, params: dict) -> dict:
+    out = run_json(spec["command"], context(ctx, spec, params), ctx.root, spec["timeout"])
+    if not isinstance(out, dict) or not isinstance(out.get("findings"), list):
+        raise NotRun('did not print {"findings": [...]}')
+    return out
+
+
+def run_json(command: str, data: dict, cwd, timeout: float, env: dict | None = None):
+    """Write data to a temporary file, run command with its quoted path in
+    place of {ctx} in a shell in cwd, and return the JSON it prints. Raises
+    NotRun when it cannot run, fails, times out or prints no JSON."""
     fd, tmp = tempfile.mkstemp(prefix="archplan-ctx-", suffix=".json")
     try:
         with os.fdopen(fd, "w") as fh:
-            json.dump(context(ctx, spec, params), fh)
-        cmd = spec["command"].replace("{ctx}", shlex.quote(tmp))
+            json.dump(data, fh)
+        cmd = command.replace("{ctx}", shlex.quote(tmp))
         try:
-            proc = subprocess.Popen(cmd, shell=True, cwd=ctx.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    stdin=subprocess.DEVNULL, start_new_session=True)
+            proc = subprocess.Popen(cmd, shell=True, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    stdin=subprocess.DEVNULL, start_new_session=True, env=env)
         except OSError as e:
             raise NotRun(f"could not run: {e}") from None
         try:
-            out, err = proc.communicate(timeout=spec["timeout"])
+            out, err = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)  # the shell and whatever it started
             except OSError:
                 proc.kill()
             proc.communicate()
-            raise NotRun(f"timed out after {spec['timeout']:g} seconds") from None
+            raise NotRun(f"timed out after {timeout:g} seconds") from None
         r = subprocess.CompletedProcess(cmd, proc.returncode, out, err)
     finally:
         try:
@@ -227,12 +237,9 @@ def execute_command(ctx, spec: dict, params: dict) -> dict:
     if len(r.stdout) > MAX_OUTPUT:
         raise NotRun(f"printed more than {MAX_OUTPUT >> 20} MB")
     try:
-        out = json.loads(r.stdout.decode("utf-8", "replace") or "null")
+        return json.loads(r.stdout.decode("utf-8", "replace") or "null")
     except ValueError:
         raise NotRun("did not print JSON") from None
-    if not isinstance(out, dict) or not isinstance(out.get("findings"), list):
-        raise NotRun('did not print {"findings": [...]}')
-    return out
 
 
 def text_of(x, n: int) -> str:

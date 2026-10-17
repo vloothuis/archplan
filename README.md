@@ -190,6 +190,9 @@ In a message, `@[Label](anchor)` mentions a model item, for example
 | `archplan check [--format github] [--all] [--update-baseline] [--tighten] [--loosen REASON] [--export] [--min-weight N] [--json]` | new findings and the ratchet; exit 1 when there are new findings or a ratchet metric got worse, 2 on errors |
 | `archplan detectors [--json]` | each detector: group, needs, whether it is on, missing data and its finding count |
 | `archplan detectors enable\|disable\|trust\|run ID [--json]` | switch a detector on or off, approve an external one, or run one |
+| `archplan annotators [--json]` | which annotator reads and writes each declaration key, and whether it is approved |
+| `archplan annotators trust ID`, `archplan annotators read [--json]` | approve a project annotator; list the declarations in the code |
+| `archplan annotators write FILE\|- [--apply] [--json]` | write changes to declarations as a patch, checked by reading it back; `--apply` applies it |
 | `archplan schema [show\|tables] [--json] [--refresh]` | the database tables, their owner components, and foreign keys across components |
 | `archplan schema --sqlite FILE`, `archplan schema --postgres --url-env VAR` | read the tables from a live database, only when you ask |
 | `archplan glossary candidates [--component ID] [--top N] [--json]` | the words that characterise each component, ranked by tf-idf |
@@ -481,6 +484,30 @@ Words in type names get a boost. Claude reads these candidates with their
 sample identifiers and the other components that use them. It then proposes
 concepts with one-line definitions as a suggestion you can review. Words you
 mark as noise go into `.archplan/vocabulary.json`.
+
+## Declarations in the code
+
+Some facts are decisions, not something an exporter can find: the trust zone
+a component is in, which functions are guards (they authenticate, authorize
+or validate), and which entry points need an authenticated caller. These
+declarations live in the repository, next to the code. After every export,
+archplan reads them into the model's `declarations` section.
+
+By default they are marker comments above a declaration, and a `zone:` line
+in the front matter of a component's `GLOSSARY.md`:
+
+```python
+# archplan: auth=none reason="load balancer health check"
+def health(request): ...
+```
+
+A project can read and write them in its own form instead, such as its
+language's annotations or database column comments, with an annotator
+plugin in `.archplan/annotators/`. Each key has one owner.
+`archplan annotators write` and the agent's `annotate` tool write changes in
+a scratch git worktree, read them back to check them, and return a patch;
+`--apply` applies it. The contract is in
+[`annotator-plugins.md`](src/archplan/format/annotator-plugins.md).
 
 ## Exporters
 
