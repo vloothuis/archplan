@@ -15,13 +15,20 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from enum import Enum
 from fnmatch import fnmatch
 from pathlib import Path
 
-from ..safeio import line_at, read_text
+from ..core.safeio import line_at, read_text
 
 EVIDENCE = 5
 MAX_FILE = 2_000_000
+
+
+class AccessMode(str, Enum):
+    ORM = "orm"
+    READ = "read"
+    WRITE = "write"
 
 WRITE = {
     "elixir": re.compile(r"\b(?:Repo|Multi)\.(?:insert|update|delete|insert_all|update_all|delete_all|"
@@ -170,7 +177,7 @@ def access(model: dict, root: Path, tables: dict, maps: dict, prisma: bool = Fal
             comp = component_of(model, path)
             for table in tbls:
                 mp = maps[table]
-                hit(comp, table, "orm", path, line or mp.get("line") or 1)
+                hit(comp, table, AccessMode.ORM, path, line or mp.get("line") or 1)
             lang = lang_of(path)
             if lang not in WRITE or NOT_WRITERS.search(path):
                 continue
@@ -178,7 +185,7 @@ def access(model: dict, root: Path, tables: dict, maps: dict, prisma: bool = Fal
             for table in tbls:
                 at = write_at(lang, text, maps[table], path == tfile)
                 if at is not None:
-                    hit(comp, table, "write", path, line_at(text, at))
+                    hit(comp, table, AccessMode.WRITE, path, line_at(text, at))
 
     known = set(tables)
     lower = {t.lower(): t for t in tables}
@@ -200,18 +207,19 @@ def access(model: dict, root: Path, tables: dict, maps: dict, prisma: bool = Fal
             if table is None:
                 continue
             kw = m.group(1).split()[0]
-            hit(comp, table, "read" if kw in ("FROM", "JOIN") else "write", path, line_at(text, m.start()))
+            mode = AccessMode.READ if kw in ("FROM", "JOIN") else AccessMode.WRITE
+            hit(comp, table, mode, path, line_at(text, m.start()))
         if lang_of(path) == "elixir":
             for m in ECTO_FROM.finditer(text):
                 if m.group(1) in known:
-                    hit(comp, m.group(1), "read", path, line_at(text, m.start()))
+                    hit(comp, m.group(1), AccessMode.READ, path, line_at(text, m.start()))
         if prisma_models:
             for m in PRISMA.finditer(text):
                 table = prisma_models.get(m.group(1))
                 if table:
-                    hit(comp, table, "write" if m.group(2) in PRISMA_WRITES else "read", path,
+                    hit(comp, table, AccessMode.WRITE if m.group(2) in PRISMA_WRITES else AccessMode.READ, path,
                         line_at(text, m.start()))
-    out = [{"component": c, "table": t, "mode": mode, "weight": len(h["files"]), "evidence": h["evidence"]}
+    out = [{"component": c, "table": t, "mode": mode.value, "weight": len(h["files"]), "evidence": h["evidence"]}
            for (c, t, mode), h in hits.items()]
     out.sort(key=lambda a: (a["table"], a["mode"], -a["weight"], a["component"]))
     return out
@@ -223,7 +231,7 @@ def owners(maps: dict, acc: list, tables: dict) -> None:
     declares it as a join table."""
     writes = defaultdict(lambda: defaultdict(int))
     for a in acc:
-        if a["mode"] == "write":
+        if AccessMode(a["mode"]) is AccessMode.WRITE:
             writes[a["table"]][a["component"]] += a["weight"]
     for table in tables:
         mp = maps.get(table)

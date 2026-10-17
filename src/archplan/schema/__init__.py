@@ -24,15 +24,15 @@ from pathlib import Path
 
 from . import access as access_mod
 from . import ddl, django, ecto, prisma, rails
-from ..safeio import model_base, prefix_of, read_file, read_text
-from ..safeio import walk as safe_walk
+from ..core.safeio import model_base, prefix_of, read_file, read_text
+from ..core.safeio import walk as safe_walk
 from .core import finish, merge_table
 
 INFRA = {"schema_migrations", "ar_internal_metadata", "django_migrations", "_prisma_migrations",
          "knex_migrations", "knex_migrations_lock", "flyway_schema_history", "databasechangelog",
          "databasechangeloglock", "goose_db_version"}
 SKIP_DIRS = {".git", "node_modules", "deps", "_build", ".venv", "venv", "vendor", "dist", "build", ".archplan",
-             "__pycache__", "tmp", "coverage"}
+             "__pycache__", "tmp", "coverage", "test", "tests", "spec", "e2e", "fixtures", "fixture"}
 SQL_NAMES = ("schema.sql", "structure.sql")
 SQL_MAX = 8 << 20  # bytes; a larger SQL dump is skipped
 LIVE = "schema-live.json"
@@ -227,14 +227,14 @@ def build(root: Path, model: dict, sources: list | None = None, live: dict | Non
 
 
 def read_live(p) -> dict | None:
-    from ..project import read_json
+    from ..core.project import read_json
     return read_json(p.path(LIVE))
 
 
 def enrich(p, live: dict | None = None, force: bool = False) -> dict | None:
     """Add the schema section to the project's as-is model. Returns it, or
     None when the model has one from the exporter or there is no source."""
-    from ..project import read_json, write_json
+    from ..core.project import read_json, write_json
     model = read_json(p.model_path)
     if not model:
         return None

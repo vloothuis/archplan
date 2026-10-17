@@ -58,7 +58,7 @@ calling `wait_for_comments`.
    so raise the tool timeout from the default of 60 seconds:
 
    ```bash
-   codex mcp add archplan -- archplan mcp
+   codex mcp add archplan -- "$HOME/.local/share/archplan/bin/archplan" mcp
    ```
 
    Then add this to `~/.codex/config.toml`, under the new
@@ -80,8 +80,8 @@ calling `wait_for_comments`.
    ```json
    {
      "hooks": {
-       "SessionStart": [{"hooks": [{"type": "command", "command": "archplan hook", "timeout": 10}]}],
-       "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "archplan hook", "timeout": 10}]}]
+       "SessionStart": [{"hooks": [{"type": "command", "command": "$HOME/.local/share/archplan/bin/archplan hook", "timeout": 10}]}],
+       "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "$HOME/.local/share/archplan/bin/archplan hook", "timeout": 10}]}]
      }
    }
    ```
@@ -193,7 +193,7 @@ In a message, `@[Label](anchor)` mentions a model item, for example
 | `archplan schema [show\|tables] [--json] [--refresh]` | the database tables, their owner components, and foreign keys across components |
 | `archplan schema --sqlite FILE`, `archplan schema --postgres --url-env VAR` | read the tables from a live database, only when you ask |
 | `archplan glossary candidates [--component ID] [--top N] [--json]` | the words that characterise each component, ranked by tf-idf |
-| `archplan hook` | Claude Code hook: report threads that wait on the agent |
+| `archplan hook` | hook: report threads that wait on the agent |
 | `archplan export-python` | the built-in Python exporter |
 | `archplan export-elixir`, `archplan trace-elixir` | the Elixir exporter and test tracer |
 | `archplan export-ts [-C DIR]` | the TypeScript and JavaScript exporter (needs `node`) |
@@ -276,6 +276,7 @@ follow it".
 | `concepts.string_enum` | a field compared with several string values across components (needs `literals`) |
 | `concepts.bool_params` | components whose public functions take boolean flags (needs `signatures`) |
 | `boundaries.stability` | components in the zone of pain (stable and concrete) or of uselessness (abstract and unused), from Martin's metrics |
+| `boundaries.balance` | dependencies out of balance, after Khononov's balanced coupling: strong coupling (`min_strength`, default `functional`: the two change together; `intrusive`: the downstream writes the upstream's tables or reads them with SQL; `model`: it uses the upstream's concrete types or queries its tables through their ORM types) over a long distance (`far` folder steps, plus `owner_distance` for different owners) on a volatile upstream (among the `volatile_share` most changed components, with `min_commits` or more). Needs the cached `archplan hotspots`. The strength, distance and volatility of every dependency are in the result's extras |
 | `boundaries.unused_public` | files with public types in a component others depend on, which only that component uses (needs `files`) |
 | `evolution.ownership` | components with many active authors and no clear owner, and authors spread over many components (cached hotspots) |
 

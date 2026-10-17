@@ -79,6 +79,12 @@ Optional, in order of value to archplan:
 
 archplan computes the vocabulary itself when a model has none.
 
+The Python exporter also reads test-recorded sequences from
+`.archplan/sequences.json`. The file has format `archplan-sequences/1` and a
+`sequences` object using the model's sequence shape. Keep argument values out
+of labels. The repository's sequence tests regenerate this file from calls
+observed while exercising representative workflows.
+
 ## Capabilities
 
 `source.capabilities` lists what the model contains:

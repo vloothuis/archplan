@@ -11,8 +11,8 @@ import os
 import re
 from pathlib import Path
 
-from ..safeio import read_file
-from ..safeio import walk as safe_walk
+from ..core.safeio import read_file
+from ..core.safeio import walk as safe_walk
 from .core import add_check, add_fk, add_index, find_col, get_table, set_col, set_pk
 
 SKIP_DIRS = {".git", ".venv", "venv", "env", "node_modules", "build", "dist", "__pycache__", ".tox", ".nox",

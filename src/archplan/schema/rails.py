@@ -8,8 +8,8 @@ import itertools
 import re
 from pathlib import Path
 
-from ..safeio import files as safe_files
-from ..safeio import line_at, read_file
+from ..core.safeio import files as safe_files
+from ..core.safeio import line_at, read_file
 from .core import add_check, add_fk, add_index, find_col, get_table, plural, set_col, set_pk, snake
 from .exterm import atom, atoms, call, statements
 

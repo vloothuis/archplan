@@ -72,15 +72,15 @@ from .store import JsonStore, NotFound, Store, stamp
 STATES = ("new", "accepted", "dismissed")
 
 
-def run(p: Project, arch: Architecture | None = None, execute: bool = False) -> dict:
+def run(p: Project, arch: Architecture | None = None, *, execute: bool = False) -> dict:
     """Every detector's findings, without states: see detectors.run."""
     return detectors.run(p, arch or Architecture(p), execute=execute)
 
 
-def analyse(p: Project, arch: Architecture | None = None, execute: bool = False) -> tuple:
+def analyse(p: Project, arch: Architecture | None = None, *, execute: bool = False) -> tuple:
     """(findings, missing): every finding the data supports, without states,
     and the detectors left out for lack of data, with the reason."""
-    res = run(p, arch, execute)
+    res = run(p, arch, execute=execute)
     return res["findings"], res["missing"]
 
 
@@ -167,7 +167,7 @@ class Findings:
         key = tuple(etag(x) for x in (self.p.model_path, self.p.target_path, self.arch.path,
                                       self.p.path("hotspots.json"))) + (detectors.version(self.p),)
         if self._cache[0] != key:
-            self._cache = (key, run(self.p, self.arch, self.execute))
+            self._cache = (key, run(self.p, self.arch, execute=self.execute))
         return self._cache[1]
 
     def raw(self) -> tuple:

@@ -264,10 +264,10 @@ ul.breaks{margin:4px 0 8px;padding-left:18px;font-size:13px;max-height:260px;ove
   <div class="spacer"></div>
   <div class="seg" id="leftModes" hidden title="What the left column shows"><button data-left="plan">Plan</button><button data-left="arch">Architecture</button><button data-left="find">Findings <span class="pill rem" id="findN" hidden></span></button></div>
   <div class="spacer"></div>
-  <button class="pill agent" id="agentPill" hidden title="What Claude did last"></button>
+  <button class="pill agent" id="agentPill" hidden title="What the agent did last"></button>
   <button class="pill warn" id="sugPill" hidden title="Show the first suggestion"></button>
-  <div class="menu-wrap" id="suggestWrap" hidden><button class="btn" id="suggestBtn" title="Ask Claude to propose refactors">✦ Suggest refactors ▾</button><div class="menu sgx" id="suggestMenu" hidden></div></div>
-  <button class="btn primary" id="sendBtn" hidden title="Hand the planned refactors to Claude">Send plan to Claude</button>
+  <div class="menu-wrap" id="suggestWrap" hidden><button class="btn" id="suggestBtn" title="Ask the agent to propose refactors">✦ Suggest refactors ▾</button><div class="menu sgx" id="suggestMenu" hidden></div></div>
+  <button class="btn primary" id="sendBtn" hidden title="Hand the planned refactors to the agent">Send plan to the agent</button>
   <button class="btn" id="searchBtn" title="Find a component, type, task or action">⌕ Search <span class="kbd">⌘K</span></button>
   <div class="menu-wrap"><button class="btn" id="shareBtn">Share ▾</button><div class="menu" id="shareMenu" hidden></div></div>
   <div class="menu-wrap"><button class="btn ico" id="moreBtn" title="More">⋯</button><div class="menu" id="moreMenu" hidden></div></div>
@@ -282,7 +282,7 @@ ul.breaks{margin:4px 0 8px;padding-left:18px;font-size:13px;max-height:260px;ove
     <li><b>Left: the plan.</b> The intent at the top says what the change should achieve. Below it come the rules, the tasks and the comment threads. A thread about a task sits under that task.</li>
     <li><b>Right: the diagram.</b> The toolbar picks the view (<i>Components</i>, <i>Types</i>, <i>Sequences</i>, <i>Glossary</i>) and the mode (<i>As-is</i>, <i>To-be</i>, <i>Diff</i>). <i>Focus</i> narrows the diagram to a few components. <i>View</i> holds the settings that hide or filter things; its number says how many are on. <i>Overlay</i> colours the boxes.</li>
     <li><b>Item pages.</b> Click a box, a line or a call to open its page on the left. The page shows the details and the edits you can make. Click <i>Plan</i> in the breadcrumb, or press <kbd>Esc</kbd>, to go back.</li>
-    <li><b>Header.</b> The pill shows what Claude did last. <i>Search</i> finds any component, type, task or action. <i>Share</i> copies or downloads the plan, the diagram as D2 and the target model. <i>⋯</i> opens files, exports from the code, resets the target, sets the theme and opens this help.</li>
+    <li><b>Header.</b> The pill shows what the agent did last. <i>Search</i> finds any component, type, task or action. <i>Share</i> copies or downloads the plan, the diagram as D2 and the target model. <i>⋯</i> opens files, exports from the code, resets the target, sets the theme and opens this help.</li>
   </ul>
   <h3>Start here</h3>
   <ol>
@@ -291,11 +291,11 @@ ul.breaks{margin:4px 0 8px;padding-left:18px;font-size:13px;max-height:260px;ove
     <li><b>Edit the to-be model.</b> Click an item and change it on its page: move a type, rename it, forbid a dependency. Drag the blue dot from one box to another to connect them. Select a line and press <kbd>Delete</kbd> to remove it. To add a type or a package, or to read the model as text, open <i>Edit the model</i> at the end of the plan. <i>Diff</i> shows what you changed.</li>
     <li><b>Comment.</b> Write on an item's page. Shift-click several items to comment on them together, for example an import cycle. Type <kbd>@</kbd> to link a component, type or task. A comment on a selection keeps a small picture of it. Click the picture to get that view back.</li>
     <li><b>Lock in.</b> When a discussion has reached a decision, choose <i>Lock in</i> on its thread. Give the refactor a title and a short summary of what was agreed. It joins <i>Planned refactors</i>. Drag the cards to set the order. <i>Unlock</i> opens the discussion again.</li>
-    <li><b>Hand over.</b> When you are happy with all planned refactors, choose <i>Send plan to Claude</i>. Claude does them all in one go, or first proposes how to split or combine the work. You can move refactors between the proposed batches, then approve. A banner at the top of the plan shows the progress. The plan also lists the tasks from your model edits in order. Claude reads it directly. <i>Check against the code</i>, at the end of the plan, shows how the result is verified.</li>
+    <li><b>Hand over.</b> When you are happy with all planned refactors, choose <i>Send plan to the agent</i>. The agent does them all in one go, or first proposes how to split or combine the work. You can move refactors between the proposed batches, then approve. A banner at the top of the plan shows the progress. The plan also lists the tasks from your model edits in order. The agent reads it directly. <i>Check against the code</i>, at the end of the plan, shows how the result is verified.</li>
   </ol>
-  <h3>Working with Claude</h3>
-  <p>In Claude Code, with the archplan plugin, type <code>/archplan</code> in the repository. Claude sees your comments as you write them and answers in the same thread. An orange <b>decision</b> thread waits for your choice: click an option. A <b>feedback</b> thread only needs reading.</p>
-  <p>When Claude proposes a change to the target, it arrives as a <b>suggestion</b>. Its card lists each change. Untick the ones you do not want, then accept or reject. The card says how the plan would grow or shrink. <i>With suggestion</i> in the mode switch shows the change in the diagram, with new items dashed green. A change Claude makes directly shows in <i>Diff</i>, and Undo reverts it. After Claude changes the code, the model reloads and the plan shrinks.</p>
+  <h3>Working with your agent</h3>
+  <p>In your coding agent, use the Archplan skill in the repository. The agent sees comments at the next prompt and can answer in the same thread. An orange <b>decision</b> thread waits for your choice: click an option. A <b>feedback</b> thread only needs reading.</p>
+  <p>When the agent proposes a change to the target, it arrives as a <b>suggestion</b>. Its card lists each change. Untick the ones you do not want, then accept or reject. The card says how the plan would grow or shrink. <i>With suggestion</i> in the mode switch shows the change in the diagram, with new items dashed green. A change the agent makes directly shows in <i>Diff</i>, and Undo reverts it. After the agent changes the code, the model reloads and the plan shrinks.</p>
   <h3>Overlays</h3>
   <p><i>Change frequency</i> colours each component by the number of commits that touched it in the last year. <i>Co-change</i> draws a purple dashed line between components that often change in the same commit. A thick line means there is no dependency between them: hidden coupling. <i>Fan-in</i> and <i>fan-out</i> colour components by how many others use them, or how many they use. The first two need git. Overlays work in the Components view.</p>
   <h3>Architecture</h3>
@@ -345,7 +345,7 @@ ul.breaks{margin:4px 0 8px;padding-left:18px;font-size:13px;max-height:260px;ove
         <button data-mode="sugg" id="suggMode" hidden title="The target with the pending suggestion applied">With suggestion</button>
       </div>
       <select id="seqSel" style="display:none;max-width:240px" title="Sequence"></select>
-      <select id="unitSel" style="display:none;max-width:240px" title="Unit"></select><select id="cmpSel" style="display:none;max-width:240px" title="Show a second unit below, to compare"></select><button class="btn" id="draftBtn" style="display:none" title="Claude proposes concepts, owners and definitions from the candidate terms">Draft glossaries…</button>
+      <select id="unitSel" style="display:none;max-width:240px" title="Unit"></select><select id="cmpSel" style="display:none;max-width:240px" title="Show a second unit below, to compare"></select><button class="btn" id="draftBtn" style="display:none" title="The agent proposes concepts, owners and definitions from the candidate terms">Draft glossaries…</button>
       <button class="btn" id="seqInfo" style="display:none" title="Edit this sequence: add calls and participants">Sequence page</button>
       <div class="focus" id="focusBox"><input id="focusIn" list="focusList" placeholder="⌖ Focus…"><datalist id="focusList"></datalist><span id="chips"></span></div>
       <div class="menu-wrap"><button class="btn" id="viewBtn" title="What the diagram shows">View ▾</button>
@@ -2492,9 +2492,9 @@ function threadHTML(t, withLink, inCard) {
   const tag = m => m.author !== 'agent' ? '' : m.kind === 'decision' ? '<span class="mk decision">decision needed</span>' : '<span class="mk">feedback</span>';
   const choices = (m, i) => i === last && nd === 'decision' && m.options?.length
     ? `<div class="choices">${m.options.map(o => `<button class="btn" data-act="thread.choose" data-id="${t.id}" data-opt="${esc(o)}">${esc(o)}</button>`).join('')}</div>` : '';
-  const msgs = t.messages.map((m, i) => `<div class="msg${m.kind === 'decision' ? ' decision' : ''}"><span class="who ${m.author === 'agent' ? 'agent' : 'human'}">${m.author === 'agent' ? 'Claude' : 'you'}</span>${tag(m)}<span class="when">${esc((m.at || '').replace('T', ' ').slice(0, 16))}</span><div class="body">${md(m.text)}</div>${choices(m, i)}</div>`).join('');
+  const msgs = t.messages.map((m, i) => `<div class="msg${m.kind === 'decision' ? ' decision' : ''}"><span class="who ${m.author === 'agent' ? 'agent' : 'human'}">${m.author === 'agent' ? 'agent' : 'you'}</span>${tag(m)}<span class="when">${esc((m.at || '').replace('T', ' ').slice(0, 16))}</span><div class="body">${md(m.text)}</div>${choices(m, i)}</div>`).join('');
   return `<div class="thread ${t.status}${nd ? ' needs-' + nd : ''}" id="th-${esc(t.id)}"><div class="th-h">${withLink ? `<a data-act="thread.goto" data-key="${esc(t.anchor)}">${esc(t.label || t.anchor)}</a>` : ''}<div class="spacer"></div>
-      ${t.status === 'planned' ? `<span class="wait plan">${stack().includes(t) ? `planned refactor ${stack().indexOf(t) + 1}` : 'refactor done'}</span>` : nd === 'decision' ? '<span class="wait human">decide</span>' : nd === 'feedback' ? '<span class="wait fb">read</span>' : w === 'agent' ? '<span class="wait agent">waiting on Claude</span>' : '<span class="wait">resolved</span>'}</div>
+      ${t.status === 'planned' ? `<span class="wait plan">${stack().includes(t) ? `planned refactor ${stack().indexOf(t) + 1}` : 'refactor done'}</span>` : nd === 'decision' ? '<span class="wait human">decide</span>' : nd === 'feedback' ? '<span class="wait fb">read</span>' : w === 'agent' ? '<span class="wait agent">waiting on agent</span>' : '<span class="wait">resolved</span>'}</div>
     ${t.anchor?.startsWith('finding:') ? findBox(t) : ''}${t.snapshot ? snapHTML(t) : ''}
     ${msgs}
     ${t.status === 'open' ? pending().filter(s => s.thread === t.id).map(s => isRef(s) ? `<div class="row fsm"><span class="pill add">proposed refactor</span><button class="linkb" data-act="ref.open" data-id="${esc(s.id)}">${esc(s.title || 'Open the proposal')}</button></div>` : sugCard(s)).join('') : ''}
@@ -2882,7 +2882,7 @@ const actions = {
 };
 // ---------- planned refactors and the handover ----------
 // A thread the human locks in becomes a planned refactor (status "planned").
-// The planned stack goes to Claude in one handover.
+// The planned stack goes to the agent in one handover.
 let HO = {current: null, history: []}, lockFor = null, rfEdit = null, hoBatches = null, hoAsk = false, drag = null;
 const rfOpen = new Set(), drafts = {};
 const planned = () => threads.filter(t => t.status === 'planned').sort((a, b) => (a.refactor?.order ?? 0) - (b.refactor?.order ?? 0));
@@ -2920,7 +2920,7 @@ function rfCard(t, i) {
       <label>Summary<textarea id="rfe-s-${t.id}" rows="3">${esc(draft('rfe-s-' + t.id, r.summary || ''))}</textarea></label>
       <div class="row"><button class="btn primary" data-act="rf.save" data-id="${t.id}">Save</button><button class="btn" data-act="rf.cancel" data-id="${t.id}">Cancel</button></div></div>`
       : r.summary ? `<div class="rf-sum">${md(r.summary)}</div>` : ''}
-    ${r.note ? `<div class="rf-note">Claude: ${esc(r.note)}</div>` : ''}
+    ${r.note ? `<div class="rf-note">Agent: ${esc(r.note)}</div>` : ''}
     <div class="chips">${anchorKeys(t.anchor).map(k => `<button class="chip" data-act="thread.goto" data-key="${esc(k)}">${esc(anchorLabel(k))}</button>`).join('')}</div>
     <div class="row"><button class="linkb" data-act="rf.thread" data-id="${t.id}">${rfOpen.has(t.id) ? 'Hide' : 'Show'} the conversation (${t.messages.length})</button><span class="spacer"></span>
       ${busy || ed ? '' : `<button class="btn" data-act="rf.edit" data-id="${t.id}">Edit</button><button class="btn" data-act="rf.unlock" data-id="${t.id}" title="Take it off the planned stack and open the discussion again">Unlock</button>`}</div>
@@ -2928,18 +2928,18 @@ function rfCard(t, i) {
 }
 function plannedHTML() {
   const ps = stack(), dn = planned().filter(t => !ps.includes(t));
-  const fin = dn.length ? fold('rfdone', `Done refactors (${dn.length})`, dn.map(t => `<div class="rf done"><div class="rf-h"><span class="tt">${esc(t.refactor?.title || t.label)}</span>${stBadge('done')}<button class="btn" data-act="thread.resolve" data-id="${t.id}" title="Move the thread to Done">Resolve</button></div>${t.refactor?.note ? `<div class="rf-note" style="margin-left:0">Claude: ${esc(t.refactor.note)}</div>` : ''}</div>`).join('')) : '';
+  const fin = dn.length ? fold('rfdone', `Done refactors (${dn.length})`, dn.map(t => `<div class="rf done"><div class="rf-h"><span class="tt">${esc(t.refactor?.title || t.label)}</span>${stBadge('done')}<button class="btn" data-act="thread.resolve" data-id="${t.id}" title="Move the thread to Done">Resolve</button></div>${t.refactor?.note ? `<div class="rf-note" style="margin-left:0">Agent: ${esc(t.refactor.note)}</div>` : ''}</div>`).join('')) : '';
   if (!ps.length) return fin + '<p class="mute" style="margin:0">Nothing planned yet. When a discussion has reached a decision, choose <b>Lock in</b> on its thread. The refactor joins this stack.</p>';
-  return ps.map(rfCard).join('') + fin + (hoActive() || !todo().length ? '' : `<div class="rf-send"><span class="mute" style="font-size:13px">Drag the cards to change the order.</span><span class="spacer"></span><button class="btn primary" data-act="ho.open">Send plan to Claude</button></div>`);
+  return ps.map(rfCard).join('') + fin + (hoActive() || !todo().length ? '' : `<div class="rf-send"><span class="mute" style="font-size:13px">Drag the cards to change the order.</span><span class="spacer"></span><button class="btn primary" data-act="ho.open">Send plan to the agent</button></div>`);
 }
 const hhmm = at => { const d = new Date(at); return isNaN(d) ? '' : d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}); };
-const HO_ST = {sent: 'waiting for Claude', proposed: 'Claude proposes batches', approved: 'approved', 'in-progress': 'in progress'};
+const HO_ST = {sent: 'waiting on agent', proposed: 'agent proposes batches', approved: 'approved', 'in-progress': 'in progress'};
 function hoBannerHTML() {
   const a = hoActive(), hist = [...(HO.history || []), ...(HO.current && !a ? [HO.current] : [])].filter((h, i, l) => l.findIndex(x => x.id === h.id) === i);
   let s = '';
   if (a) {
     const n = a.refactors.length, done = a.refactors.filter(id => rfOf(id)?.refactor?.state === 'done').length;
-    s += `<div class="hobanner" id="hoBanner"><span class="dot live"></span><span>Sent to Claude ${hhmm(a.created)} · ${a.mode === 'all' ? 'all in one go' : 'split into batches'} · ${done} of ${n} done · ${HO_ST[a.status] || esc(a.status)}</span><span class="spacer"></span><button class="btn" data-act="ho.cancel">Cancel</button></div>`;
+    s += `<div class="hobanner" id="hoBanner"><span class="dot live"></span><span>Sent to the agent ${hhmm(a.created)} · ${a.mode === 'all' ? 'all in one go' : 'split into batches'} · ${done} of ${n} done · ${HO_ST[a.status] || esc(a.status)}</span><span class="spacer"></span><button class="btn" data-act="ho.cancel">Cancel</button></div>`;
     if (a.status === 'proposed') s += proposalHTML(a);
   }
   if (hist.length) s += `<p class="mute hohist">Earlier handovers: ${hist.slice(-3).reverse().map(h => `${esc(new Date(h.created).toLocaleDateString())} ${hhmm(h.created)}, ${esc(h.status)}, ${plural(h.refactors.length, 'refactor')}`).join('; ')}.</p>`;
@@ -2948,11 +2948,11 @@ function hoBannerHTML() {
 const hoB = a => hoBatches?.id === a.id ? hoBatches.b : a.batches || [];
 function proposalHTML(a) {
   const B = hoB(a), num = id => stack().findIndex(t => t.id === id) + 1;
-  return `<div class="proposal" id="hoProposal"><div class="mh" style="padding-left:0">Claude proposes ${B.length} batch${B.length === 1 ? '' : 'es'}</div>
+  return `<div class="proposal" id="hoProposal"><div class="mh" style="padding-left:0">The agent proposes ${B.length} batch${B.length === 1 ? '' : 'es'}</div>
     ${B.map((b, i) => `<div class="batch" data-batch="${i}"><b>${i + 1}. ${esc(b.title || 'Batch ' + (i + 1))}</b>${b.notes ? `<div class="mute" style="font-size:13px">${esc(b.notes)}</div>` : ''}
       <div class="chips">${b.refactors.map(id => `<span class="chip" draggable="true" data-bref="${esc(id)}">${num(id) || '?'}. ${esc(rfOf(id)?.refactor?.title || id)}</span>`).join('') || '<span class="mute" style="font-size:13px">Empty. Drop a refactor here.</span>'}</div></div>`).join('')}
     <p class="mute" style="font-size:13px;margin:4px 0">Drag a refactor to another batch to move it. Approve sends the batches as shown.</p>
-    ${hoAsk ? `<textarea id="ho-ask" rows="2" placeholder="What should Claude change in the proposal?"></textarea><div class="row"><button class="btn primary" data-act="ho.asksend">Send to Claude</button><button class="btn" data-act="ho.askcancel">Cancel</button></div>`
+    ${hoAsk ? `<textarea id="ho-ask" rows="2" placeholder="What should the agent change in the proposal?"></textarea><div class="row"><button class="btn primary" data-act="ho.asksend">Send to the agent</button><button class="btn" data-act="ho.askcancel">Cancel</button></div>`
       : `<div class="row"><button class="btn primary" data-act="ho.approve">Approve</button><button class="btn" data-act="ho.ask">Ask for changes</button></div>`}</div>`;
 }
 // Server calls; without a server (sample, local file) the same changes are made in the page.
@@ -2985,7 +2985,7 @@ async function loadHandover() {
 function sendPlan(mode, note) {
   return hoCall('POST', '/api/handover', {mode, note}, () => {
     const ids = todo().map(t => t.id), at = nowStamp();
-    // Without Claude, propose one batch per two refactors so the flow can be tried.
+    // Without an agent, propose one batch per two refactors so the flow can be tried.
     const batches = mode === 'batches' ? [...Array(Math.ceil(ids.length / 2))].map((_, i) => ({title: `Batch ${i + 1}`, refactors: ids.slice(2 * i, 2 * i + 2), notes: ''})) : [];
     HO.current = {id: 'ho-' + Math.random().toString(36).slice(2, 8), created: at, mode, note, refactors: ids, status: mode === 'all' ? 'sent' : 'proposed', batches, decided: null};
   });
@@ -3000,13 +3000,13 @@ const cancelHandover = () => hoCall('POST', `/api/handover/${HO.current.id}/canc
 function hoDialog() {
   const ps = todo(), nOpen = openThreads().length;
   if (!ps.length) return;
-  $('hoDlg').firstElementChild.innerHTML = `<button class="btn close" data-ho="close" title="Close (Esc)">✕</button><h2>Send plan to Claude</h2>
-    <p>Claude gets ${plural(ps.length, 'planned refactor')}, in this order:</p><ol>${ps.map(t => `<li>${esc(t.refactor?.title || t.label)}</li>`).join('')}</ol>
+  $('hoDlg').firstElementChild.innerHTML = `<button class="btn close" data-ho="close" title="Close (Esc)">✕</button><h2>Send plan to the agent</h2>
+    <p>The agent gets ${plural(ps.length, 'planned refactor')}, in this order:</p><ol>${ps.map(t => `<li>${esc(t.refactor?.title || t.label)}</li>`).join('')}</ol>
     ${nOpen ? `<div class="warnbox">⚠ ${nOpen === 1 ? '1 discussion is' : nOpen + ' discussions are'} still open. You can send the plan anyway.</div>` : ''}
-    <h3>How should Claude do this?</h3>
-    <label class="opt"><input type="radio" name="homode" value="all" checked><span><b>All in one go, in this order</b><br><span class="mute">Claude works through the refactors from top to bottom.</span></span></label>
-    <label class="opt"><input type="radio" name="homode" value="batches"><span><b>Propose how to split or combine the work first</b><br><span class="mute">Claude proposes batches. You approve them before the work starts.</span></span></label>
-    <textarea id="hoNote" rows="2" placeholder="Note for Claude (optional)" style="margin-top:6px"></textarea>
+    <h3>How should the agent do this?</h3>
+    <label class="opt"><input type="radio" name="homode" value="all" checked><span><b>All in one go, in this order</b><br><span class="mute">The agent works through the refactors from top to bottom.</span></span></label>
+    <label class="opt"><input type="radio" name="homode" value="batches"><span><b>Propose how to split or combine the work first</b><br><span class="mute">The agent proposes batches. You approve them before the work starts.</span></span></label>
+    <textarea id="hoNote" rows="2" placeholder="Note for the agent (optional)" style="margin-top:6px"></textarea>
     <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn" data-ho="close">Cancel</button><button class="btn primary" data-ho="send">${nOpen ? 'Send anyway' : 'Send'}</button></div>`;
   $('hoDlg').hidden = false;
   $('hoDlg').querySelector('input[name=homode]').focus();
@@ -3084,7 +3084,7 @@ Object.assign(actions, {
   'ho.asksend': async () => {
     const v = val('ho-ask'), id = hoActive()?.refactors[0]; if (!v || !id) return;
     hoAsk = false; await replyThread(id, `About the batch proposal: ${v}`);
-    toast('Sent to Claude in the thread of refactor 1.');
+    toast('Sent to the agent in the thread of refactor 1.');
   },
 });
 // ---------- architecture profile and the Roles view ----------
@@ -3186,7 +3186,7 @@ function archRulesHTML(X, ro, an) {
         ${s.breaks.length > 200 ? `<li class="mute">… ${s.breaks.length - 200} more</li>` : ''}</ul>` : ''}`;
   }).join('') || '<p class="mute">No rules.</p>'}
     ${(an.warnings || []).length ? `<ul class="breaks">${an.warnings.map(w => `<li class="mute">${esc(typeof w === 'string' ? w : w.text || w.message || JSON.stringify(w))}</li>`).join('')}</ul>` : ''}
-    ${ro ? '' : '<p class="mute" style="font-size:13px;margin:6px 0 0">Click a rule to list its breaks. To add a rule, write it as a sentence in a comment; Claude turns it into a rule.</p>'}</div>`;
+    ${ro ? '' : '<p class="mute" style="font-size:13px;margin:6px 0 0">Click a rule to list its breaks. To add a rule, write it as a sentence in a comment; the agent turns it into a rule.</p>'}</div>`;
 }
 function layersHTML(X, ro, an) {
   const L = X.layers || [], un = an.layers?.unassigned || [];
@@ -3392,7 +3392,7 @@ function focusTargets(f, has) {
 // ---------- end finding focus ----------
 const FGROUPS = [['profile', 'Profile'], ['structure', 'Structure'], ['layers', 'Layers'], ['vocabulary', 'Vocabulary'], ['types', 'Types'], ['history', 'History'], ['concepts', 'Concepts'], ['boundaries', 'Boundaries'], ['data', 'Data'], ['evolution', 'Evolution']];
 const FCOL = {profile: ['var(--rem)', 'var(--rem-ink)'], structure: ['var(--chg)', 'var(--warn-ink)'], layers: ['var(--acc)', 'var(--sel-ink)'], vocabulary: ['var(--agent)', 'var(--agent-ink)'], types: ['var(--mute)', 'var(--ink)'], history: ['var(--mute)', 'var(--ink)'], concepts: ['var(--agent)', 'var(--agent-ink)'], boundaries: ['var(--acc)', 'var(--sel-ink)'], data: ['var(--mute)', 'var(--ink)'], evolution: ['var(--mute)', 'var(--ink)']};
-const FKIND = {'profile.rule': 'call rule', 'profile.pair': 'missing pair', 'structure.cycle': 'cycle', 'structure.tangle': 'tangle', 'layers.upward': 'upward dependency', 'vocabulary.leak': 'leak', 'vocabulary.synonyms': 'synonyms', 'types.fields': 'field clusters', 'types.synonyms': 'synonyms', 'history.coupling': 'changes together', 'history.modularity_violation': 'modularity violation'};
+const FKIND = {'profile.rule': 'call rule', 'profile.pair': 'missing pair', 'structure.cycle': 'cycle', 'structure.tangle': 'tangle', 'layers.upward': 'upward dependency', 'vocabulary.leak': 'leak', 'vocabulary.synonyms': 'synonyms', 'types.fields': 'field clusters', 'types.synonyms': 'synonyms', 'history.coupling': 'changes together', 'history.modularity_violation': 'modularity violation', 'boundaries.balance': 'unbalanced coupling'};
 const FLDBG = ['#fef3c7', '#e0e7ff', '#dcfce7', '#fce7f3', '#e0f2fe', '#f1f5f9'];
 const findings = () => FIND?.findings || [];
 const findById = id => findings().find(f => f.id === id);
@@ -3479,7 +3479,7 @@ function findCard(f) {
     : `<span class="spacer"></span>${(ps => ps ? `<button class="pill add" data-act="ref.open" data-id="${esc(ps.id)}" title="${esc(ps.title || 'A pending refactor proposal')}">Proposed fix</button>` : '')(sugFor(f.id))}${f.thread ? `<button class="linkb" data-act="find.thread" data-id="${esc(f.thread)}">In discussion${th && th.status !== 'open' ? ` (${esc(th.status)})` : ''}</button>` : `<button class="btn" data-act="find.discuss" data-id="${esc(f.id)}">Discuss</button>`}<button class="btn ghost" data-act="find.dis" data-id="${esc(f.id)}">Dismiss…</button><button class="btn ghost" data-act="find.accept" data-id="${esc(f.id)}" title="Add it to the baseline: archplan check stops reporting it">Accept as is</button>`;
   return `<div class="find${findOn === f.id ? ' on' : ''}${base ? ' base' : ''}" id="fi-${esc(f.id)}" style="${fGroup(f) === 'profile' && !base ? 'border-color:var(--rem-line,#fecaca)' : ''}">
     <div data-act="find.focus" data-id="${esc(f.id)}" title="Show it in the diagram" style="cursor:pointer">
-      <div class="row" style="margin:0;gap:8px"><span class="fk" style="color:${c2}"><i style="background:${c1}"></i>${esc(kindLabel(f))}</span><span class="spacer"></span>${f.label ? `<span class="pill agent" title="Claude's judgement, not a verdict">Claude: ${esc(f.label)}</span>` : ''}${f.strength || f.basis ? `<span class="mute fsm">${esc([f.strength, f.basis].filter(Boolean).join(' · '))}</span>` : ''}${fWeightHTML(f)}</div>
+      <div class="row" style="margin:0;gap:8px"><span class="fk" style="color:${c2}"><i style="background:${c1}"></i>${esc(kindLabel(f))}</span><span class="spacer"></span>${f.label ? `<span class="pill agent" title="Agent assessment, not a verdict">Agent: ${esc(f.label)}</span>` : ''}${f.strength || f.basis ? `<span class="mute fsm">${esc([f.strength, f.basis].filter(Boolean).join(' · '))}</span>` : ''}${fWeightHTML(f)}</div>
       <div class="ft">${esc(f.title || f.id)}</div>${ev ? '' : f.detail ? `<div class="fsm" style="color:var(--mute)">${esc(f.detail)}</div>` : ''}
       ${ev}</div>${(ts => ts.length > 1 ? `<div class="fshow">Show in: ${ts.map((t, i) => `<button class="linkb" data-act="find.focusAt" data-id="${esc(f.id)}" data-i="${i}">${esc(t.label)}</button>`).join(' · ')}</div>` : '')(findTargets(f))}
     <div class="row fsm" style="margin:6px 0 0;gap:6px">${acts}</div></div>`;
@@ -3507,7 +3507,7 @@ function findPage() {
   const nA = FIND.counts?.accepted ?? base.filter(f => f.state === 'accepted').length, nD = FIND.counts?.dismissed ?? base.filter(f => f.state === 'dismissed').length;
   const chip = (g, l) => `<button class="pill${findGroup === g ? ' acc' : ''}" data-act="find.group" data-g="${g}"${g !== 'all' && !cnt(g) ? ' style="opacity:.55"' : ''}>${l} ${cnt(g)}</button>`;
   return `<div class="doc-title">Findings</div>
-    <p class="mute" style="margin:4px 0 10px">What the checks found in the code. Discuss one with Claude, dismiss it with a reason, or accept it as is. Accepted and dismissed findings form the baseline: <span class="mono">archplan check</span> reports only new ones.</p>
+    <p class="mute" style="margin:4px 0 10px">What the checks found in the code. Discuss one with your agent, dismiss it with a reason, or accept it as is. Accepted and dismissed findings form the baseline: <span class="mono">archplan check</span> reports only new ones.</p>
     <div class="row" style="gap:5px;flex-wrap:wrap;margin-bottom:6px">${chip('all', 'All')}${FGROUPS.map(([g, l]) => chip(g, l)).join('')}</div>
     <div class="row fsm" style="margin:0 0 10px"><span class="mute">Baseline: ${nA} accepted · ${nD} dismissed</span>${nA + nD ? `<button class="linkb" data-act="find.base">${findBase ? 'Hide them' : 'Show them'}</button>` : ''}</div>
     ${ratchetHTML()}
@@ -3678,9 +3678,9 @@ async function vocCall(path, body, what) {
 // Which components a draft covers: the selected ones, else the focus.
 const draftScope = () => { const ms = multi.filter(a => a.startsWith('comp:')).map(a => a.slice(5)); return ms.length ? ms : sel?.kind === 'comp' ? [sel.id] : [...focus]; };
 const draftHTML = big => { const sc = draftScope(); return `<div class="${big ? 'draft big' : 'draft'}">
-  ${big ? '' : '<h4>Draft with Claude</h4><p class="mute fsm" style="margin:0 0 6px">Claude reads the candidate terms of each component and proposes concepts, owners and definitions as a suggestion.</p>'}
-  <textarea id="vd-note" rows="${big ? 2 : 1}" placeholder="Optional note for Claude, e.g. focus on the payment domain">${esc(draft('vd-note', ''))}</textarea>
-  <div class="row"><button class="btn primary" data-act="vocab.draft" data-scope="all">Ask Claude to draft glossaries${sc.length ? ' for all components' : ''}</button>${sc.length ? `<button class="btn" data-act="vocab.draft" data-scope="sel">Only for ${sc.length === 1 ? esc(cn(sc[0])) : 'these ' + sc.length + ' components'}</button>` : ''}</div></div>`; };
+  ${big ? '' : '<h4>Draft with your agent</h4><p class="mute fsm" style="margin:0 0 6px">Your agent reads the candidate terms of each component and proposes concepts, owners and definitions as a suggestion.</p>'}
+  <textarea id="vd-note" rows="${big ? 2 : 1}" placeholder="Optional note for the agent, e.g. focus on the payment domain">${esc(draft('vd-note', ''))}</textarea>
+  <div class="row"><button class="btn primary" data-act="vocab.draft" data-scope="all">Ask the agent to draft glossaries${sc.length ? ' for all components' : ''}</button>${sc.length ? `<button class="btn" data-act="vocab.draft" data-scope="sel">Only for ${sc.length === 1 ? esc(cn(sc[0])) : 'these ' + sc.length + ' components'}</button>` : ''}</div></div>`; };
 Object.assign(actions, {
   'vc.open': e => { const k = e.dataset.c + '|' + e.dataset.t; VOC.open = VOC.open === k ? null : k; renderSide(); },
   'vc.showign': () => { VOC.showIgn = !VOC.showIgn; renderSide(); },
@@ -3696,7 +3696,7 @@ Object.assign(actions, {
   },
   'vocab.draft': async e => {
     const comps = e.dataset.scope === 'sel' ? draftScope() : null, note = val('vd-note');
-    toast('Asking Claude to draft the glossaries…');
+    toast('Asking the agent to draft the glossaries…');
     let r; try { r = await api('POST', '/api/vocabulary/draft', {...(comps ? {components: comps} : {}), ...(note ? {note} : {})}); }
     catch (err) { return toast(`Could not ask for a draft: ${err.message}`); }
     clearDrafts('vd-'); await syncThreads();
@@ -3706,7 +3706,7 @@ Object.assign(actions, {
 $('draftBtn').addEventListener('click', () => { actions['page.glossary'](); const t = $('vd-note'); if (t) { t.scrollIntoView({block: 'center'}); t.focus(); } });
 $('gloss').addEventListener('input', e => { if (e.target.id === 'vd-note') drafts['vd-note'] = e.target.value; });
 // ---------- refactor proposals ----------
-// GET /api/suggest: whether Claude proposes refactors on its own, and the open
+// GET /api/suggest: whether the agent proposes refactors on its own, and the open
 // request. Refactor suggestions (kind "refactor") carry a title, rationale,
 // effort, risk and the findings they claim to fix. Without the endpoint all of this stays hidden.
 const AUTO = {ok: null, d: null, busy: '', count: 5, scope: 'all', kinds: new Set(['cycles', 'layers', 'profile', 'types', 'coupling', 'vocabulary']), rej: null, more: new Set()};
@@ -3729,20 +3729,20 @@ function drawSuggestMenu() {
   if (AUTO.scope !== 'all' && !scopeComps(AUTO.scope).length) AUTO.scope = 'all';
   const seg = (k, v, l, off) => `<button class="${(k === 'count' ? AUTO.count : AUTO.scope) === v ? 'on' : ''}" data-sa="${k}" data-v="${esc(String(v))}"${off ? ' disabled' : ''}>${esc(l)}</button>`;
   $('suggestMenu').innerHTML = `<div class="mh">Suggest refactors</div>
-    ${d.open_request ? `<div class="sgx-busy"><span class="dot live"></span>Claude is drafting proposals… <button class="linkb" data-sa="thread" data-v="${esc(d.open_request)}">Open the thread</button></div>` : ''}
+    ${d.open_request ? `<div class="sgx-busy"><span class="dot live"></span>The agent is drafting proposals… <button class="linkb" data-sa="thread" data-v="${esc(d.open_request)}">Open the thread</button></div>` : ''}
     <div class="sgx-row"><span class="mute">How many</span><div class="seg">${[3, 5, 10].map(n => seg('count', n, String(n))).join('')}</div></div>
     <div class="sgx-row"><span class="mute">Where</span><div class="seg">${seg('scope', 'all', 'Whole model')}${seg('scope', 'focus', `Focused${nF ? ' (' + nF + ')' : ''}`, !nF)}${seg('scope', 'sel', `Selected${nS ? ' (' + nS + ')' : ''}`, !nS)}</div></div>
     <div class="sgx-row" style="align-items:flex-start"><span class="mute">About</span><div class="chips" style="margin:0">${SKINDS.map(([k, l]) => `<button class="pill${AUTO.kinds.has(k) ? ' acc' : ''}" data-sa="kind" data-v="${k}">${l}</button>`).join('')}</div></div>
     <input id="sgx-note" value="${esc(note)}" placeholder="Optional note, e.g. keep the public API stable" style="width:100%;box-sizing:border-box;margin:4px 0">
-    <div class="row" style="margin:4px 0"><button class="btn primary" data-sa="go"${AUTO.kinds.size ? '' : ' disabled'}>Suggest</button><span class="mute fsm">Claude reads the findings and the model, then proposes refactors you can plan, discuss or reject.</span></div>
+    <div class="row" style="margin:4px 0"><button class="btn primary" data-sa="go"${AUTO.kinds.size ? '' : ' disabled'}>Suggest</button><span class="mute fsm">Your agent reads the findings and the model, then proposes refactors you can plan, discuss or reject.</span></div>
     <div class="sep"></div>
-    <label class="sgx-auto"><input type="checkbox" data-sa="auto"${d.auto ? ' checked' : ''}><span><b>Automatic</b><br><span class="mute fsm">Claude proposes refactors on its own after each export and whenever the queue of proposals is empty.</span>${d.last_at ? `<br><span class="mute fsm">Last proposals ${esc(relTime(d.last_at))}.</span>` : ''}</span></label>`;
+    <label class="sgx-auto"><input type="checkbox" data-sa="auto"${d.auto ? ' checked' : ''}><span><b>Automatic</b><br><span class="mute fsm">Your agent proposes refactors on its own after each export and whenever the queue of proposals is empty.</span>${d.last_at ? `<br><span class="mute fsm">Last proposals ${esc(relTime(d.last_at))}.</span>` : ''}</span></label>`;
 }
 async function requestSuggest() {
   const comps = scopeComps(AUTO.scope), note = val('sgx-note');
   try {
     const r = await api('POST', '/api/suggest', {count: AUTO.count, focus: comps, kinds: [...AUTO.kinds], ...(note ? {note} : {})});
-    toast('Claude is drafting proposals. They appear under Suggestions in the plan.');
+    toast('The agent is drafting proposals. They appear under Suggestions in the plan.');
     if (r?.thread?.id) { await syncThreads(); AUTO.d = {...(AUTO.d || {}), open_request: r.thread.id}; }
   } catch (err) { toast(`Could not ask for proposals: ${err.message}`); }
   closeMenus(); loadAuto();
@@ -3762,7 +3762,7 @@ $('suggestMenu').addEventListener('click', e => {
 $('suggestMenu').addEventListener('change', async e => {
   if (e.target.dataset.sa !== 'auto') return;
   const on = e.target.checked;
-  try { await api('PUT', '/api/suggest/auto', {on, count: AUTO.count}); toast(on ? 'Claude now proposes refactors on its own.' : 'Automatic proposals are off.'); }
+  try { await api('PUT', '/api/suggest/auto', {on, count: AUTO.count}); toast(on ? 'The agent now proposes refactors on its own.' : 'Automatic proposals are off.'); }
   catch (err) { e.target.checked = !on; toast(`Could not change the setting: ${err.message}`); }
   loadAuto();
 });
@@ -3777,7 +3777,7 @@ function refCard(s) {
   const P = SUG.picked[s.id] ||= new Set((s.ops || []).map((_, i) => i)), ops = s.ops || [];
   const ver = s.verified?.fixed || [], claimed = (s.fixes || []).filter(id => !ver.includes(id)), intro = s.verified?.introduced || [];
   const nFix = ver.length + claimed.length, shown = AUTO.more.has(s.id) ? ops : ops.slice(0, 4);
-  const fchip = (id, ok) => `<button class="pill${ok ? ' add' : ''}" data-act="find.show" data-id="${esc(id)}" title="${ok ? 'Verified: the preview no longer has this finding' : 'Claimed by Claude, not verified'}">${ok ? '✓ ' : ''}${esc(fname(id))}</button>`;
+  const fchip = (id, ok) => `<button class="pill${ok ? ' add' : ''}" data-act="find.show" data-id="${esc(id)}" title="${ok ? 'Verified: the preview no longer has this finding' : 'Claimed by the agent, not verified'}">${ok ? '✓ ' : ''}${esc(fname(id))}</button>`;
   return `<div class="sug ref" id="sug-${esc(s.id)}"><div class="sug-h">Proposed refactor${s.effort ? `<span class="pill">effort ${esc(s.effort)}</span>` : ''}${s.risk ? `<span class="pill ${RISK[s.risk] || ''}">risk ${esc(s.risk)}</span>` : ''}<span class="spacer"></span><span class="mute" style="font-weight:400;font-size:13px">${esc(relTime(s.created))}</span></div>
     <div class="ref-t">${esc(s.title || 'Refactor')}</div>
     ${s.rationale ? `<div class="note">${md(s.rationale)}</div>` : s.note ? `<div class="note">${md(s.note)}</div>` : ''}
@@ -3786,7 +3786,7 @@ function refCard(s) {
     ${intro.length ? `<div class="ref-in">Introduces ${intro.map(t => `<b>${esc(t)}</b>`).join(', ')}</div>` : ''}
     ${shown.map(o => { const i = ops.indexOf(o), [k, c, t, sub] = opLine(o); return `<label class="sop"><input type="checkbox" data-sug="${esc(s.id)}" data-i="${i}"${P.has(i) ? ' checked' : ''}><span class="k k-${c}">${esc(k)}</span><span>${esc(t)}${sub ? `<span class="sub">${esc(sub.length > 240 ? sub.slice(0, 239) + '…' : sub)}</span>` : ''}</span></label>`; }).join('')}
     ${ops.length > 4 ? `<button class="linkb fsm" data-act="ref.more" data-id="${esc(s.id)}">${AUTO.more.has(s.id) ? 'Show fewer changes' : `Show all ${ops.length} changes`}</button>` : ''}
-    ${AUTO.rej === s.id ? `<div class="row" style="margin-top:8px"><input id="rj-${esc(s.id)}" value="${esc(draft('rj-' + s.id, ''))}" placeholder="Why not? Claude reads this before the next proposals" style="flex:1"><button class="btn primary" data-act="ref.reject" data-id="${esc(s.id)}">Reject</button><button class="btn" data-act="ref.rejcancel">Cancel</button></div>`
+    ${AUTO.rej === s.id ? `<div class="row" style="margin-top:8px"><input id="rj-${esc(s.id)}" value="${esc(draft('rj-' + s.id, ''))}" placeholder="Why not? The agent reads this before the next proposals" style="flex:1"><button class="btn primary" data-act="ref.reject" data-id="${esc(s.id)}">Reject</button><button class="btn" data-act="ref.rejcancel">Cancel</button></div>`
     : `<div class="acts"><button class="btn primary" data-act="ref.plan" data-id="${esc(s.id)}"${P.size ? '' : ' disabled'} title="Add it to the planned refactors">Plan it</button><button class="btn" data-act="ref.discuss" data-id="${esc(s.id)}">Discuss</button><button class="btn" data-act="ref.rej" data-id="${esc(s.id)}">Reject…</button><button class="btn" data-act="sug.show" data-id="${esc(s.id)}" title="Show the target with this refactor in the diagram">Show in diagram</button><span class="eff">${esc(effText(s))}</span></div>`}</div>`;
 }
 async function refCall(id, what, body, label) {
@@ -3798,7 +3798,7 @@ Object.assign(actions, {
   'ref.rej': e => { AUTO.rej = e.dataset.id; renderSide(); $('rj-' + AUTO.rej)?.focus(); },
   'ref.rejcancel': () => { clearDrafts('rj-'); AUTO.rej = null; renderSide(); },
   'ref.reject': async e => {
-    const id = e.dataset.id, reason = val('rj-' + id); if (!reason) { toast('Give a reason, so Claude can learn from it.'); return $('rj-' + id)?.focus(); }
+    const id = e.dataset.id, reason = val('rj-' + id); if (!reason) { toast('Give a reason, so the agent can learn from it.'); return $('rj-' + id)?.focus(); }
     clearDrafts('rj-'); AUTO.rej = null;
     if (await refCall(id, 'reject', {reason}, 'reject the proposal')) toast('Rejected the proposal.');
   },
@@ -3964,18 +3964,18 @@ function planDoc() {
   const sec = (id, title, body) => `<div class="dsec" id="sec-${id}"><h4>${title}</h4>${body}</div>`;
   const decT = loose.filter(t => needs(t) === 'decision'), qT = loose.filter(t => needs(t) !== 'decision'), done = threads.filter(t => t.status === 'resolved');
   const nPlan = todo().length, nOpen = openThreads().length;
-  const st = collab ? `<div class="collab"><b class="on">● shared</b> with Claude through <code>archplan mcp</code> in <code>${esc(collab.root)}</code></div>`
-    : `<div class="collab">● local only. Run <code>archplan up</code> in a repository to share threads with Claude.</div>`;
+  const st = collab ? `<div class="collab"><b class="on">● shared</b> with your agent through <code>archplan mcp</code> in <code>${esc(collab.root)}</code></div>`
+    : `<div class="collab">● local only. Run <code>archplan up</code> in a repository to share threads with your agent.</div>`;
   return `${hoBannerHTML()}${composeLoose ? `<div class="callout" id="composeBox"><b>New comment on ${esc(anchorLabel(composeKey))}</b> <button class="x" data-act="compose.close" title="Close">×</button>${threadsOn(composeKey).map(t => threadHTML(t)).join('')}${composer(composeKey)}</div>` : ''}
     <div class="dsec" id="sec-intent" style="margin-top:0"><div class="doc-title${title ? '' : ' empty'}" id="docTitle">${esc(title || 'What should this change achieve?')}</div>
-    <textarea id="i-intent" rows="3" placeholder="Write the intent: what should this change achieve? Claude reads this first.">${esc(intent)}</textarea>
+    <textarea id="i-intent" rows="3" placeholder="Write the intent: what should this change achieve? Your agent reads this first.">${esc(intent)}</textarea>
     <div class="pills"><button class="pill acc" data-act="sec.go" data-sec="${nOpen || !nPlan ? 'open' : 'planned'}">${nPlan} planned · ${nOpen} open</button>${viol.length ? `<span class="pill rem">${plural(viol.length, 'rule')} violated</span>` : `<span class="pill">no rule violated</span>`}<span class="pill">${plural(P.tasks.length, 'task')}</span>${dec ? `<span class="pill warn">${plural(dec, 'decision')}</span>` : ''}${pending().length ? `<span class="pill add">${plural(pending().length, 'suggestion')}</span>` : ''}</div>${st}</div>
     ${loneSug.map(sugCard).join('')}
     ${P.warnings.map(w => `<div class="warnbox">⚠ ${esc(w)}</div>`).join('')}
     ${sec('rules', 'Rules', `${rules.map(([r, i]) => { const v = vio(r); return `<div class="rule-row${v.length ? ' bad' : ''}"><span>${esc(ruleText(toBe, r))}</span><span class="n">${v.length ? `${plural(v.reduce((n, e) => n + (e.weight || e.via.length || 1), 0), 'site')}` : ''}</span>${mode === 'asis' ? '' : `<button class="x" data-act="rule.del" data-i="${i}" title="Drop this rule">×</button>`}</div>`; }).join('')
       || '<p class="mute" style="margin:0">No rules yet. Select a dependency line and forbid it.</p>'}
       <p class="mute" style="font-size:13px;margin:6px 0 0">Default <b>${pol.default}</b>${pol.default === 'deny' ? `: only the ${nAllow} allow rules permit a dependency` : ''}.${E ? ` Enforced by <code>${esc(E.tool)}</code> (${esc(E.config)}).` : ''}</p>`)}
-    ${R.length || AUTO.d?.open_request ? sec('suggestions', `Suggestions${R.length ? ` (${R.length})` : ''}`, `${AUTO.d?.open_request ? `<div class="sgx-busy"><span class="dot live"></span>Claude is drafting proposals… <button class="linkb" data-act="find.thread" data-id="${esc(AUTO.d.open_request)}">Open the thread</button></div>` : ''}${R.map(refCard).join('')}`) : ''}
+    ${R.length || AUTO.d?.open_request ? sec('suggestions', `Suggestions${R.length ? ` (${R.length})` : ''}`, `${AUTO.d?.open_request ? `<div class="sgx-busy"><span class="dot live"></span>The agent is drafting proposals… <button class="linkb" data-act="find.thread" data-id="${esc(AUTO.d.open_request)}">Open the thread</button></div>` : ''}${R.map(refCard).join('')}`) : ''}
     ${sec('open', `Open discussions${nOpen ? ` (${nOpen})` : ''}`, [...decT, ...qT].map(t => threadHTML(t, true)).join('')
       + (loose.length < nOpen ? `<p class="mute" style="font-size:13px;margin:6px 0 0">${plural(nOpen - loose.length, 'more discussion')} sit${nOpen - loose.length === 1 ? 's' : ''} under the changes below.</p>` : '')
       || '<p class="mute" style="margin:0">No open discussions. Comment on an item from its page.</p>')}
@@ -4148,7 +4148,7 @@ function renderGloss0() {
   const el = $('gloss'), M = mode === 'asis' ? asIs : toBe;
   if (!hasVocab(asIs) && !hasVocab(toBe) && VOC.ok) {
     el.innerHTML = `<div class="callout" style="max-width:660px"><b>No glossary yet.</b>
-      <p>archplan ranks the words each component uses more than the rest of the code; open a component in the Components view to see them. Claude can turn these candidates into concepts with owners and definitions, which you review as a suggestion.</p>${draftHTML(true)}</div>`;
+      <p>archplan ranks the words each component uses more than the rest of the code; open a component in the Components view to see them. Your agent can turn these candidates into concepts with owners and definitions, which you review as a suggestion.</p>${draftHTML(true)}</div>`;
     return;
   }
   if (!hasVocab(asIs) && !hasVocab(toBe)) {
@@ -4390,7 +4390,7 @@ function openSnapshot(id) {
   render(true);
 }
 
-// ---------- suggestions from Claude ----------
+// ---------- suggestions from the agent ----------
 const SUG = {off: false, list: [], picked: {}, prev: {}, active: null, sig: ''};
 const pending = () => SUG.list.filter(s => s.status === 'pending');
 const pickedOps = s => [...(SUG.picked[s.id] || [])].sort((a, b) => a - b);
@@ -4509,7 +4509,7 @@ function markSugg() {
   });
 }
 
-// ---------- what Claude is doing ----------
+// ---------- what the agent is doing ----------
 const ACT = {d: null};
 async function loadActivity() {
   if (!collab) return;
@@ -4526,7 +4526,7 @@ function renderAgent() {
   if (!d?.at) { p.hidden = true; return; }
   const live = Date.now() - Date.parse(d.at) < 120000;
   p.hidden = false;
-  p.innerHTML = `<span class="dot${live ? ' live' : ''}"></span>Claude: ${esc(d.summary || d.tool || 'working')} · ${esc(relTime(d.at))}`;
+  p.innerHTML = `<span class="dot${live ? ' live' : ''}"></span>Agent: ${esc(d.summary || d.tool || 'working')} · ${esc(relTime(d.at))}`;
   p.title = `${d.tool ? 'Tool: ' + d.tool + '. ' : ''}${d.task ? 'Task ' + d.task + '. ' : ''}${d.thread || d.task ? 'Click to show it.' : ''}`;
 }
 $('agentPill').addEventListener('click', () => {
@@ -4740,7 +4740,7 @@ function renderHeader() {
   const n = pending().length;
   $('sugPill').hidden = !n;
   $('suggestWrap').hidden = !AUTO.ok;
-  $('suggestBtn').innerHTML = AUTO.d?.open_request ? '<span class="dot live"></span> Claude is drafting proposals…' : `✦ Suggest refactors${AUTO.d?.auto ? ' · auto' : ''} ▾`;
+  $('suggestBtn').innerHTML = AUTO.d?.open_request ? '<span class="dot live"></span> The agent is drafting proposals…' : `✦ Suggest refactors${AUTO.d?.auto ? ' · auto' : ''} ▾`;
   $('sendBtn').hidden = !todo().length || !!hoActive();
   $('rolesBtn').hidden = !ARCH; $('leftModes').hidden = !ARCH && !FIND;
   const lm = leftMode === 'arch' && ARCH || leftMode === 'find' && FIND ? leftMode : 'plan', nN = FIND ? findNew() : 0;

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..model import leaks
+from ..core.policy import leaks
 from .common import OCCURRENCE, Weight, comp_name, evidence_file, finding, focus
 
 ID = "vocabulary.leak"

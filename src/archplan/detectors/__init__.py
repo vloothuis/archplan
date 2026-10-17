@@ -26,9 +26,9 @@ import importlib
 import sys
 import time
 
-from ..architecture import Architecture, ArchitectureError, analyse as profile_analysis
-from ..project import Project, etag, read_json, write_json
-from ..store import NotFound
+from ..core.architecture import Architecture, ArchitectureError, analyse as profile_analysis
+from ..core.project import Project, etag, read_json, write_json
+from ..core.store import NotFound
 from . import external
 from .common import GROUPS, STRENGTHS, Weight, comp_name, finding, fingerprint, graph, namer, reweigh
 
@@ -36,7 +36,7 @@ BUILTIN = ["profile_rule", "profile_pair", "structure_cycle", "structure_tangle"
            "vocabulary_leak", "types_fields", "types_synonyms", "history_coupling", "history_modularity",
            "concepts_state_flags", "concepts_data_clump", "concepts_raw_ids", "concepts_untyped_bag",
            "concepts_units_in_names", "concepts_string_enum", "concepts_bool_params",
-           "boundaries_stability", "boundaries_unused_public", "evolution_ownership",
+           "boundaries_stability", "boundaries_unused_public", "boundaries_balance", "evolution_ownership",
            "data_shared_table", "data_cross_fk", "data_polymorphic", "data_json_bag", "data_flag_columns",
            "data_repeated_columns", "data_enum_mismatch", "data_orphan_table"]
 
@@ -57,6 +57,63 @@ REASONS = {
 }
 KNOWN_NEEDS = set(REASONS) | {"profile"}
 READ_MAX = 1 << 20  # bytes ctx.read returns at most
+
+
+class CapabilityChecker:
+    """Decide whether a detector's required model data is available."""
+
+    def __init__(self, context):
+        self.context = context
+
+    def lacks(self, need: str) -> str | None:
+        """Why the data for need is missing, or None when it is there."""
+        ctx, model = self.context, self.context.model
+        if need == "profile":
+            try:
+                ctx.profile
+            except ArchitectureError as e:
+                return str(e)
+            return None
+        if need == "layers":
+            try:
+                profile = ctx.profile[0]
+            except ArchitectureError as e:
+                return str(e)
+            ok = len([x for x in profile.get("layers") or [] if x.get("components")]) >= 2
+        elif need == "components":
+            ok = bool(ctx.components)
+        elif need == "deps":
+            ok = bool(model.get("dependencies"))
+        elif need == "types":
+            ok = bool(ctx.types)
+        elif need == "fields":
+            ok = any(t.get("fields") for t in ctx.types.values())
+        elif need == "files":
+            ok = bool(model.get("files"))
+        elif need == "vocabulary":
+            ok = bool(ctx.vocabulary.get("usage"))
+        elif need == "git":
+            ok = ctx.hotspots is not None
+        elif need == "authors":
+            if ctx.hotspots is None:
+                return REASONS["git"]
+            ok = isinstance(ctx.hotspots.get("owners"), dict)
+        elif need == "cochange":
+            if ctx.hotspots is None:
+                return REASONS["git"]
+            ok = isinstance(ctx.hotspots.get("cochange"), dict)
+        elif need == "signatures":
+            ok = bool(ctx.signatures)
+        elif need == "literals":
+            ok = bool(ctx.literals)
+        elif need == "schema":
+            ok = bool(ctx.schema)
+        else:
+            return f"unknown need {need!r}"
+        return None if ok else REASONS[need]
+
+    def available(self) -> list:
+        return sorted(need for need in KNOWN_NEEDS if self.lacks(need) is None)
 
 
 class DetectorError(ValueError):
@@ -160,7 +217,7 @@ class Context:
     def files_by_component(self) -> dict:
         """{component: [repository-relative source files]}, tests left out."""
         def fn():
-            from ..vocab import Vocab
+            from ..core.vocab import Vocab
             return dict(Vocab(self.p).files_by_component(self.model))
         return self._get("files", fn)
 
@@ -188,7 +245,7 @@ class Context:
     def vocab_candidates(self) -> dict:
         """Glossary candidates per component (tf-idf over the code; cached per file)."""
         def fn():
-            from ..vocab import Vocab
+            from ..core.vocab import Vocab
             return Vocab(self.p).analyse(self.model)
         return self._get("candidates", fn)
 
@@ -196,13 +253,13 @@ class Context:
     def base(self):
         """The folder the model's paths are relative to: the repository root
         when the project sits in a subfolder of it."""
-        from ..safeio import model_base
+        from ..core.safeio import model_base
         return self._get("base", lambda: model_base(self.root, self.model))
 
     def read(self, path: str, limit: int = READ_MAX) -> str | None:
         """A repository file's text, or None when the path leaves the repository
         (paths come from the model, which is repository data) or cannot be read."""
-        from ..safeio import read_text
+        from ..core.safeio import read_text
         try:
             return read_text(self.base, path, limit, truncate=True)
         except OSError:
@@ -210,56 +267,16 @@ class Context:
 
     # capabilities
 
+    def _capability_checker(self) -> CapabilityChecker:
+        return self._get("capability_checker", lambda: CapabilityChecker(self))
+
     def lacks(self, need: str) -> str | None:
-        """Why the data for need is missing, or None when it is there."""
-        m = self.model
-        if need == "profile":
-            try:
-                self.profile
-            except ArchitectureError as e:
-                return str(e)
-            return None
-        if need == "layers":
-            try:
-                prof = self.profile[0]
-            except ArchitectureError as e:
-                return str(e)
-            ok = len([x for x in prof.get("layers") or [] if x.get("components")]) >= 2
-        elif need == "components":
-            ok = bool(self.components)
-        elif need == "deps":
-            ok = bool(m.get("dependencies"))
-        elif need == "types":
-            ok = bool(self.types)
-        elif need == "fields":
-            ok = any(t.get("fields") for t in self.types.values())
-        elif need == "files":
-            ok = bool(m.get("files"))
-        elif need == "vocabulary":
-            ok = bool(self.vocabulary.get("usage"))
-        elif need == "git":
-            ok = self.hotspots is not None
-        elif need == "authors":
-            if self.hotspots is None:
-                return REASONS["git"]
-            ok = isinstance(self.hotspots.get("owners"), dict)
-        elif need == "cochange":
-            if self.hotspots is None:
-                return REASONS["git"]
-            ok = isinstance(self.hotspots.get("cochange"), dict)
-        elif need == "signatures":
-            ok = bool(self.signatures)
-        elif need == "literals":
-            ok = bool(self.literals)
-        elif need == "schema":
-            ok = bool(self.schema)
-        else:
-            return f"unknown need {need!r}"
-        return None if ok else REASONS[need]
+        """Compatibility facade for detector capability checks."""
+        return self._capability_checker().lacks(need)
 
     @property
     def capabilities(self) -> list:
-        return self._get("caps", lambda: sorted(n for n in KNOWN_NEEDS if self.lacks(n) is None))
+        return self._get("caps", self._capability_checker().available)
 
 
 # ---------- the registry ----------

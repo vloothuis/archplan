@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
-from ..hotspots import Mapper
+from ..core.hotspots import Mapper
 from .common import EXAMPLES, Weight, plural, types_focus
 
 ID = "boundaries.unused_public"
