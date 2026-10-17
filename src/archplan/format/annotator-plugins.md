@@ -279,6 +279,6 @@ JSON result, at most 4 MB.
 - The model holds the declarations, but the editor does not show them or
   send changes to them yet. The agent's `annotate` tool and
   `archplan annotators write` do.
-- Detectors do not use the declarations yet. They are the input for the
-  planned security detectors: entry points without auth, and paths to
-  sensitive data that pass no guard.
+- The security detectors use the declarations (see the README). A key for
+  sensitive data, and a detector for paths to it that pass no guard, are
+  planned.
