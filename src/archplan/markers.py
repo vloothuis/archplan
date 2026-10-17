@@ -331,7 +331,7 @@ def token_of(key: str, value, reason) -> str:
     token = "guard" if key == "function.guard" else f"auth={value}"
     if reason:
         reason = BREAKS.sub(" ", str(reason))  # never a second line
-        reason = reason.replace("?>", "? >")  # `?>` ends a PHP comment
+        reason = re.sub(r"coding([:=])", r"coding \1", re.sub(r"[<>]", " ", reason))  # see check_change
         token += ' reason="' + reason.replace("\\", "\\\\").replace('"', '\\"') + '"'
     return token
 

@@ -23,7 +23,8 @@ A key names a kind of target and a property of it.
 | `function.guard` | a function or type | `true` | the function or type authenticates, authorizes or validates input |
 | `entrypoint.auth` | a function that handles outside input | `required` or `none` | whether the entry point needs an authenticated caller |
 
-A declaration can have a `reason`: one line on why. archplan keeps it next
+A declaration can have a `reason`: one line on why, at most 300 characters,
+without `<`, `>` or `coding:`. archplan keeps it next
 to the value. Give a reason for `entrypoint.auth` `none`, such as "load
 balancer health check".
 

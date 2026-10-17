@@ -147,7 +147,9 @@ class AnnotatorTest(unittest.TestCase):
         self.assertIn("one line", res["results"][5]["note"])
         self.assertIn("PHP", annotators.check_change({"op": "set", "target": {"kind": "entrypoint", "id": "x"},
                                                      "key": "auth", "value": "none", "reason": "a ?> b"}))
-        self.assertNotIn("?>", markers.token_of("entrypoint.auth", "none", "a ?> b"))
+        self.assertNotIn(">", markers.token_of("entrypoint.auth", "none", "a ?> %> b"))
+        self.assertIsNotNone(annotators.check_change({"op": "set", "target": {"kind": "entrypoint", "id": "x"},
+                                                      "key": "auth", "value": "none", "reason": "coding: rot13"}))
         self.assertFalse(res["applied"])
         self.assertEqual((self.root / "shop/ops/views.py").read_text(), before)  # nothing changed yet
         self.assertIn("+# archplan: guard\n def orders", res["patch"])
