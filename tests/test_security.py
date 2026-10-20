@@ -4,7 +4,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from archplan.detectors import (security_gateway, security_open_entry, security_unguarded_entry,  # noqa: E402
+from archplan import blast  # noqa: E402
+from archplan.detectors import (security_gateway, security_open_entry, security_risk_hotspot,  # noqa: E402
+                                security_unguarded_entry,
                                 security_unchecked_entry, security_unguarded_path, security_unguarded_sink,
                                 security_untested_denial, security_untraced, security_zone_dependency)
 from archplan.detectors.common import graph  # noqa: E402
@@ -79,6 +81,10 @@ def model():
 
 def run(mod, m=None, files=None, **params):
     return mod.run(Ctx(m or model(), files), {**mod.PARAMS, **params})
+
+
+def run_ctx(mod, ctx, **params):
+    return mod.run(ctx, {**mod.PARAMS, **params})
 
 
 CONTROLLER = '''defmodule Shop.ExportController do
@@ -305,6 +311,62 @@ class SecurityTest(unittest.TestCase):
         self.assertEqual(len(run(security_untested_denial, m)), 1)
         seqs["get-order-anon"]["messages"][0]["outcome"] = "status:403"
         self.assertEqual(run(security_untested_denial, m), [])
+
+    def test_blast_radius(self):
+        m = model()
+        m["declarations"] += [
+            decl("function", "internal/orders/store.go:Find", "sink", "read", file="internal/orders/store.go"),
+            decl("function", "internal/orders/store.go:All", "sink", "write", file="internal/orders/store.go")]
+        ctx = Ctx(m)
+        es = {e["entry"]: e for e in blast.entries(ctx)}
+        get, lst = es["internal/web/orders.go:getOrder"], es["internal/web/orders.go:listOrders"]
+        self.assertEqual(get["components"], ["web", "auth", "orders"])
+        self.assertEqual(get["guards"], ["internal/auth/verifier.go:VerifySubject"])
+        self.assertEqual(get["sinks"], [{"id": "internal/orders/store.go:Find", "kind": "read"}])
+        self.assertEqual(get["zones"], ["internet", "internal"])
+        self.assertEqual(get["gaps"], ["no refusal"])
+        self.assertEqual(lst["gaps"], ["unguarded"])
+        self.assertEqual(es["internal/web/health.go:health"]["gaps"], [])  # auth=none
+        # export writes with no guard and no auth declaration: the riskiest.
+        self.assertEqual(blast.entries(ctx)[0]["entry"], "internal/web.(*App).export")
+        self.assertEqual(blast.entries(ctx)[0]["risk"], 30 + 10 + 5 + 30)  # write, undeclared, two zones, unguarded
+        p = {x["entry"]: x for x in blast.plan(blast.entries(ctx))}
+        self.assertEqual(sorted(p), ["internal/web.(*App).export", "internal/web/orders.go:getOrder",
+                                     "internal/web/orders.go:listOrders"])
+        self.assertIn("expect internal/orders/store.go:Find not to be called",
+                      p["internal/web/orders.go:getOrder"]["tests"][0])
+        self.assertEqual(p["internal/web/orders.go:getOrder"]["start_from"], "get-order")
+        # A change to the guard's file touches only the request that passes it; one in orders touches all three.
+        t = blast.touched(ctx, list(es.values()), ["internal/auth/verifier.go"])
+        self.assertEqual([e["entry"] for e in t], ["internal/web/orders.go:getOrder"])
+        self.assertEqual(t[0]["because"], ["internal/auth/verifier.go is on its path"])
+        t = blast.touched(ctx, list(es.values()), ["internal/orders/other.go"])
+        self.assertEqual(len(t), 3)
+        rep = blast.report(ctx, ["internal/auth/verifier.go"])
+        self.assertEqual([x["entry"] for x in rep["plan"]], ["internal/web/orders.go:getOrder"])
+        self.assertIn("1 changed files touch 1 of 4", blast.text(rep))
+        # A traced refusal closes the gap.
+        m["sequences"]["get-order-anon"] = {"entry": "internal/web.(*App).getOrder", "messages": [
+            msg("Caller", "web", "(*App).getOrder(w, r)", 0),
+            {**msg("web", "internal/auth.Verifier", "(*Verifier).VerifySubject(ctx, raw)", 1), "outcome": "error"}]}
+        self.assertEqual({e["entry"]: e for e in blast.entries(ctx)}["internal/web/orders.go:getOrder"]["gaps"], [])
+
+    def test_risk_hotspot(self):
+        m = model()
+        m["declarations"].append(
+            decl("function", "internal/orders/store.go:All", "sink", "write", file="internal/orders/store.go"))
+        ctx = Ctx(m)
+        ctx.churn = {"web": 40, "orders": 30, "auth": 4, "vault": 2}
+        # Only the top quarter by commits: web, not orders.
+        fs = run_ctx(security_risk_hotspot, ctx)
+        self.assertEqual([f["components"] for f in fs], [["web"]])
+        self.assertEqual(fs[0]["evidence"]["writes"], ["internal/orders/store.go:All"])
+        self.assertIn("1 traced entry point passes it to reach 1 write sink; it lacks a guard", fs[0]["detail"])
+        ctx.churn["orders"] = 40
+        self.assertEqual(sorted(f["components"][0] for f in run_ctx(security_risk_hotspot, ctx)), ["orders", "web"])
+        self.assertEqual(run_ctx(security_risk_hotspot, ctx, min_commits=41), [])
+        ctx.churn = {}
+        self.assertEqual(run_ctx(security_risk_hotspot, ctx), [])
 
     def test_untraced(self):
         m = model()

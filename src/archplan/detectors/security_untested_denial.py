@@ -39,6 +39,13 @@ def refused(m: dict) -> bool:
     return bool(REFUSED.match(str(m.get("outcome") or "")))
 
 
+def shows_refusal(ctx, entry: dict, need: list, msgs: list, title: str, titles) -> bool:
+    """Whether a request shows a refusal: the entry point or a guard of need
+    refused, or its test's title says it does."""
+    return (any(refused(m) and (hit(ctx, entry, m) or any(hit(ctx, g, m) for g in need)) for m in msgs)
+            or bool(titles and titles.search(title)))
+
+
 def run(ctx, params) -> list:
     seqs = ctx.model.get("sequences") or {}
     if not guards(ctx):
@@ -57,9 +64,7 @@ def run(ctx, params) -> list:
             continue
         eid = d["target"]["id"]
         need = guards(ctx, "authz") if d["value"] == "authz" else guards(ctx)
-        entry = target(ctx, d)
-        if any(refused(m) and (hit(ctx, entry, m) or any(hit(ctx, g, m) for g in need)) for m in msgs) \
-                or titles and titles.search(title):
+        if shows_refusal(ctx, target(ctx, d), need, msgs, title, titles):
             denied.add(eid)
         elif guarded(ctx, d, msgs):
             decl[eid] = d

@@ -121,6 +121,16 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {
          "since_days": {"type": "integer", "default": 365},
          "limit": {"type": "integer", "default": 20, "maximum": 100}}}},
+    {"name": "get_blast_radius",
+     "description": "What each traced entry point reaches: the components its requests pass, its guards, the sinks "
+                    "it reads or writes, its zones, its gaps (no guard on its traced requests, no test that shows "
+                    "a refusal) and a risk score. With files or diff (a git ref such as develop), the entry points "
+                    "the change touches, by risk: review those paths first. plan lists the security tests to add, "
+                    "by risk; hotspots the components that change often on paths to sinks. Needs traced sequences.",
+     "inputSchema": {"type": "object", "properties": {
+         "files": {"type": "array", "items": {"type": "string"}},
+         "diff": {"type": "string"},
+         "limit": {"type": "integer", "default": 20, "maximum": 100}}}},
     {"name": "refresh_model",
      "description": "Re-export the as-is model from the code with the project's export command. Call it after you "
                     "change the code, so the editor shows what is left of the plan. Can take a minute.",
@@ -360,6 +370,14 @@ class Agent:
     def get_hotspots(self, since_days=365, limit=20):
         return hotspots.summary(hotspots.hotspots(self.p, int(since_days)), min(int(limit), 100))
 
+    def get_blast_radius(self, files=None, diff=None, limit=20):
+        from . import blast
+        from .detectors import Context
+        ctx = Context(self.p)
+        if diff:
+            files = blast.changed(ctx, diff) + list(files or [])
+        return blast.report(ctx, list(files) if files is not None else None, min(int(limit), 100))
+
     def refresh_model(self):
         out = {"counts": self.p.export(require_trust=True), "note": "The editor reloads the as-is model and rebases the target."}
         from .brief import auto_tick
@@ -546,6 +564,7 @@ ACTIVITY = {
     "annotate": "Writing {n} declaration change(s)",
     "wait_for_comments": "Waiting for comments",
     "get_hotspots": "Analysing git history for hotspots",
+    "get_blast_radius": "Reading what the entry points reach",
     "get_handover": "Reading the planned refactors",
     "get_architecture": "Reading the architecture profile",
     "update_profile": "Updated the architecture profile",

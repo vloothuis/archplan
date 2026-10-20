@@ -227,6 +227,11 @@ progress.
   point needs auth, call `annotate` instead of editing marker comments by
   hand. It writes in the project's own form and checks the result. Make a
   change it reports as unsupported, conflict or failed by hand.
+- Before you change code on a path to a guard or a sink, call
+  `get_blast_radius` with `diff` (or `files`). It lists the entry points
+  the change touches and the security tests they lack. Add a test that makes
+  the guard refuse a caller where `plan` asks for one, and run it with
+  tracing, so `security.untested_denial` sees the refusal.
 
 ## Commands
 
@@ -237,6 +242,7 @@ progress.
 | `archplan export` | re-export the as-is model from the code |
 | `archplan threads --waiting agent` | threads that wait on you, as text |
 | `archplan hotspots` | hotspots and hidden coupling from the git history |
+| `archplan blast [--diff REF]` | what traced entry points reach, what a change touches, the security tests to add |
 | `archplan profile` | the architecture profile and its rule breaks |
 | `archplan profile list` | the framework profiles that match, with their fit |
 | `archplan check` | new findings; exit 1 when there are any |
