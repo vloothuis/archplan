@@ -41,7 +41,7 @@ from .project import Project, ProjectError, etag, read_json, write_atomic
 TRUST_ENV = "ARCHPLAN_CI_TRUST"
 # Files in .archplan that belong to one machine or one run: not copied to the base.
 LOCAL = ("server.json", "server.log", ".hook-seen.json", "activity.json", "vocab-cache.json",
-         "suggest-state.json", "*.tmp", ".*.lock")
+         "suggest-state.json", "parts", "*.tmp", ".*.lock")
 LIST_MAX = 50       # findings listed per section of the summary
 
 
