@@ -71,9 +71,32 @@ def called(message: dict) -> str:
     return short(CALL.match(label.strip()).group(1).strip())
 
 
-def matches(t: dict, name: str, comp: str | None) -> bool:
-    """Whether a call of name on participant comp can be the declared function t."""
-    return t["name"] == name and (not t["component"] or not comp or comp == t["component"])
+_files = {}
+
+
+def call_file(ctx, message: dict) -> str | None:
+    """The file of the function a sequence message calls, when its label is
+    a function id the model's signatures know, such as `M.f/2`, or names a
+    function of a type the model knows, such as `M.f` of type `M`."""
+    key = id(ctx.model)
+    if key not in _files or _files[key][0] is not ctx.model:
+        _files.clear()
+        _files[key] = (ctx.model, {x["id"]: x.get("file") for x in ctx.model.get("signatures") or []
+                                   if isinstance(x, dict) and isinstance(x.get("id"), str)})
+    label = message.get("label") or (message.get("id") or "").split(":", 1)[-1]
+    fid = CALL.match(label.strip()).group(1).strip()
+    if fid in _files[key][1]:
+        return _files[key][1][fid]
+    owner = ((ctx.model.get("types") or {}).get(re.sub(r"/\d+$", "", fid).rpartition(".")[0]) or {})
+    return owner.get("file") if isinstance(owner, dict) else None
+
+
+def matches(t: dict, name: str, comp: str | None, file: str | None = None) -> bool:
+    """Whether a call of name on participant comp, of a function in file when
+    known, can be the declared function t. Many modules of a component can
+    have a function of the same name, such as a LiveView's mount."""
+    return (t["name"] == name and (not t["component"] or not comp or comp == t["component"])
+            and (not file or not t.get("file") or file == t["file"]))
 
 
 def name(ctx, cid: str | None) -> str:

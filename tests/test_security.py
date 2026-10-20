@@ -5,15 +5,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from archplan.detectors import (security_gateway, security_open_entry, security_unguarded_entry,  # noqa: E402
-                                security_unguarded_path, security_unguarded_sink, security_untraced,
-                                security_zone_dependency)
+                                security_unchecked_entry, security_unguarded_path, security_unguarded_sink,
+                                security_untraced, security_zone_dependency)
 from archplan.detectors.common import graph  # noqa: E402
 from archplan.detectors.security_common import called, short  # noqa: E402
 
 
 class Ctx:
-    def __init__(self, model):
+    def __init__(self, model, files=None):
         self.model = model
+        self.files = files or {}
+
+    def read(self, path):
+        return self.files.get(path)
 
     @property
     def components(self):
@@ -73,8 +77,46 @@ def model():
     }
 
 
-def run(mod, m=None, **params):
-    return mod.run(Ctx(m or model()), {**mod.PARAMS, **params})
+def run(mod, m=None, files=None, **params):
+    return mod.run(Ctx(m or model(), files), {**mod.PARAMS, **params})
+
+
+CONTROLLER = '''defmodule Shop.ExportController do
+  use Shop, :controller
+  plug :load_order when action in [:show]
+
+  def export(conn, %{"id" => id}) do
+    send_resp(conn, 200, Orders.list(id))
+  end
+
+  def submissions(conn, %{"id" => id}) do
+    if allowed?(conn, id), do: send_resp(conn, 200, "ok"), else: forbidden(conn)
+  end
+
+  def show(conn, _params), do: send_resp(conn, 200, conn.assigns.order)
+
+  defp allowed?(%{assigns: %{user: user}}, id),
+    do: Policy.can_access?(user, id)
+
+  defp load_order(conn, _opts) do
+    if Policy.can_access?(conn.assigns.user, conn.params["id"]), do: conn, else: halt(conn)
+  end
+
+  defp forbidden(conn), do: send_resp(conn, 403, "")
+end
+'''
+
+VIEWS = '''@login_required
+def report(request, id):
+    return render(request, Report.objects.get(pk=id))
+
+
+@login_required
+def invoice(request, id):
+    invoice = Invoice.objects.get(pk=id)
+    check_owner(request.user, invoice)
+    return render(request, invoice)
+'''
 
 
 class SecurityTest(unittest.TestCase):
@@ -106,6 +148,66 @@ class SecurityTest(unittest.TestCase):
         m["declarations"] = [d for d in m["declarations"] if d["key"] != "guard"]
         fs = run(security_unguarded_entry, m)
         self.assertEqual(sorted(f["strength"] for f in fs), ["strong", "strong"])
+
+    def test_unguarded_entry_authz_per_request(self):
+        m = model()
+        m["declarations"][0]["value"] = "authn"
+        m["declarations"].append(decl("function", "internal/auth/policy.go:Allow", "guard", "authz",
+                                      file="internal/auth/policy.go"))
+        m["declarations"][1]["value"] = "authz"  # getOrder
+        # one test, two requests: the second checks the policy, the first does not
+        m["sequences"] = {"orders": {"entry": "test", "messages": [
+            msg("browser", "web", "Router.call(conn)", 0),
+            msg("web", "auth", "VerifySubject(ctx, raw)", 1),
+            msg("web", "web", "(*App).getOrder(w, r)", 1),
+            msg("web", "orders", "Find(id)", 2),
+            msg("browser", "web", "Router.call(conn)", 0),
+            msg("web", "web", "(*App).listOrders(w, r)", 1),
+            msg("web", "auth", "Allow(user, order)", 2)]}}
+        fs = {f["evidence"]["entry"]: f for f in run(security_unguarded_entry, m)}
+        self.assertEqual(list(fs), ["getOrder"])
+        f = fs["getOrder"]
+        self.assertEqual((f["strength"], f["evidence"]["auth"]), ("strong", "authz"))
+        self.assertEqual(f["evidence"]["guards"], ["internal/auth/policy.go:Allow"])
+        self.assertIn("authorization check", f["title"])
+        # the authn guard on the same request does not count for authz
+        m["sequences"]["orders"]["messages"][3:4] = [msg("web", "auth", "Allow(user, order)", 2)]
+        self.assertEqual(run(security_unguarded_entry, m), [])
+        # a hook that runs as its own step before the entry point belongs to its request
+        m["sequences"]["orders"]["messages"] = [msg("browser", "web", "Hook.onMount(conn)", 0),
+                                                msg("web", "auth", "Allow(user, order)", 1),
+                                                msg("browser", "web", "(*App).getOrder(w, r)", 0)]
+        self.assertEqual(run(security_unguarded_entry, m), [])
+
+    def test_unchecked_entry(self):
+        m = model()
+        m["declarations"] = [
+            decl("function", "lib/policy.ex:can_access?", "guard", "authz", file="lib/policy.ex"),
+            decl("function", "shop/auth.py:check_owner", "guard", "authz", file="shop/auth.py"),
+            decl("function", "shop/auth.py:login_required", "guard", "authn", file="shop/auth.py"),
+            *[decl("entrypoint", f"lib/export_controller.ex:{n}", "auth", "authz", file="lib/export_controller.ex")
+              for n in ("export", "submissions", "show")],
+            *[decl("entrypoint", f"shop/views.py:{n}", "auth", "authz", file="shop/views.py")
+              for n in ("report", "invoice")],
+            decl("entrypoint", "lib/export_controller.ex:forbidden", "auth", "required",
+                 file="lib/export_controller.ex")]
+        files = {"lib/export_controller.ex": CONTROLLER, "shop/views.py": VIEWS}
+        fs = {f["evidence"]["entry"]: f for f in run(security_unchecked_entry, m, files)}
+        # submissions calls the guard through a helper; show through a plug; invoice directly.
+        # login_required only authenticates.
+        self.assertEqual(sorted(fs), ["lib/export_controller.ex:export", "shop/views.py:report"])
+        self.assertEqual(fs["lib/export_controller.ex:export"]["strength"], "medium")
+        self.assertEqual(fs["lib/export_controller.ex:export"]["evidence"]["read"], ["export"])  # the plug is for show
+        fs = run(security_unchecked_entry, m, files, hooks=["Orders"])  # a hook checks what export names
+        self.assertEqual([f["evidence"]["entry"] for f in fs], ["shop/views.py:report"])
+        # a trace of a request that passes the guard clears it
+        m["sequences"] = {"export": {"entry": "Shop.ExportController.export/2", "messages": [
+            msg("browser", "web", "Shop.ExportController.export/2", 0),
+            msg("web", "auth", "Policy.can_access?/2", 1)]}}
+        m["components"]["web"]["path"] = "lib"
+        m["components"]["auth"]["path"] = "lib/policy.ex"
+        fs = run(security_unchecked_entry, m, files)
+        self.assertEqual([f["evidence"]["entry"] for f in fs], ["shop/views.py:report"])
 
     def test_open_entry(self):
         fs = run(security_open_entry)

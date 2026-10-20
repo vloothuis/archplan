@@ -40,7 +40,8 @@ BUILTIN = ["profile_rule", "profile_pair", "structure_cycle", "structure_tangle"
            "data_shared_table", "data_cross_fk", "data_polymorphic", "data_json_bag", "data_flag_columns",
            "data_repeated_columns", "data_enum_mismatch", "data_orphan_table",
            "security_unguarded_entry", "security_unguarded_sink", "security_open_entry",
-           "security_zone_dependency", "security_untraced", "security_gateway", "security_unguarded_path"]
+           "security_zone_dependency", "security_untraced", "security_gateway", "security_unguarded_path",
+           "security_unchecked_entry"]
 
 REASONS = {
     "components": "the model has no components",

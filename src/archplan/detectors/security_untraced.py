@@ -9,7 +9,7 @@ the traces never visit gives no findings."""
 from __future__ import annotations
 
 from .common import Weight, finding, focus
-from .security_common import called, decls, guards, matches, name, participant, target
+from .security_common import call_file, called, decls, guards, matches, name, participant, target
 
 ID = "security.untraced"
 NAME = "Declared guard or entry point that no trace reaches"
@@ -28,16 +28,16 @@ def run(ctx, params) -> list:
         for m in msgs:
             comp = participant(ctx, m.get("to"))
             visited.add(comp)
-            calls.add((called(m), comp))
+            calls.add((called(m), comp, call_file(ctx, m)))
     out = []
     if params["report_guards"]:
         for g in guards(ctx):
-            if g["component"] in visited and not any(matches(g, n, c) for n, c in calls):
+            if g["component"] in visited and not any(matches(g, n, c, f) for n, c, f in calls):
                 out.append(make(ctx, "guard", g, len(seqs)))
     if params["report_entries"]:
         for d in decls(ctx, "entrypoint", "auth"):
             e = target(ctx, d)
-            if e["component"] in visited and not any(matches(e, n, c) for n, c in calls):
+            if e["component"] in visited and not any(matches(e, n, c, f) for n, c, f in calls):
                 out.append(make(ctx, "entry", e, len(seqs)))
     return out
 

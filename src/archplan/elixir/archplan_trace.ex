@@ -1,7 +1,7 @@
 # ExUnit formatter that records one call trace per test, for archplan
 # sequences. It does not change the project: load it from the command line.
 #
-#   elixir -r /path/to/archplan_trace.ex -S mix test --only feature --max-cases 1 \
+#   elixir -r /path/to/archplan_trace.ex -S mix test --only feature \
 #     --formatter ArchplanTrace --formatter ExUnit.CLIFormatter
 #
 # For each test it enables Erlang call tracing on the project's own modules
@@ -13,7 +13,8 @@
 # Environment:
 #   ARCHPLAN_TRACE_DIR      output directory
 #   ARCHPLAN_CONFIG         config file (default: .archplan/elixir.json)
-#   ARCHPLAN_TRACE_TEST=1   also record calls made by the test process itself
+#   ARCHPLAN_TRACE_TEST=1   record all calls of the test process itself, not only
+#                           the requests it makes (Phoenix.ConnTest)
 
 Code.require_file("archplan_common.ex", __DIR__)
 
@@ -55,6 +56,12 @@ defmodule ArchplanTrace do
         tracer_loop(new_state(tcfg, MapSet.new(mods)))
       end)
 
+    # Tracing stays on for the whole run. The tracer gives each call to the
+    # test whose process made it, so it does not wait for ExUnit's events,
+    # which formatters get without ExUnit waiting for them.
+    :erlang.trace(:all, true, [:call, :arity, {:tracer, tracer}])
+    :erlang.trace(tracer, false, [:call])
+
     setup_ms = System.monotonic_time(:millisecond) - t0
     IO.puts(:stderr, "archplan: tracing #{length(mods)} modules (setup #{setup_ms} ms), writing to #{Path.relative_to_cwd(dir)}")
 
@@ -62,36 +69,14 @@ defmodule ArchplanTrace do
   end
 
   @impl true
-  # ExUnit sends events without waiting for formatters, so a test can start
-  # before tracing is on. A test that has already finished by the time its
-  # start event arrives is skipped, so its trace cannot pick up calls of the
-  # next test.
   def handle_cast({:test_started, %ExUnit.Test{} = test}, state) do
-    {:messages, queued} = Process.info(self(), :messages)
-
-    done? =
-      Enum.any?(queued, fn
-        {:"$gen_cast", {:test_finished, %ExUnit.Test{module: m, name: n}}} -> m == test.module and n == test.name
-        _ -> false
-      end)
-
-    if done? do
-      {:noreply, Map.put(state, :skip, {test.module, test.name})}
-    else
-      send(state.tracer, {:start, {test.module, test.name}})
-      :erlang.trace(:all, true, [:call, :arity, {:tracer, state.tracer}])
-      {:noreply, Map.put(state, :skip, nil)}
-    end
-  end
-
-  def handle_cast({:test_finished, %ExUnit.Test{module: m, name: n}}, %{skip: {m, n}} = state) do
-    {:noreply, %{state | skip: nil}}
+    send(state.tracer, {:start, {test.module, test.name}})
+    {:noreply, state}
   end
 
   def handle_cast({:test_finished, %ExUnit.Test{} = test}, state) do
-    :erlang.trace(:all, false, [:call, :arity])
     ref = make_ref()
-    send(state.tracer, {:finish, self(), ref})
+    send(state.tracer, {:finish, {test.module, test.name}, self(), ref})
 
     result =
       receive do
@@ -107,6 +92,7 @@ defmodule ArchplanTrace do
   end
 
   def handle_cast({:suite_finished, _}, state) do
+    :erlang.trace(:all, false, [:call, :arity])
     IO.puts(:stderr, "archplan: wrote #{state.written} trace files to #{Path.relative_to_cwd(state.dir)}")
     {:noreply, state}
   end
@@ -133,9 +119,10 @@ defmodule ArchplanTrace do
       "calls" => result.calls,
       "truncated" => result.truncated,
       "entry" =>
-        case trees do
-          [%{root: [m, f, a, _]} | _] -> "#{m}.#{f}/#{a}"
-          [] -> nil
+        case {result.entry, trees} do
+          {entry, _} when entry != nil -> entry
+          {_, [%{root: [m, f, a, _]} | _]} -> "#{m}.#{f}/#{a}"
+          _ -> nil
         end,
       "trees" =>
         Enum.map(trees, fn t ->
@@ -149,19 +136,14 @@ defmodule ArchplanTrace do
 
   # ---------------------------------------------------------- tracer
 
-  defp new_state(tcfg, mods) do
-    %{
-      tcfg: tcfg,
-      mods: mods,
-      test: nil,
-      stacks: %{},
-      actors: %{},
-      trees: [],
-      order: 0,
-      calls: 0,
-      truncated: false
-    }
-  end
+  # tests: the per-test state of each running test, made when one of its
+  # processes makes its first call. procs: for each process seen, {owner,
+  # actor, async}. owner is a test key; :shared for a process no test
+  # started, which belongs to the only running test; :done when its test has
+  # finished. finished: the keys of finished tests.
+  defp new_state(tcfg, mods), do: %{tcfg: tcfg, mods: mods, tests: %{}, procs: %{}, finished: MapSet.new()}
+
+  defp new_test, do: %{stacks: %{}, trees: [], order: 0, calls: 0, truncated: false, entry: nil}
 
   defp tracer_loop(st) do
     receive do
@@ -174,14 +156,24 @@ defmodule ArchplanTrace do
       {:trace, pid, :exception_from, _mfa, _value} ->
         tracer_loop(ret(st, pid))
 
-      {:start, test} ->
-        tracer_loop(%{new_state(st.tcfg, st.mods) | test: test})
+      {:start, key} ->
+        # A shared process belongs to the only running test, also one that
+        # has made no call of its own yet.
+        tracer_loop(ensure(st, key))
 
-      {:finish, from, ref} ->
+      {:finish, key, from, ref} ->
         st = drain(st, :erlang.trace_delivered(:all))
-        st = Enum.reduce(Map.keys(st.stacks), st, &close_all/2)
-        send(from, {ref, %{trees: st.trees, calls: st.calls, truncated: st.truncated}})
-        tracer_loop(%{new_state(st.tcfg, st.mods) | test: nil})
+        st = Enum.reduce(Map.keys((st.tests[key] || new_test()).stacks), st, &close_all(&2, key, &1))
+        t = st.tests[key] || new_test()
+        send(from, {ref, %{trees: t.trees, calls: t.calls, truncated: t.truncated, entry: t.entry}})
+
+        procs =
+          Map.new(st.procs, fn
+            {pid, {^key, a, async}} -> {pid, {:done, a, async}}
+            other -> other
+          end)
+
+        tracer_loop(%{st | tests: Map.delete(st.tests, key), procs: procs, finished: MapSet.put(st.finished, key)})
 
       _ ->
         tracer_loop(st)
@@ -200,57 +192,90 @@ defmodule ArchplanTrace do
   end
 
   # A frame is {:node, mod, fun, arity, order, children} for a call into
-  # another module, or {:same, mod} for a call within the module on top.
+  # another module, {:same, mod} for a call within the module on top, or
+  # :skip for a call of the test process outside a request.
   defp call(st, pid, m, f, a) do
-    {actor, st} = actor(st, pid, m)
+    {{owner, actor, _}, st} = proc(st, pid, m)
+    owner = resolve(st, owner)
 
-    if actor == :skip do
-      st
-    else
-      stack = Map.get(st.stacks, pid, [])
-      full = st.calls >= st.tcfg["max_calls"]
-
-      frame =
-        case stack do
-          [top | _] when elem(top, 1) == m ->
-            {:same, m}
-
-          _ when full ->
-            {:same, m}
-
-          _ ->
-            {:node, m, f, a, st.order, []}
-        end
-
-      st =
-        case frame do
-          {:node, _, _, _, _, _} -> %{st | calls: st.calls + 1, order: st.order + 1}
-          _ -> if full, do: %{st | truncated: true}, else: st
-        end
-
-      %{st | stacks: Map.put(st.stacks, pid, [frame | stack])}
+    case st.tests do
+      %{^owner => t} -> %{st | tests: Map.put(st.tests, owner, push(t, st.tcfg, pid, actor, m, f, a))}
+      _ -> st
     end
   end
+
+  defp push(t, tcfg, pid, actor, m, f, a) do
+    stack = Map.get(t.stacks, pid, [])
+    full = t.calls >= tcfg["max_calls"]
+
+    {stack, t} =
+      cond do
+        actor == :requests and outside?(stack) and not web_entry?(m) ->
+          {[:skip | stack], t}
+
+        dispatch?(stack, m, f) ->
+          # A Phoenix controller's call/2 applies the action: name the step
+          # after the action, so a sequence shows which entry point ran.
+          [{:node, _, _, _, o, kids} | rest] = stack
+          entry = t.entry || "#{C.mod_name(m)}.#{f}/#{a}"
+          {[{:same, m}, {:node, m, f, a, o, kids} | rest], %{t | entry: entry}}
+
+        match?([{_, ^m} | _], stack) or match?([{:node, ^m, _, _, _, _} | _], stack) ->
+          {[{:same, m} | stack], t}
+
+        full ->
+          {[{:same, m} | stack], %{t | truncated: true}}
+
+        true ->
+          {[{:node, m, f, a, t.order, []} | stack], %{t | calls: t.calls + 1, order: t.order + 1}}
+      end
+
+    %{t | stacks: Map.put(t.stacks, pid, stack)}
+  end
+
+  defp outside?([]), do: true
+  defp outside?([:skip | _]), do: true
+  defp outside?(_), do: false
+
+  defp dispatch?([{:node, m, :call, 2, _, _} | _], m, f), do: f not in [:call, :init, :action] and controller?(m)
+  defp dispatch?(_, _, _), do: false
+
+  defp controller?(m),
+    do: function_exported?(m, :action, 2) and function_exported?(m, :call, 2) and function_exported?(m, :init, 1)
 
   defp ret(st, pid) do
-    case Map.get(st.stacks, pid, []) do
-      [] -> st
-      [{:same, _} | rest] -> %{st | stacks: Map.put(st.stacks, pid, rest)}
-      [{:node, _, _, _, _, _} = node | rest] -> finish_node(st, pid, node, rest)
+    with {owner, actor, async} <- st.procs[pid],
+         owner = resolve(st, owner),
+         %{^owner => t} <- st.tests do
+      %{st | tests: Map.put(st.tests, owner, pop(t, pid, {actor, async}))}
+    else
+      _ -> st
     end
   end
 
-  defp finish_node(st, pid, {:node, m, f, a, order, kids}, rest) do
+  defp resolve(st, :shared), do: only_test(st)
+  defp resolve(_st, owner), do: owner
+
+  defp pop(t, pid, actor) do
+    case Map.get(t.stacks, pid, []) do
+      [] -> t
+      [:skip | rest] -> %{t | stacks: Map.put(t.stacks, pid, rest)}
+      [{:same, _} | rest] -> %{t | stacks: Map.put(t.stacks, pid, rest)}
+      [{:node, _, _, _, _, _} = node | rest] -> finish_node(t, pid, node, rest, actor)
+    end
+  end
+
+  defp finish_node(t, pid, {:node, m, f, a, order, kids}, rest, {actor, async}) do
     node = [C.mod_name(m), Atom.to_string(f), a, Enum.reverse(kids)]
 
     case add_child(rest, node) do
       {:ok, rest} ->
-        %{st | stacks: Map.put(st.stacks, pid, rest)}
+        %{t | stacks: Map.put(t.stacks, pid, rest)}
 
       :root ->
-        {actor, async} = st.actors[pid]
+        actor = if actor == :requests, do: "browser", else: actor
         tree = %{order: order, actor: actor, async: async, root: node}
-        %{st | stacks: Map.put(st.stacks, pid, rest), trees: [tree | st.trees]}
+        %{t | stacks: Map.put(t.stacks, pid, rest), trees: [tree | t.trees]}
     end
   end
 
@@ -268,29 +293,40 @@ defmodule ArchplanTrace do
 
   # Close the calls still open at the end of the test (a process that is
   # still running, or one that was killed).
-  defp close_all(pid, st) do
-    case Map.get(st.stacks, pid, []) do
-      [] -> st
-      _ -> st |> ret(pid) |> then(&close_all(pid, &1))
+  defp close_all(st, key, pid) do
+    t = st.tests[key]
+
+    case t.stacks[pid] do
+      [_ | _] ->
+        {_, actor, async} = st.procs[pid] || {nil, "process", "process"}
+        close_all(%{st | tests: Map.put(st.tests, key, pop(t, pid, {actor, async}))}, key, pid)
+
+      _ ->
+        st
     end
   end
 
-  # Who started the calls in a process: the test itself, a browser request
-  # or LiveView, an Oban job, or another process. Decided on first sight,
-  # from the process's initial call, else from the first project module it
-  # calls.
-  defp actor(st, pid, m) do
-    case st.actors do
-      %{^pid => {a, _}} ->
-        {a, st}
+  # Which test a process belongs to, and who started its calls: the test
+  # itself, a browser request or LiveView, an Oban job, or another process.
+  # Decided on first sight, from the process's initial call, else from the
+  # first project module it calls.
+  defp proc(st, pid, m) do
+    case st.procs do
+      %{^pid => p} ->
+        {p, st}
 
       _ ->
         info = process_info(pid)
+        owner = owner(st, pid, info)
+
+        st = if is_tuple(owner), do: ensure(st, owner), else: st
 
         {a, async} =
           cond do
-            info.label == st.test and info.label != nil ->
-              if include_test?(st), do: {"test", nil}, else: {:skip, nil}
+            info.label == owner and owner != :done ->
+              # The test process: its own calls, or only the requests it
+              # makes (Phoenix.ConnTest runs them in the test process).
+              if include_test?(st), do: {"test", nil}, else: {:requests, nil}
 
             match?({Phoenix.LiveView, _, _}, info.label) or web_process?(info.initial) or web_entry?(m) ->
               {"browser", nil}
@@ -302,16 +338,69 @@ defmodule ArchplanTrace do
               {"process", "process"}
           end
 
-        if a == :skip, do: :erlang.trace(pid, false, [:call])
-        {a, %{st | actors: Map.put(st.actors, pid, {a, async})}}
+        p = {owner, a, async}
+        {p, %{st | procs: Map.put(st.procs, pid, p)}}
     end
   end
+
+  # The test of the process, of a process in its $callers (tasks, LiveView
+  # tests) or of one in its $ancestors; :done when that test has finished. A
+  # process with no test in those is shared: it belongs to the only running
+  # test, and to none when several run.
+  defp owner(st, pid, info) do
+    test_owner(st, info.label) || chain_owner(st, info.chain, MapSet.new([pid]), 3) || :shared
+  end
+
+  defp test_owner(st, label) do
+    cond do
+      not test_label?(label) -> nil
+      MapSet.member?(st.finished, label) -> :done
+      true -> label
+    end
+  end
+
+  defp chain_owner(_st, _chain, _seen, 0), do: nil
+
+  defp chain_owner(st, chain, seen, depth) do
+    Enum.find_value(chain, fn p ->
+      cond do
+        MapSet.member?(seen, p) ->
+          nil
+
+        match?(%{^p => {o, _, _}} when o != :shared, st.procs) ->
+          {o, _, _} = st.procs[p]
+          o
+
+        true ->
+          info = process_info(p)
+          test_owner(st, info.label) || chain_owner(st, info.chain, MapSet.put(seen, p), depth - 1)
+      end
+    end)
+  end
+
+  defp ensure(st, key) do
+    if Map.has_key?(st.tests, key) or MapSet.member?(st.finished, key),
+      do: st,
+      else: %{st | tests: Map.put(st.tests, key, new_test())}
+  end
+
+  defp only_test(st) do
+    case Map.keys(st.tests) do
+      [key] -> key
+      _ -> nil
+    end
+  end
+
+  defp test_label?({m, n}) when is_atom(m) and is_atom(n),
+    do: String.starts_with?(Atom.to_string(n), ~w(test feature doctest property describe))
+
+  defp test_label?(_), do: false
 
   defp include_test?(st), do: System.get_env("ARCHPLAN_TRACE_TEST") == "1" or st.tcfg["include_test_process"] == true
 
   # A process that ended before the tracer saw its first call cannot be
   # inspected; it counts as "process".
-  defp process_info(pid) do
+  defp process_info(pid) when is_pid(pid) do
     case Process.info(pid, [:dictionary, :initial_call]) do
       [dictionary: dict, initial_call: initial] ->
         mod =
@@ -320,12 +409,23 @@ defmodule ArchplanTrace do
             _ -> ""
           end
 
-        %{label: dict[:"$process_label"], initial: mod}
+        chain =
+          (List.wrap(dict[:"$callers"]) ++ List.wrap(dict[:"$ancestors"]))
+          |> Enum.map(fn
+            p when is_pid(p) -> p
+            name when is_atom(name) -> Process.whereis(name)
+            _ -> nil
+          end)
+          |> Enum.filter(&is_pid/1)
+
+        %{label: dict[:"$process_label"], initial: mod, chain: chain}
 
       _ ->
-        %{label: nil, initial: ""}
+        %{label: nil, initial: "", chain: []}
     end
   end
+
+  defp process_info(_), do: %{label: nil, initial: "", chain: []}
 
   @web ~w(Phoenix.LiveView Phoenix.Channel Phoenix.Socket Phoenix.Endpoint Plug Bandit ThousandIsland cowboy ranch)
 

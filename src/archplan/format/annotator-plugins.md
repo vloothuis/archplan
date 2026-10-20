@@ -23,7 +23,7 @@ A key names a kind of target and a property of it.
 | `component.gateway` | a component id | a list of 1 to 20 component ids | the components through which others must reach this one, such as the repository in front of a store |
 | `function.guard` | a function or type | `true`, `authn` or `authz` | the function or type checks who the caller is (`authn`), what the caller may do (`authz`), or both, or validates input (`true`) |
 | `function.sink` | a function or type | `write` or `read` | the function changes (`write`) or returns (`read`) data that only some callers may change or see |
-| `entrypoint.auth` | a function that handles outside input | `required` or `none` | whether the entry point needs an authenticated caller |
+| `entrypoint.auth` | a function that handles outside input | `required`, `authz` or `none` | whether the entry point needs an authenticated caller (`required`), also a check of what that caller may do, such as read the record the request names (`authz`), or neither (`none`) |
 
 A declaration can have a `reason`: one line on why, at most 300 characters,
 of letters, digits, spaces and `. , ; ' ( ) / ? ! & + % # @ -`. Without `:` and
@@ -255,8 +255,8 @@ def require_user(conn, _opts), do: ...
   Rust, Swift, PHP, Dart, C and C++. In Go the writer uses the directive form
   `//archplan:`, which `gofmt` keeps and `go doc` does not show.
 - `guard`, `guard=authn` or `guard=authz` declares `function.guard`.
-  `sink=write` or `sink=read` declares `function.sink`. `auth=required` or
-  `auth=none` declares `entrypoint.auth`. `reason="…"` gives the reason for the keys on
+  `sink=write` or `sink=read` declares `function.sink`. `auth=required`,
+  `auth=authz` or `auth=none` declares `entrypoint.auth`. `reason="…"` gives the reason for the keys on
   the same line.
 - The writer puts one key on each marker line, with the indentation of the
   declaration, above its decorators. In Go it goes directly above `func`,
