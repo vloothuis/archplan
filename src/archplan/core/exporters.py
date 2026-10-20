@@ -274,6 +274,14 @@ def text(res: dict) -> str:
         lines.append(f"* {res['command']}")
         if res["runs_repo_code"]:
             lines.append("  This command runs code from the repository; `archplan trust` must approve it first.")
+        pick = next((r for r in res["exporters"] if r["name"] == res["pick"]), None)
+        both = [r for r in res["exporters"] if pick and r.get("command") and r["name"] not in (pick["name"], "lite")
+                and r["match"] != pick["match"]]
+        if both:
+            lines.append(f"  {both[0]['name']} matches {both[0]['match']}/ as well. To merge both models, set "
+                         "\"export\" in .archplan/config.json to a list:")
+            lines.append(f"    [{json.dumps(pick['command'].replace('.archplan/model.archmodel.json', '{out}'))},")
+            lines.append(f"     {json.dumps(both[0]['command'].replace('.archplan/model.archmodel.json', '{out}'))}]")
     for r in res["exporters"]:
         if r["match"] is not None and r["installed"] is False and r.get("install"):
             lines.append(f"to use {r['name']}: {r['install']}")

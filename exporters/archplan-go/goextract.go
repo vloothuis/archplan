@@ -36,6 +36,10 @@ type GoResult struct {
 	Types        map[string]Type
 	TypeErrors   int
 	Vocabulary   *Vocabulary
+	Files        map[string]File
+	Signatures   []Signature
+	Literals     []Literal
+	Routes       []Route
 	Warnings     []string
 }
 
@@ -48,7 +52,7 @@ type goPkg struct {
 	comp  string
 	files []*ast.File
 	types *types.Package
-	info  *types.Info // set when building the vocabulary
+	info  *types.Info // uses, definitions and expression types
 }
 
 type extractor struct {
@@ -81,6 +85,7 @@ func ExtractGo(list []Package, comps map[string]Component, opt GoOptions) (*GoRe
 		x.res.Types[id] = x.describe(obj)
 	}
 	x.implementations()
+	x.code()
 	if opt.Vocab {
 		x.vocabulary()
 	}
@@ -249,8 +254,9 @@ func (x *extractor) check(list []Package) {
 	}
 	im := &moduleImporter{local: map[string]*types.Package{}, gc: gc}
 	for _, p := range x.pkgs {
-		if x.opt.Vocab {
-			p.info = &types.Info{Uses: map[*ast.Ident]types.Object{}}
+		p.info = &types.Info{
+			Uses: map[*ast.Ident]types.Object{}, Defs: map[*ast.Ident]types.Object{},
+			Types: map[ast.Expr]types.TypeAndValue{},
 		}
 		conf := types.Config{Importer: im, FakeImportC: true, Error: func(error) { x.res.TypeErrors++ }}
 		// Type errors are counted, not fatal: the partial package is still

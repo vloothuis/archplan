@@ -78,6 +78,46 @@ func TestSequenceFrom(t *testing.T) {
 	}
 }
 
+// stitchedSample is a trace that rela stitched: the client's fetch step
+// holds the server's call tree as its child.
+const stitchedSample = `[{"name": "open order as viewer", "handler": "OrderView", "diagram": {
+  "participants": ["frontend/src/api", "dataentry", "acl"],
+  "root": {"from": "Browser", "to": "frontend/src/views", "fn": "load", "children": [
+    {"from": "frontend/src/views", "to": "frontend/src/api", "fn": "getOrder", "args": ["id=\"T-1\""], "children": [
+      {"from": "frontend/src/api", "to": "dataentry", "fn": "fetch", "via": "http", "span": "s-42",
+       "route": {"method": "GET", "path": "/api/v1/orders/{id}"}, "outcome": "status:403", "children": [
+        {"from": "dataentry", "to": "dataentry", "fn": "(*App).getOrder", "args": ["w=x", "r=y"], "children": [
+          {"from": "dataentry", "to": "acl", "fn": "MayRead", "outcome": "false"}
+        ]}
+      ]}
+    ]}
+  ]}
+}}]`
+
+func TestSequenceCarriesOutcomeRouteAndSpan(t *testing.T) {
+	scs, err := ParseSteps([]byte(stitchedSample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := SequenceFrom(scs[0], func(string) string { return "" })
+	if len(s.Messages) != 5 {
+		t.Fatalf("messages = %+v", s.Messages)
+	}
+	hop := s.Messages[2]
+	if !hop.Async || hop.Via != "http" || hop.Span != "s-42" || hop.Outcome != "status:403" {
+		t.Errorf("hop = %+v", hop)
+	}
+	if hop.Route == nil || *hop.Route != (HTTPRoute{Method: "GET", Path: "/api/v1/orders/{id}"}) {
+		t.Errorf("hop route = %+v", hop.Route)
+	}
+	if h := s.Messages[3]; h.Depth != 3 || h.From != "dataentry" || h.Label != "(*App).getOrder(w, r)" || h.Route != nil {
+		t.Errorf("handler = %+v", h)
+	}
+	if g := s.Messages[4]; g.Outcome != "false" || g.Async {
+		t.Errorf("guard = %+v", g)
+	}
+}
+
 func TestParseStepsRejectsBadJSON(t *testing.T) {
 	if _, err := ParseSteps([]byte("{")); err == nil {
 		t.Fatal("want an error")

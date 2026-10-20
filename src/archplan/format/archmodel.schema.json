@@ -16,6 +16,7 @@
         "module": { "type": "string" },
         "generator": { "type": "string" },
         "generatedAt": { "type": "string", "format": "date-time" },
+        "capabilities": { "type": "array", "items": { "type": "string" } },
         "commands": {
           "type": "object",
           "properties": {
@@ -142,6 +143,7 @@
           "entry": { "type": "string" },
           "source": { "type": "string" },
           "participants": { "type": "array", "items": { "type": "string" } },
+          "stitched": { "type": "array", "items": { "type": "string" } },
           "fragments": {
             "type": "object",
             "additionalProperties": {
@@ -168,10 +170,34 @@
                 "fragment": { "type": "string" },
                 "async": { "type": "boolean" },
                 "via": { "type": "string" },
-                "outcome": { "type": "string" }
+                "outcome": { "type": "string" },
+                "route": {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": { "method": { "type": "string" }, "path": { "type": "string" } }
+                },
+                "span": { "type": "string" },
+                "handler": { "type": "string" },
+                "joined": { "const": "route" }
               }
             }
           }
+        }
+      }
+    },
+    "routes": {
+      "type": "array",
+      "description": "HTTP routes and the functions that serve them.",
+      "items": {
+        "type": "object",
+        "required": ["method", "pattern"],
+        "properties": {
+          "method": { "type": "string" },
+          "pattern": { "type": "string" },
+          "handler": { "type": "string" },
+          "component": { "type": "string" },
+          "file": { "type": "string" },
+          "line": { "type": "integer" }
         }
       }
     },

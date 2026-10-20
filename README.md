@@ -565,6 +565,8 @@ An exporter writes an [archmodel/1](src/archplan/format/archmodel.md) file.
 - **Go** (`go.mod`): [`exporters/archplan-go`](exporters/archplan-go), run with
   `go run github.com/vloothuis/archplan/exporters/archplan-go@latest`. It reads
   `.go-arch-lint.yml` when present, and seqtrace call traces with `-steps`.
+  It lists file references and the routes registered on a `net/http`
+  `ServeMux`.
 - **Python** (`pyproject.toml`, `setup.py`): `archplan export-python`, built in.
   It reads import-linter `forbidden` contracts as rules, and Django model
   fields as type fields.
@@ -580,7 +582,7 @@ An exporter writes an [archmodel/1](src/archplan/format/archmodel.md) file.
   components. It runs the project's installed `typescript`, so `archplan
   init` does not approve it: read the command, then run `archplan trust`.
 
-The Python, TypeScript and Elixir exporters also list function signatures,
+The Go, Python, TypeScript and Elixir exporters also list function signatures,
 string literals and enum-like value sets (`signatures`, `literals` and
 `enums` in the [format](src/archplan/format/archmodel.md)). Detectors use
 them to find concepts the code has no type for.
@@ -658,6 +660,12 @@ program can be an exporter: add an entry in `.archplan/exporters/`, or set
 `archplan export-check` tests a model against it. A command from a project
 entry still needs `archplan trust`.
 
+A repository with a server and a browser app in different languages can
+use several exporters: make `export` a list of commands that each write to
+`{out}`. archplan merges their models, and joins the app's HTTP calls with
+the server code they reach. See
+[Several exporters](src/archplan/format/exporter-plugins.md#several-exporters).
+
 ## Security
 
 - The editor listens on 127.0.0.1 only and has no login. It refuses writes from
@@ -674,7 +682,8 @@ entry still needs `archplan trust`.
   leaves them unapproved and says so. Run `archplan trust` (or `archplan
   export`, which asks) in a terminal. There is no flag to skip the question,
   so an agent cannot approve a command. Approvals live in
-  `~/.config/archplan/trusted.json`.
+  `~/.config/archplan/trusted.json`. When `export` is a list, one approval
+  covers the whole list, and any change to it needs a new one.
 - An approval also stores a sha256 hash of each repository file the command
   names as an argument, such as `tools/check.py` in `python3 tools/check.py
   {ctx}`. This holds for export commands and external detectors. When such a

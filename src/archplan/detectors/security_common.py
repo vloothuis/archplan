@@ -72,23 +72,44 @@ def called(message: dict) -> str:
 
 
 _files = {}
+RECV_CALL = re.compile(r"^((?:\([^)]*\)\.)?[^(#]*)")
+
+
+def tails(sid: str) -> list:
+    """The ways a trace label can name the function sid: `pkg.(*T).Get`
+    gives `(*T).Get` and `Get`, `pkg.T.Get` gives `T.Get` and `Get`."""
+    m = re.search(r"(\([^()]*\)\.[^.()]+)$", sid)
+    if m:
+        return [m.group(1), sid.rsplit(".", 1)[-1]]
+    segs = sid.rsplit("/", 1)[-1].split(".")
+    return [".".join(segs[-2:]), segs[-1]] if len(segs) > 2 else [segs[-1]]
 
 
 def call_file(ctx, message: dict) -> str | None:
     """The file of the function a sequence message calls, when its label is
     a function id the model's signatures know, such as `M.f/2`, or names a
-    function of a type the model knows, such as `M.f` of type `M`."""
+    function of a type the model knows, such as `M.f` of type `M`. A Go trace
+    labels a call `(*T).Get` on the component: the file is that of the one
+    signature of that component the label names."""
     key = id(ctx.model)
     if key not in _files or _files[key][0] is not ctx.model:
         _files.clear()
-        _files[key] = (ctx.model, {x["id"]: x.get("file") for x in ctx.model.get("signatures") or []
-                                   if isinstance(x, dict) and isinstance(x.get("id"), str)})
-    label = message.get("label") or (message.get("id") or "").split(":", 1)[-1]
-    fid = CALL.match(label.strip()).group(1).strip()
+        sigs = [x for x in ctx.model.get("signatures") or [] if isinstance(x, dict) and isinstance(x.get("id"), str)]
+        by_tail = {}
+        for x in sigs:
+            for t in tails(x["id"]):
+                by_tail.setdefault((x.get("component"), t), set()).add(x.get("file"))
+        _files[key] = (ctx.model, {x["id"]: x.get("file") for x in sigs}, by_tail)
+    label = (message.get("label") or (message.get("id") or "").split(":", 1)[-1]).strip()
+    fid = CALL.match(label).group(1).strip()
     if fid in _files[key][1]:
         return _files[key][1][fid]
     owner = ((ctx.model.get("types") or {}).get(re.sub(r"/\d+$", "", fid).rpartition(".")[0]) or {})
-    return owner.get("file") if isinstance(owner, dict) else None
+    if isinstance(owner, dict) and owner.get("file"):
+        return owner["file"]
+    comp = participant(ctx, message.get("to"))
+    found = _files[key][2].get((comp, RECV_CALL.match(label).group(1).strip())) if comp else None
+    return next(iter(found)) if found and len(found) == 1 else None
 
 
 def matches(t: dict, name: str, comp: str | None, file: str | None = None) -> bool:

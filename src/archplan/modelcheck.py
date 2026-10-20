@@ -52,7 +52,7 @@ def check(m, root: Path | None = None) -> dict:
         r.err(f"format must be \"archmodel/1\", not {m.get('format')!r}")
     sections = {"source": dict, "layers": list, "components": dict, "dependencies": list, "files": dict,
                 "policy": dict, "types": dict, "sequences": dict, "vocabulary": dict, "notes": dict,
-                "signatures": list, "literals": list, "enums": list,
+                "signatures": list, "literals": list, "enums": list, "routes": list,
                 "schema": dict, "declarations": list}
     for k, t in sections.items():
         if k in m and m[k] is not None and not isinstance(m[k], t):
@@ -131,11 +131,26 @@ def check(m, root: Path | None = None) -> dict:
     for rule in policy.get("rules") or []:
         if isinstance(rule, dict):
             for k in ("from", "to"):
-                if rule.get(k) is not None and rule[k] not in comps:
+                if rule.get(k) is not None and rule[k] != "*" and rule[k] not in comps:
                     r.err(f"policy rule {rule.get('from')} -> {rule.get('to')}: unknown component {rule[k]!r}")
     for sid, s in seqs.items():
         if not isinstance(s, dict) or not isinstance(s.get("messages", []), list):
             r.err(f"sequence {sid}: needs a messages list")
+            continue
+        for i, msg in enumerate(s.get("messages") or []):
+            rt = msg.get("route") if isinstance(msg, dict) else None
+            if rt is not None and not (isinstance(rt, dict) and isinstance(rt.get("path"), str)):
+                r.err(f"sequence {sid}: message {i} has a route without a path")
+            if isinstance(msg, dict) and msg.get("span") is not None and not isinstance(msg["span"], str):
+                r.err(f"sequence {sid}: message {i} has a span that is not a string")
+    for i, rt in enumerate(get("routes", list)):
+        if not isinstance(rt, dict) or not isinstance(rt.get("pattern"), str) or not isinstance(rt.get("method"), str):
+            r.err(f"routes[{i}]: needs a method and a pattern")
+            continue
+        if rt.get("component") is not None and rt["component"] not in comps:
+            r.err(f"routes[{i}]: unknown component {rt['component']!r}")
+        if rt.get("file") is not None:
+            paths.append((f"routes[{i}] file", rt["file"]))
     bad = 0
     for where, p in paths:
         why = bad_path(p, root)

@@ -163,7 +163,8 @@ def regroup(model: dict, specs: list, root: Path) -> bool:
     matchers = [(cid, Exclude(root, s["match"])) for cid, s in specs]
     comps = model.setdefault("components", {})
     files = model.get("files") if isinstance(model.get("files"), dict) else {}
-    lists = [x for k in ("signatures", "literals", "enums") for x in (model.get(k) or []) if isinstance(x, dict)]
+    lists = [x for k in ("signatures", "literals", "enums", "routes") for x in (model.get(k) or [])
+             if isinstance(x, dict)]
     types = [t for t in (model.get("types") or {}).values() if isinstance(t, dict)]
 
     # The exporter's component of every file the model names.
@@ -214,7 +215,7 @@ def regroup(model: dict, specs: list, root: Path) -> bool:
         if c not in spec_ids and isinstance(v, dict) and isinstance(v.get("match"), list):
             v["match"] = [p for p in v["match"] if p not in moved]
 
-    # Files, types, signatures, literals and enums follow their file.
+    # Files, types, signatures, literals, enums and routes follow their file.
     for f, v in files.items():
         if isinstance(v, dict) and f in new:
             v["component"] = new[f]

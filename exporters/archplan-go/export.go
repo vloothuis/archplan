@@ -98,6 +98,10 @@ func Export(ctx context.Context, opt Options) (*Model, error) {
 		Policy:       &al.Policy,
 		Types:        gr.Types,
 		Vocabulary:   gr.Vocabulary,
+		Files:        gr.Files,
+		Signatures:   gr.Signatures,
+		Literals:     gr.Literals,
+		Routes:       gr.Routes,
 	}
 	if m.Dependencies == nil {
 		m.Dependencies = []Dependency{}
@@ -105,7 +109,35 @@ func Export(ctx context.Context, opt Options) (*Model, error) {
 	if err := addSequences(m, opt.Steps); err != nil {
 		return nil, err
 	}
+	m.Source.Capabilities = capabilities(m)
 	return m, nil
+}
+
+// capabilities lists what the model contains, in the terms of
+// exporter-plugins.md.
+func capabilities(m *Model) []string {
+	var out []string
+	add := func(name string, ok bool) {
+		if ok {
+			out = append(out, name)
+		}
+	}
+	internal, fields := false, false
+	for _, c := range m.Components {
+		internal = internal || c.Kind != KindExternal
+	}
+	for _, t := range m.Types {
+		fields = fields || len(t.Fields) > 0
+	}
+	add("components", internal)
+	add("deps", len(m.Dependencies) > 0)
+	add("files", len(m.Files) > 0)
+	add("types", len(m.Types) > 0)
+	add("fields", fields)
+	add("calls", len(m.Sequences) > 0)
+	add("signatures", len(m.Signatures) > 0)
+	add("literals", len(m.Literals) > 0)
+	return out
 }
 
 // configName is the config path as the policy enforcer reports it: relative

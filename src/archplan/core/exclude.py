@@ -114,7 +114,7 @@ def load(start=None) -> Exclude:
 
 def filter_model(model: dict, ex: Exclude, root: Path) -> int:
     """Remove excluded paths from a model in place, for exporters that do not
-    read the exclude list themselves. Drops files, refs, types, signatures,
+    read the exclude list themselves. Drops files, refs, types, signatures, routes,
     literals and enums in excluded files, components whose path is excluded,
     and the dependencies and evidence that came from them. Returns the number
     of items removed."""
@@ -147,7 +147,7 @@ def filter_model(model: dict, ex: Exclude, root: Path) -> int:
                                                                           or v.get("component") in dropped)]:
             del types[t]
             n += 1
-    for key in ("signatures", "literals", "enums"):
+    for key in ("signatures", "literals", "enums", "routes"):
         lst = model.get(key)
         if isinstance(lst, list):
             keep = [x for x in lst

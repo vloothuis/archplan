@@ -10,9 +10,13 @@ type Model struct {
 	Layers       []Layer              `json:"layers,omitempty"`
 	Components   map[string]Component `json:"components"`
 	Dependencies []Dependency         `json:"dependencies"`
+	Files        map[string]File      `json:"files,omitempty"`
 	Policy       *Policy              `json:"policy,omitempty"`
 	Types        map[string]Type      `json:"types,omitempty"`
 	Sequences    map[string]Sequence  `json:"sequences,omitempty"`
+	Signatures   []Signature          `json:"signatures,omitempty"`
+	Literals     []Literal            `json:"literals,omitempty"`
+	Routes       []Route              `json:"routes,omitempty"`
 	Vocabulary   *Vocabulary          `json:"vocabulary,omitempty"`
 	Notes        map[string]string    `json:"notes,omitempty"`
 }
@@ -27,6 +31,8 @@ type Source struct {
 	Generator   string            `json:"generator,omitempty"`
 	GeneratedAt string            `json:"generatedAt,omitempty"`
 	Commands    map[string]string `json:"commands,omitempty"`
+	// Capabilities lists what the model contains; see exporter-plugins.md.
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 // Layer is an ordered group of components, outermost first.
@@ -145,6 +151,68 @@ type Message struct {
 	Fragment string `json:"fragment,omitempty"`
 	Async    bool   `json:"async,omitempty"`
 	Via      string `json:"via,omitempty"`
+	// Outcome is the kind of a refusing return: error, false or status:<4xx>.
+	Outcome string `json:"outcome,omitempty"`
+	// Route is the HTTP route a call with Via "http" requests.
+	Route *HTTPRoute `json:"route,omitempty"`
+	// Span correlates a client call with the server trace it caused.
+	Span string `json:"span,omitempty"`
+}
+
+// HTTPRoute is the method and path pattern of an HTTP request.
+type HTTPRoute struct {
+	Method string `json:"method,omitempty"`
+	Path   string `json:"path"`
+}
+
+// File is one source file and the other module files it refers to.
+type File struct {
+	Component string `json:"component"`
+	Refs      []Ref  `json:"refs"`
+}
+
+// Ref is a reference to another module file, at the line of the first use.
+type Ref struct {
+	To   string `json:"to"`
+	Line int    `json:"line,omitempty"`
+}
+
+// Signature is a function or method with its parameters.
+type Signature struct {
+	ID        string  `json:"id"`
+	Component string  `json:"component"`
+	File      string  `json:"file"`
+	Line      int     `json:"line"`
+	Name      string  `json:"name"`
+	Params    []Param `json:"params"`
+	Returns   *string `json:"returns"`
+	Public    bool    `json:"public"`
+}
+
+// Param is one parameter of a signature.
+type Param struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// Literal is a string value the code compares, switches on or assigns.
+type Literal struct {
+	Value     string `json:"value"`
+	Component string `json:"component"`
+	File      string `json:"file"`
+	Line      int    `json:"line"`
+	Context   string `json:"context"`
+	Field     string `json:"field,omitempty"`
+}
+
+// Route is an HTTP route the code registers, and the function that serves it.
+type Route struct {
+	Method    string `json:"method"`
+	Pattern   string `json:"pattern"`
+	Handler   string `json:"handler,omitempty"`
+	Component string `json:"component,omitempty"`
+	File      string `json:"file,omitempty"`
+	Line      int    `json:"line,omitempty"`
 }
 
 // Vocabulary is the domain language of the code: the concepts each component

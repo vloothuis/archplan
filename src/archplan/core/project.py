@@ -6,6 +6,7 @@ editor) and an agent (over MCP):
   config.json            how to export the code's model, paths to exclude, components and layers,
                          which port to use, auto suggestion mode
   model.archmodel.json   the as-is model, written by the exporter
+  parts/                 with several exporters, the model each one wrote; not committed
   target.archmodel.json  the target model the human (or agent) edits
   base.archmodel.json    the as-is model the target was last edited against
   state.json             target revision, who wrote it last, the plan intent
@@ -49,6 +50,7 @@ vocab-cache.json
 suggest-state.json
 *.tmp
 .*.lock
+parts/
 """
 
 
@@ -312,67 +314,145 @@ class Project:
 
     # export
 
-    def export_command(self) -> str | None:
+    @property
+    def export_setting(self):
+        """`export` from config.json: a command, a list of entries, or None."""
         return self.config.get("export")
+
+    def export_entries(self) -> list:
+        """[{"cmd", "prefix"}] for the export setting (see core/merge.py)."""
+        from .merge import MergeError, entries
+        try:
+            return entries(self.export_setting)
+        except MergeError as e:
+            raise ProjectError(f"{self.dir / 'config.json'}: {e}") from None
+
+    def export_command(self) -> str | None:
+        """The export command as a person reads it: the command, or the
+        commands of a list joined with "; "."""
+        e = self.export_setting
+        if isinstance(e, list):
+            try:
+                return "; ".join(x["cmd"] for x in self.export_entries()) or None
+            except ProjectError:
+                return str(e)
+        return e or None
 
     # The export command comes from config.json, which a cloned repository
     # supplies. It runs in a shell, so the agent (refresh_model) and the editor
     # (From code) run it only after a person approved this exact command for this
     # directory, outside the repository: `archplan init`, `archplan trust`, or
-    # answering yes in `archplan export`.
+    # answering yes in `archplan export`. For a list, the approval covers the
+    # whole list: a changed, added or removed entry needs a new approval.
+
+    def _trust_key(self) -> tuple:
+        """(hash key, the commands whose file arguments the approval covers)."""
+        from .merge import trust_text
+        cmds = [x["cmd"] for x in self.export_entries()]
+        return command_hash(self.root, trust_text(self.export_setting)), "\n".join(cmds)
 
     def trusted(self) -> bool:
         return self.trust_state()[0]
 
     def trust_state(self) -> tuple:
         """(approved, changed files): see project.trust_state."""
-        cmd = self.export_command()
-        if not cmd:
+        if not self.export_command():
             return False, []
-        return trust_state(self.root, "commands", command_hash(self.root, cmd), cmd)
+        try:
+            key, cmds = self._trust_key()
+        except ProjectError:
+            return False, []
+        return trust_state(self.root, "commands", key, cmds)
 
     def trust(self) -> None:
-        cmd = self.export_command()
-        if not cmd:
+        if not self.export_command():
             raise ProjectError("no export command to trust")
-        record_trust(self.root, "commands", command_hash(self.root, cmd), cmd)
+        key, cmds = self._trust_key()
+        record_trust(self.root, "commands", key, cmds)
+
+    def _run(self, cmd: str, out: str | None, timeout: float) -> str:
+        """Run one export command in the project root, with {out} replaced by
+        out when given. Returns its standard output."""
+        if out is not None:
+            cmd = cmd.replace("{out}", shlex.quote(out))
+        if cmd.startswith("archplan "):
+            # Our own exporter: run it with this interpreter, so it works when
+            # archplan is not on the PATH (as in a plugin's bin/). Isolated mode
+            # (-I) keeps the repository's own files off sys.path, so a planted
+            # archplan package in the root cannot take its place.
+            pkg_parent = str(Path(__file__).resolve().parents[2])
+            boot = f"import sys; sys.path.insert(0, {pkg_parent!r}); from archplan.cli import main; sys.exit(main())"
+            cmd = f"{shlex.quote(sys.executable)} -I -c {shlex.quote(boot)} {cmd[len('archplan '):]}"
+        r = subprocess.run(cmd, shell=True, cwd=self.root, capture_output=True, text=True, timeout=timeout,
+                           env=os.environ.copy())
+        if r.returncode != 0:
+            raise ProjectError(f"export failed ({r.returncode}): {cmd}\n{r.stderr.strip()[-2000:]}")
+        return r.stdout
 
     def export(self, timeout: float = 600, require_trust: bool = False) -> dict:
         """Run the configured exporter in the project root. The command writes the
-        as-is model to the configured model path (or prints it on stdout)."""
+        as-is model to the configured model path (or prints it on stdout). With a
+        list of commands, each writes a part, and the parts are merged."""
         cmd = self.export_command()
         if not cmd:
             raise ProjectError(f"no export command in {self.dir / 'config.json'}")
+        entries = self.export_entries()
         ok, changed = self.trust_state() if require_trust else (True, [])
         if not ok:
             raise UntrustedExport(
                 f"the export command in .archplan/config.json is not approved on this machine: {cmd!r}"
                 f"{changed_note(changed)}. "
                 "A person must run `archplan trust` (or `archplan export`) in a terminal once.")
-        env = os.environ.copy()
-        pkg_parent = str(Path(__file__).resolve().parents[2])
-        if cmd.startswith("archplan "):
-            # Our own exporter: run it with this interpreter, so it works when
-            # archplan is not on the PATH (as in a plugin's bin/). Isolated mode
-            # (-I) keeps the repository's own files off sys.path, so a planted
-            # archplan package in the root cannot take its place.
-            boot = f"import sys; sys.path.insert(0, {pkg_parent!r}); from archplan.cli import main; sys.exit(main())"
-            cmd = f"{shlex.quote(sys.executable)} -I -c {shlex.quote(boot)} {cmd[len('archplan '):]}"
-        before = etag(self.model_path)
-        r = subprocess.run(cmd, shell=True, cwd=self.root, capture_output=True, text=True, timeout=timeout, env=env)
-        if r.returncode != 0:
-            raise ProjectError(f"export failed ({r.returncode}): {cmd}\n{r.stderr.strip()[-2000:]}")
-        if etag(self.model_path) == before and r.stdout.lstrip().startswith("{"):
-            self.model_path.parent.mkdir(parents=True, exist_ok=True)
-            write_atomic(self.model_path, r.stdout)
-        m = read_json(self.model_path)
-        if not m or m.get("format") != "archmodel/1":
-            raise ProjectError(f"export did not produce an archmodel/1 file at {self.model_path}")
+        if isinstance(self.export_setting, list):
+            m = self._export_parts(entries, timeout)
+        else:
+            before = etag(self.model_path)
+            out = self._run(entries[0]["cmd"], self.model_path.relative_to(self.root).as_posix()
+                            if self.model_path.is_relative_to(self.root) else str(self.model_path), timeout)
+            if etag(self.model_path) == before and out.lstrip().startswith("{"):
+                self.model_path.parent.mkdir(parents=True, exist_ok=True)
+                write_atomic(self.model_path, out)
+            m = read_json(self.model_path)
+            if not m or m.get("format") != "archmodel/1":
+                raise ProjectError(f"export did not produce an archmodel/1 file at {self.model_path}")
         from .exclude import filter_model  # for exporters that do not read the exclude list
         from .grouping import apply as apply_grouping  # config.json components and layers
-        if filter_model(m, self.exclude, self.root) | apply_grouping(m, self.config, self.root):
+        from .links import link  # calls between processes: span stitching and the route join
+        changed = filter_model(m, self.exclude, self.root) | apply_grouping(m, self.config, self.root)
+        if any(link(m).values()) or changed or isinstance(self.export_setting, list):
             write_json(self.model_path, m)
         return counts(m)
+
+    def _export_parts(self, entries: list, timeout: float) -> dict:
+        """Run each entry with {out} set to its own file in .archplan/parts/,
+        or read its standard output, and merge the parts."""
+        from .merge import MergeError, merge
+        parts_dir = self.path("parts")
+        parts_dir.mkdir(parents=True, exist_ok=True)
+        append_ignore(self, "parts/")
+        parts = []
+        for i, e in enumerate(entries):
+            part = parts_dir / f"{i + 1}.archmodel.json"
+            if os.path.lexists(part):
+                os.unlink(part)
+            out = self._run(e["cmd"], part.relative_to(self.root).as_posix(), timeout)
+            if os.path.lexists(part):
+                m = read_json(part)
+            else:
+                try:
+                    m = json.loads(out) if out.lstrip().startswith("{") else None
+                except ValueError:
+                    m = None
+            if not isinstance(m, dict) or m.get("format") != "archmodel/1":
+                raise ProjectError(f"export {i + 1} ({e['cmd']!r}) did not write an archmodel/1 file to {{out}} "
+                                   "or standard output")
+            parts.append((e, m))
+        try:
+            m = merge(parts)
+        except MergeError as err:
+            raise ProjectError(str(err)) from None
+        self.model_path.parent.mkdir(parents=True, exist_ok=True)
+        return m
 
 
 def counts(m: dict) -> dict:
