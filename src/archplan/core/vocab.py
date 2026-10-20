@@ -629,8 +629,10 @@ def _strip_comment(line: str) -> str:
 
 def parse_front(text: str) -> dict:
     """The YAML subset GLOSSARY.md front matter uses: owns (a map of concept
-    name to extra terms), uses and avoid (lists), in flow or block style."""
-    out = {"owns": {}, "uses": [], "avoid": []}
+    name to extra terms), uses and avoid (lists), and vendor and technical
+    (lists of owned concepts that are not domain concepts), in flow or block
+    style."""
+    out = {"owns": {}, "uses": [], "avoid": [], "vendor": [], "technical": []}
     key, sub = None, None
     for raw in text.splitlines():
         line = _strip_comment(raw)
@@ -668,9 +670,10 @@ def parse_front(text: str) -> dict:
 
 
 def parse_glossary(text: str) -> dict:
-    """{"owns": {name: [terms]}, "uses", "avoid", "definitions": {concept id: text}}."""
+    """{"owns": {name: [terms]}, "uses", "avoid", "vendor", "technical",
+    "definitions": {concept id: text}}."""
     body = text
-    g = {"owns": {}, "uses": [], "avoid": []}
+    g = {"owns": {}, "uses": [], "avoid": [], "vendor": [], "technical": []}
     if text.startswith("---\n"):
         front, sep, after = text[4:].partition("\n---")
         if not sep:
@@ -717,6 +720,7 @@ def vocabulary(p: Project, model: dict, v: Vocab | None = None) -> dict:
             continue
         gloss[c] = g
         vcomps[c] = {"file": rel}
+        kinds = {slug(n): kind for kind in ("vendor", "technical") for n in g[kind]}
         for name in sorted(g["owns"]):
             cid = slug(name)
             if not cid:
@@ -725,7 +729,7 @@ def vocabulary(p: Project, model: dict, v: Vocab | None = None) -> dict:
                 warnings.append(f"{rel}: concept {name!r} is already owned by {concepts[cid]['owner']}")
                 continue
             terms = list(dict.fromkeys([name] + [t for t in g["owns"][name] if t]))
-            concepts[cid] = {"name": name, "owner": c, "terms": terms, "kind": "domain",
+            concepts[cid] = {"name": name, "owner": c, "terms": terms, "kind": kinds.get(cid, "domain"),
                              **({"definition": g["definitions"][cid]} if g["definitions"].get(cid) else {}),
                              "source": "glossary"}
     internal_keys = {term_key(c) for c in internal}
