@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -34,6 +35,7 @@ from . import __version__, findings, ratchet
 from .core.architecture import Architecture, ArchitectureError, analyse
 from .core.hotspots import git, toplevel
 from .detectors.common import graph
+from .core.safeio import inside
 from .project import Project, ProjectError, etag, read_json, write_atomic
 
 TRUST_ENV = "ARCHPLAN_CI_TRUST"
@@ -130,16 +132,23 @@ class Base:
             # The head's settings, so that only the code differs; symlinks stay links.
             shutil.copytree(self.p.dir, d, symlinks=True, ignore=shutil.ignore_patterns(*LOCAL))
             self.project = bp = Project(root)
+            # config.json comes from the branch: its model path must stay inside the worktree.
+            try:
+                rel = bp.model_path.relative_to(self.wt)
+            except ValueError:
+                rel = None
+            if rel is None or inside(self.wt, rel) is None:
+                raise ProjectError(f"the model path in {self.p.dir.name}/config.json is outside the repository")
             if bp.model_path.is_relative_to(d):
                 # The head's model came along with the settings: put back the base's, when it is committed.
                 bp.model_path.unlink(missing_ok=True)
                 try:
-                    rel = bp.model_path.relative_to(self.wt).as_posix()
-                    write_atomic(bp.model_path, git(self.wt, "show", f"HEAD:{rel}"))
+                    write_atomic(bp.model_path, git(self.wt, "show", f"HEAD:{rel.as_posix()}"))
                 except (ProjectError, ValueError):
                     pass
             if self.model_file:
                 bp.model_path.parent.mkdir(parents=True, exist_ok=True)
+                bp.model_path.unlink(missing_ok=True)
                 shutil.copyfile(self.model_file, bp.model_path)
             else:
                 self.note = export(bp, self.trust, "the base")
@@ -256,8 +265,13 @@ def in_diff(f: dict, files: set, comps: set) -> bool:
 # ---------- reports ----------
 
 def md(s) -> str:
-    """Text for a markdown table cell."""
-    return " ".join(str(s).split()).replace("|", "\\|").replace("<", "&lt;")
+    """Text for a markdown table cell, with markdown and HTML escaped."""
+    return re.sub(r"([\\`*_\[\]()!#~|])", r"\\\1", " ".join(str(s).split())).replace("<", "&lt;")
+
+
+def code(s) -> str:
+    """Text for an inline code span in a table cell."""
+    return "`" + " ".join(str(s).split()).replace("`", "'").replace("|", "\\|") + "`"
 
 
 def summary(res: dict) -> str:
@@ -269,7 +283,7 @@ def summary(res: dict) -> str:
              f"{plural(rat['worse'], 'ratchet metric')} worse."]
     if res.get("base"):
         b = res["base"]
-        lines.append(f"Compared with `{md(b['ref'] or b['model'])}`"
+        lines.append(f"Compared with {code(b['ref'] or b['model'])}"
                      + (f" (merge base `{b['commit'][:10]}`)" if b.get("commit") else "")
                      + f": {c.get('on_base', 0)} findings were already there, "
                      + f"{c.get('fixed_since_base', 0)} are fixed.")
@@ -281,7 +295,7 @@ def summary(res: dict) -> str:
         for f in fs[:LIST_MAX]:
             where = f["files"][0] if f.get("files") else ", ".join(f.get("components", [])[:3])
             ln = findings.line_of(f) if f.get("files") else None
-            out.append(f"| {f.get('weight', '')} | {md(f['title'])} | `{md(where)}{f':{ln}' if ln else ''}` |"
+            out.append(f"| {f.get('weight', '')} | {md(f['title'])} | {code(f'{where}:{ln}' if ln else where)} |"
                        + ((" yes |" if f.get("in_diff") else " |") if diff_col else ""))
         if len(fs) > LIST_MAX:
             out.append(f"\n{len(fs) - LIST_MAX} more; see the job log.")
@@ -322,7 +336,7 @@ def summary(res: dict) -> str:
                   f"{bl['entries']} traced entry points.", ""]
         if bl["touched"]:
             lines += ["| Risk | Entry point | Why |", "|---:|---|---|"]
-            lines += [f"| {e['risk']} | `{md(e['entry'])}` | {md('; '.join(e['because'][:2]))} |"
+            lines += [f"| {e['risk']} | {code(e['entry'])} | {md('; '.join(e['because'][:2]))} |"
                       for e in bl["touched"]]
             lines.append("")
     for n in res.get("notes") or []:

@@ -199,6 +199,18 @@ class CiTest(TempProject):
         bad = Path(self.tmp.name) / "bad.json"
         bad.write_text("{}")
         self.assertEqual(self.run_ci("--base-model", str(bad), "--no-export")[0], 2)
+        # the branch's config.json cannot make the base write outside its worktree
+        cfg = json.loads(p.path("config.json").read_text())
+        cfg["model"] = "../outside.archmodel.json"
+        p.path("config.json").write_text(json.dumps(cfg))
+        (self.root.parent / "outside.archmodel.json").write_text(cached.read_text())
+        code, _, err = self.run_ci("--base", "main", "--base-model", str(cached), "--no-export")
+        self.assertEqual(code, 2)
+        self.assertIn("outside the repository", err)
+
+    def test_summary_escapes(self):
+        self.assertEqual(ci.md("[x](http://e) *a* <b>|"), "\\[x\\]\\(http://e\\) \\*a\\* &lt;b>\\|")
+        self.assertEqual(ci.code("a`b|c"), "`a'b\\|c`")
 
 
 if __name__ == "__main__":
