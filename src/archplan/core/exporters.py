@@ -17,7 +17,8 @@ exists there, declaring one of the listed dependencies when any are listed.
 With subdirs, a direct subfolder can match instead; the one with the most
 files matching `weight` wins. In the command, {out} is the model path,
 {root} the matched folder and {chdir} " -C <folder>" when that is not the
-root.
+root. {go_version} is the tag of the Go exporter released with this archplan
+(see go_version), so a project keeps the exporter it was set up with.
 
 runs_repo_code marks an exporter that runs code from the repository: the
 TypeScript exporter loads the project's own typescript package from
@@ -226,9 +227,22 @@ def installed(e: dict, root: Path, where: Path) -> bool | None:
         return False
 
 
+def go_version(version: str | None = None) -> str:
+    """The Go exporter's version for an archplan version: release vYY.M.N
+    also tags exporters/archplan-go/v0.YYMM.N (see docs/releasing.md), so
+    26.10.15 gives v0.2610.15. "latest" for a version outside that scheme,
+    such as a development build."""
+    if version is None:
+        from .. import __version__ as version
+    m = re.fullmatch(r"v?(\d{2})\.(\d{1,2})\.(\d+)", version or "")
+    if not m or not 1 <= int(m.group(2)) <= 12 or int(m.group(1)) < 26:
+        return "latest"
+    return f"v0.{int(m.group(1)) * 100 + int(m.group(2))}.{int(m.group(3))}"
+
+
 def command(e: dict, where: Path, out: str) -> str:
     w = str(where)
-    return (e["command"].replace("{chdir}", f" -C {shlex.quote(w)}" if w != "." else "")
+    return (e["command"].replace("{go_version}", go_version()).replace("{chdir}", f" -C {shlex.quote(w)}" if w != "." else "")
             .replace("{root}", shlex.quote(w)).replace("{out}", shlex.quote(out)))
 
 

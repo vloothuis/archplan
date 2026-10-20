@@ -41,4 +41,7 @@ CalVer version.
 The Go exporter is a separate Go module in `exporters/archplan-go`. Go only
 accepts major version 0 or 1 for its module path, so its tag keeps major 0
 and puts the year and month in the minor version: release `v26.10.0` also
-tags `exporters/archplan-go/v0.2610.0`. `go run ...@latest` picks it up.
+tags `exporters/archplan-go/v0.2610.0`. `archplan init` in archplan
+`v26.10.0` writes `go run ...@v0.2610.0` into `config.json`, so a project
+keeps the exporter it was set up with. A development build, whose version
+does not follow the scheme, writes `@latest`.

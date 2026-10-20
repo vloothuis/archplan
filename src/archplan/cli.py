@@ -15,6 +15,8 @@
   archplan profile [infer|show|list|use NAME]  the architecture profile: roles, rules and where the code breaks them
   archplan check [--format github] [--tighten]  new findings (cycles, rule breaks, ...) and the ratchet;
                                  exit 1 when there are new findings or a ratchet metric got worse
+  archplan ci [--base REF] [--summary PATH] [--sarif PATH]  check for a pull request: export, compare with
+                                 the base, write a markdown summary and SARIF; exit codes as check
   archplan detectors [enable|disable|trust|run ID]  the checks behind the findings, and their settings
   archplan annotators [trust ID|read|write FILE [--apply]]  declarations in the code (zones, guards, auth):
                                  who reads and writes them, and changes to them as a patch
@@ -415,7 +417,7 @@ def cmd_profile(a):
 def cmd_check(a):
     """Exit 1 when there are new findings or a ratchet metric got worse, 0
     when neither, 2 on errors."""
-    from . import findings, ratchet
+    from . import ci, findings, ratchet
     try:
         p = Project.find(dir=a.dir)
     except ProjectError as e:
@@ -453,9 +455,7 @@ def cmd_check(a):
             msg = (f"started with {len(ch)} metrics" if r["started"] else "nothing got better" if not ch else
                    "tightened " + ", ".join(f"{k} {ratchet.fmt(o)} -> {ratchet.fmt(n)}" for k, (o, n) in ch.items()))
             print(f"ratchet: {msg}", file=sys.stderr)
-        full = f.listing()
-        rat = f.ratchet(full, a.min_weight)
-        lst = findings.above(full, findings.min_weight(p, a.min_weight))
+        full, rat, lst = ci.evaluate(f, a.min_weight)
     except ProjectError as e:
         die(str(e), 2)
     new, worse = lst["counts"]["new"], rat["worse"]
@@ -470,6 +470,85 @@ def cmd_check(a):
     else:
         print(findings.text(lst, a.all) + "\n\n" + ratchet.text(rat))
     sys.exit(1 if new or worse else 0)
+
+
+def cmd_ci(a):
+    """check for a pull request: export first, compare with a base, write a
+    summary and SARIF. Exit codes as check: 1, 0, or 2 on errors."""
+    from . import blast, ci, findings, ratchet
+    from .detectors import Context
+    from .detectors.security_common import component_of
+    try:
+        p = Project.find(dir=a.dir)
+    except ProjectError as e:
+        die(str(e), 2)
+    if a.min_weight is not None and not 0 <= a.min_weight <= 100:
+        die("--min-weight must be 0 to 100", 2)
+    trust = ci.opted_in(a.trust_config)
+    notes = []
+    try:
+        if not a.no_export:
+            notes.append(ci.export(p, trust))
+        f = findings.Findings(p)
+        f.execute = True  # external detectors run here, as in check
+        full, rat, lst = ci.evaluate(f, a.min_weight)
+        listing = lst
+        res = {"counts": lst["counts"], "ratchet": rat, "failing": [x for x in lst["findings"] if x["state"] == "new"]}
+        ctx = Context(p)
+        base_model = None
+        if a.base or a.base_model:
+            with ci.Base(p, a.base, a.base_model, trust) as b:
+                notes.append(b.note)
+                fb = ci.base_findings(b.project, f)
+                base_full, base_model = fb.listing(), fb.model()
+                c = ci.compare(lst, base_full, full)
+                mw = findings.min_weight(p, a.min_weight)
+                res.update(failing=c["failing"], on_base=c["on_base"], fixed=c["fixed"], counts=c["listing"]["counts"],
+                           ratchet_delta=ci.ratchet_delta(ratchet.measure(base_full, base_model, mw), rat["metrics"]),
+                           base={"ref": a.base, "model": a.base_model, "commit": b.commit})
+                listing = c["listing"]
+        if a.base:
+            files = blast.changed(ctx, a.base)
+            comps = {component_of(ctx, x) for x in files} - {None}
+            for x in listing["findings"]:
+                x["in_diff"] = ci.in_diff(x, set(files), comps)
+            res["changed"] = {"files": files[:200], "components": sorted(comps)}
+            if ctx.model.get("sequences"):
+                res["blast"] = blast.report(ctx, files, 10)
+        target = read_json(p.target_path)
+        if target:
+            res["plan"] = {"head": ci.plan_gap(f.model(), target), "base": ci.plan_gap(base_model, target)}
+    except (ProjectError, ValueError) as e:
+        die(str(e), 2)
+    notice = ci.tighten_notice(rat)
+    res["notes"] = [n for n in notes + [notice] if n]
+    failing, worse = len(res["failing"]), rat["worse"]
+    path = a.summary or os.environ.get("GITHUB_STEP_SUMMARY")
+    if path:
+        ci.write_summary(path, ci.summary(res), append=not a.summary)
+    if a.sarif:
+        shown_fs = [x for x in listing["findings"] if a.all or x["state"] == "new"]
+        ci.write_sarif(a.sarif, ci.sarif(shown_fs, ci.repo_paths(p, ctx.base), {x["id"] for x in res["failing"]}))
+    if a.json:
+        out = {**listing, "findings": [x for x in listing["findings"] if a.all or x["state"] == "new"],
+               **{k: v for k, v in res.items() if k not in ("failing", "counts")}}
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+    elif a.format == "github":
+        text = "\n".join(x for x in (findings.github(listing, a.all), ratchet.github(rat)) if x)
+        if text:
+            print(text)
+        for n in res["notes"]:
+            print("::notice title=archplan::" + findings.github_escape(n))
+        print(f"archplan: {failing} new findings, {worse} ratchet metrics worse", file=sys.stderr)
+    else:
+        out = findings.text(listing, a.all) + "\n\n" + ratchet.text(rat)
+        if res.get("base"):
+            out += (f"\n\nAgainst the base ({a.base or a.base_model}): {res['counts']['on_base']} new findings were "
+                    f"already there and do not fail, {res['counts']['fixed_since_base']} are fixed.")
+        print(out)
+        for n in res["notes"]:
+            print(f"note: {n}", file=sys.stderr)
+    sys.exit(1 if failing or worse else 0)
 
 
 def cmd_detectors(a):
@@ -865,6 +944,24 @@ def main(argv=None):
     s.add_argument("--min-weight", type=int, metavar="N", default=None,
                    help='leave out new findings that weigh less than N (0 to 100); default: "check": '
                         '{"min_weight": N} in config.json, else 0')
+    s = add("ci", cmd_ci, "check for a pull request: export, findings new against the base, summary and SARIF")
+    s.add_argument("--base", metavar="REF", help="fail only on findings that are not on the merge base with REF, "
+                                                 "such as origin/main; exports there in a temporary git worktree")
+    s.add_argument("--base-model", metavar="PATH", help="the base's model file (a cached artifact) instead of "
+                                                       "exporting at the base")
+    s.add_argument("--trust-config", action="store_true",
+                   help="run the export command from config.json without `archplan trust` "
+                        "(or set ARCHPLAN_CI_TRUST=1)")
+    s.add_argument("--no-export", action="store_true", help="use the model as it is; do not run the export command")
+    s.add_argument("--summary", metavar="PATH", help="write a markdown summary here (default: append to "
+                                                    "$GITHUB_STEP_SUMMARY when it is set)")
+    s.add_argument("--sarif", metavar="PATH", help="write SARIF 2.1.0 for GitHub code scanning")
+    s.add_argument("--format", choices=["text", "github"], default="text",
+                   help="github: ::warning and ::error annotations for GitHub Actions")
+    s.add_argument("--json", action="store_true", help="the result as JSON")
+    s.add_argument("--all", action="store_true", help="also list findings that do not fail")
+    s.add_argument("--min-weight", type=int, metavar="N", default=None,
+                   help="leave out new findings that weigh less than N (0 to 100), as in check")
     s = add("detectors", cmd_detectors, "list the detectors; enable, disable, trust or run one")
     s.add_argument("action", nargs="?", choices=["list", "enable", "disable", "trust", "run"], default="list")
     s.add_argument("id", nargs="?", help="a detector id, such as concepts.data_clump")

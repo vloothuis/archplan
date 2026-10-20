@@ -10,7 +10,7 @@
       "go.mod": []
     }
   },
-  "command": "go run github.com/vloothuis/archplan/exporters/archplan-go@latest -o {out}",
+  "command": "go run github.com/vloothuis/archplan/exporters/archplan-go@{go_version} -o {out}",
   "check": {
     "programs": [
       "go"
