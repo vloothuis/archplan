@@ -107,7 +107,7 @@ The exporter reads `.archplan/elixir.json`. It looks in the Mix project first, t
 | `trace.max_calls` | Calls recorded per test. Later calls are dropped. |
 | `trace.max_messages` | Messages kept per sequence. |
 | `trace.max_depth` | Nesting depth kept per sequence. |
-| `trace.include_test_process` | Also record calls made by the test process itself. |
+| `trace.include_test_process` | Record all calls of the test process itself, not only the requests it makes. |
 
 If the project uses the `boundary` library, its boundaries become the components and the policy. This path is not tested yet.
 
@@ -116,24 +116,25 @@ If the project uses the `boundary` library, its boundaries become the components
 Tracing turns test runs into sequences. Run the tests you want as sequences, then export.
 
 ```sh
-archplan trace-elixir -C core test test/systems/pool/onboarding_page_test.exs --max-cases 1
-archplan trace-elixir -C core test --only feature --max-cases 1
+archplan trace-elixir -C core test test/systems/pool/onboarding_page_test.exs
+archplan trace-elixir -C core test --only feature
 archplan export-elixir -C core -o .archplan/model.archmodel.json
 ```
 
 `trace` runs a Mix task (default `test`) with the `ArchplanTrace` formatter and the normal CLI formatter. It writes one JSON file per passed or failed test. Without the wrapper:
 
 ```sh
-MIX_ENV=test elixir -r /path/to/archplan_trace.ex -S mix test --max-cases 1 \
+MIX_ENV=test elixir -r /path/to/archplan_trace.ex -S mix test \
   --formatter ArchplanTrace --formatter ExUnit.CLIFormatter
 ```
 
 How it works:
 
 - At start it sets a call trace pattern on every exported function of the project's own modules.
-- At each test start it turns on call tracing for all processes. At test end it turns it off.
+- It turns on call tracing for all processes for the whole run. It does not wait for ExUnit's test events: ExUnit sends them without waiting for formatters, so a test can be running before its start event arrives.
+- It gives each process to a test: the test process by its label, other processes through their `$callers` (tasks, LiveView tests) or `$ancestors`. A process with no test there, such as one the application started, belongs to the only running test. While several tests run, its calls are dropped.
 - It records module, function and arity only. Argument and return values are never recorded.
-- It keeps calls into another module. Calls within the same module are not kept.
+- It keeps calls into another module. Calls within the same module are not kept, with one exception: when a Phoenix controller's `call/2` applies an action, the step is named after the action, such as `Systems.Storage.Controller.export/2`. The trace's `entry` is the first such action.
 - The export keeps only calls that cross a component boundary.
 
 Each process gets an actor, which becomes the first participant:
@@ -142,7 +143,7 @@ Each process gets an actor, which becomes the first participant:
 | --- | --- |
 | LiveView, controller, endpoint or other web process | `browser` |
 | Oban job | `oban` (async) |
-| Test process | not recorded, unless `ARCHPLAN_TRACE_TEST=1` |
+| Test process | `browser` for the requests it makes: a call into a controller, endpoint, router or plug, with everything below it, as `Phoenix.ConnTest` runs them in the test process. Its other calls, such as factories, are not recorded, unless `ARCHPLAN_TRACE_TEST=1`. |
 | Any other process | `process` (async) |
 
 Environment variables:
@@ -151,11 +152,11 @@ Environment variables:
 | --- | --- |
 | `ARCHPLAN_TRACE_DIR` | Output directory. Default: `<repo root>/.archplan/sequences`. |
 | `ARCHPLAN_CONFIG` | Config file. Default: `.archplan/elixir.json`. |
-| `ARCHPLAN_TRACE_TEST=1` | Also record the test process. |
+| `ARCHPLAN_TRACE_TEST=1` | Record all calls of the test process. |
 
-### Run tests serially
+### Parallel tests
 
-Use `--max-cases 1`. Erlang call tracing is global. With tests running in parallel, calls from one test end up in the trace of another.
+Tests may run in parallel. A process the application started, such as a GenServer or a PubSub subscriber, cannot be given to one test while several run, so its calls are dropped. Use `--max-cases 1` to keep them.
 
 ### Cost
 
@@ -165,8 +166,7 @@ Use `--max-cases 1`. Erlang call tracing is global. With tests running in parall
 
 ### Limits
 
-- ExUnit sends events to formatters without waiting. A very short test can finish before the formatter sees it start. Such a test is skipped.
-- A process that exits before the tracer handles its first call cannot be inspected. It counts as `process`.
+- A process that exits before the tracer handles its first call cannot be inspected. It counts as `process` and is shared: while several tests run, its calls are dropped.
 - Calls to modules outside the project (Ecto, Phoenix) are not traced. Calls back into the project from those modules are.
 - LiveView function components show up as calls from the page to the component module. This can make sequences long. Exclude noisy modules with `trace.exclude_modules`.
 - Long tests are cut at `max_calls` or `max_messages`. The title then ends with "(truncated)". Failed tests end with "(failed)".

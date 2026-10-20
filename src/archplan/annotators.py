@@ -64,7 +64,7 @@ def valid_value(key: str, v) -> bool:
     if key == "function.sink":
         return v in SINKS
     if key == "entrypoint.auth":
-        return v in ("required", "none")
+        return v in ("required", "authz", "none")
     return False
 
 

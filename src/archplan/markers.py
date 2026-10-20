@@ -8,7 +8,7 @@ attributes and other comments allowed in between:
   def health(request): ...
 
 `guard` (or `guard=authn`, `guard=authz`) declares function.guard, `sink=write`
-or `sink=read` function.sink, `auth=required|none` entrypoint.auth. A
+or `sink=read` function.sink, `auth=required|authz|none` entrypoint.auth. A
 component's zone is the `zone:` line in the front matter of the GLOSSARY.md
 in its folder, and its gateways the `gateway:` line (`gateway: [a, b]`).
 See format/annotator-plugins.md.
@@ -45,7 +45,7 @@ TOKEN = re.compile(r'([a-z_]+)(?:=("(?:[^"\\]|\\.)*"|\S+))?')
 # What a written reason may not hold: line breaks, and : = < > * " \, so it
 # cannot become a magic comment (coding:, frozen_string_literal:) or end a PHP comment (?>).
 UNSAFE = re.compile(r"[^\w .,;'()/?!&+%#@-]")
-AUTH = ("required", "none")
+AUTH = ("required", "authz", "none")
 NOT_NAMES = frozenset("if for while switch return catch elif else when case unless until match new".split())
 STATEMENTS = frozenset("return await yield throw raise new else elif if for while do case when not and or in is "
                        "print puts assert del go defer".split())

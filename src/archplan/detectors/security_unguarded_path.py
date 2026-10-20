@@ -11,8 +11,8 @@ such as an export or a script runner, that reach the data while none of them
 can check access. A dependency may only use types, so findings are weak:
 candidates to confirm with a trace.
 
-Entry components are those of declared entry points with auth=required and
-those in the `entry_zones`. Targets are the components in the `target_zones`
+Entry components are those of declared entry points with auth=required or
+auth=authz and those in the `entry_zones`. Targets are the components in the `target_zones`
 and, with `sink_targets`, those of declared sinks. Sinks are off by default:
 a sink often sits in a hub component, such as a Repo in Core, that every
 component depends on. One finding per first step and target."""
@@ -57,7 +57,8 @@ def run(ctx, params) -> list:
     guard = {g["component"] for g in guards(ctx) if g["component"]}
     if not guard:
         return []
-    entries = {target(ctx, d)["component"] for d in decls(ctx, "entrypoint", "auth") if d.get("value") == "required"}
+    entries = {target(ctx, d)["component"] for d in decls(ctx, "entrypoint", "auth")
+               if d.get("value") in ("required", "authz")}
     entries |= {c for c, z in zone.items() if z in (params["entry_zones"] or [])}
     goals = {c for c, z in zone.items() if z in (params["target_zones"] or [])}
     if params["sink_targets"]:

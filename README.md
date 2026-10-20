@@ -492,7 +492,8 @@ a component is in, the components through which others must reach it (its
 gateways), which functions are guards (they authenticate, authorize
 or validate), which functions are sinks (they write or read data that needs
 a permission check first), and which entry points need an authenticated
-caller. These
+caller (`auth=required`) or also a check of what that caller may do, such as
+read the record the request names (`auth=authz`). These
 declarations live in the repository, next to the code. After every export,
 archplan reads them into the model's `declarations` section.
 
@@ -516,7 +517,8 @@ The security detectors read the declarations:
 
 | Kind | Finds |
 |---|---|
-| `security.unguarded_entry` | a traced entry point whose calls pass no guard: strong when it is declared `auth=required`, weak when it has no auth declaration. Needs sequences. |
+| `security.unguarded_entry` | a traced entry point whose request passes no guard: strong when it is declared `auth=required`, or `auth=authz` and the request passes no authorization guard; weak when it has no auth declaration. A test that makes several requests has each judged on its own. Needs sequences. |
+| `security.unchecked_entry` | an entry point declared `auth=authz` whose code, with the functions of its file that it calls and the file's plugs and filters, names no authorization guard. Static, so it covers entry points no test runs; a traced request that passes the guard clears it. Medium. |
 | `security.unguarded_sink` | a trace that calls a write sink before any authorization guard (`guard` or `guard=authz`), strong; or a read sink with no such guard anywhere in the trace, medium. Calls inside a guard are its own. A `guard=authn` guard does not count. Needs sequences. |
 | `security.untraced` | a declared guard or entry point that no trace calls, in a component the traces do visit: a guard wired nowhere, or a route nothing reaches. Weak. Needs sequences. |
 | `security.open_entry` | an entry point declared `auth=none` without a reason |

@@ -463,6 +463,66 @@ class ElixirValuesTest(unittest.TestCase):
         self.assertEqual([e["values"] for e in m["enums"]], [["draft", "paid"]])
 
 
+@unittest.skipUnless(shutil.which("mix"), "needs mix")
+class ElixirTraceTest(unittest.TestCase):
+    def test_requests_actions_and_async_tests(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d).resolve()
+            write(root, {"mix.exs": "defmodule Shop.MixProject do\n  use Mix.Project\n"
+                                    "  def project, do: [app: :shop, version: \"0.1.0\"]\nend\n",
+                         "lib/shop.ex": textwrap.dedent("""\
+                             defmodule Shop.Auth do
+                               def check(conn), do: conn
+                             end
+
+                             defmodule Shop.Store do
+                               def setup, do: :ok
+                               def get(id), do: Process.sleep(5) && id
+                             end
+
+                             defmodule Shop.OrderController do
+                               def init(opts), do: opts
+                               def call(conn, action), do: apply(__MODULE__, action, [conn, %{}])
+                               def action(conn, _opts), do: conn
+                               def show(conn, _params), do: Shop.Auth.check(conn) && Shop.Store.get(1)
+                             end
+                             """),
+                         "test/test_helper.exs": "ExUnit.start()\n",
+                         "test/order_test.exs": textwrap.dedent("""\
+                             defmodule Shop.OrderTest do
+                               use ExUnit.Case, async: true
+                               test "show" do
+                                 Shop.Store.setup()
+                                 for _ <- 1..5, do: Shop.OrderController.call(:conn, :show)
+                               end
+                             end
+                             """),
+                         "test/store_test.exs": textwrap.dedent("""\
+                             defmodule Shop.StoreTest do
+                               use ExUnit.Case, async: true
+                               test "get" do
+                                 Task.async(fn -> for i <- 1..5, do: Shop.Store.get(i) end) |> Task.await()
+                               end
+                             end
+                             """)})
+            wrapper = ROOT / "src" / "archplan" / "elixir" / "archplan-elixir"
+            out = subprocess.run(["sh", str(wrapper), "trace"], cwd=root, capture_output=True, text=True,
+                                 env={**os.environ, "ARCHPLAN_TRACE_DIR": str(root / "seq")})
+            self.assertEqual(out.returncode, 0, out.stderr[-2000:])
+            show = json.loads((root / "seq" / "order-show.json").read_text())
+            get = json.loads((root / "seq" / "store-get.json").read_text())
+        # the test's own setup call is left out; the action names the step
+        self.assertEqual(show["entry"], "Shop.OrderController.show/2")
+        self.assertEqual({t["actor"] for t in show["trees"]}, {"browser"})
+        self.assertEqual(show["trees"][0]["root"],
+                         ["Shop.OrderController", "show", 2, [["Shop.Auth", "check", 1, []],
+                                                              ["Shop.Store", "get", 1, []]]])
+        self.assertEqual(len(show["trees"]), 5)
+        # the task belongs to its test, which runs at the same time as the other
+        self.assertEqual(get["calls"], 5)
+        self.assertEqual({t["actor"] for t in get["trees"]}, {"process"})
+
+
 @unittest.skipUnless(shutil.which("node") and (TS_MODULES / "typescript").is_dir(), "needs node and typescript")
 class TsExportTest(TempProject):
     def test_components_dependencies_types_files(self):

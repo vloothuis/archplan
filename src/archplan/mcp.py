@@ -89,7 +89,8 @@ TOOLS = [
                     "that authenticates (guard authn), authorizes (guard authz) or both (guard true) "
                     "(function.guard), a function that writes or reads data that needs an authorization "
                     "check first (function.sink: write or read), or whether an entry point "
-                    "needs an authenticated caller (entrypoint.auth: required or none, with a reason for none). "
+                    "needs an authenticated caller (entrypoint.auth: required), also a check of what that caller may "
+                    "do (authz), or neither (none, with a reason). "
                     "The project's annotator writes them in its own form (marker comments by default) in a "
                     "scratch copy and reads them back; you get one result per change and the patch. With "
                     "apply, the patch goes into the working tree. A change with status unsupported, conflict "
@@ -106,7 +107,7 @@ TOOLS = [
              "key": {"type": "string", "enum": ["zone", "gateway", "guard", "sink", "auth"]},
              "value": {"description": "zone: an id such as internal; gateway: a list of component ids; "
                                       "guard: true, authn or authz; "
-                                      "sink: write or read; auth: required or none"},
+                                      "sink: write or read; auth: required, authz or none"},
              "reason": {"type": "string"}},
              "required": ["op", "target", "key"]}},
          "apply": {"type": "boolean", "default": False}},
