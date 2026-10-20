@@ -128,6 +128,7 @@ type Sequence struct {
 	Title        string              `json:"title,omitempty"`
 	Entry        string              `json:"entry,omitempty"`
 	Source       string              `json:"source,omitempty"`
+	Guards       string              `json:"guards,omitempty"`
 	Participants []string            `json:"participants"`
 	Fragments    map[string]Fragment `json:"fragments,omitempty"`
 	Messages     []Message           `json:"messages"`

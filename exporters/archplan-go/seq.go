@@ -13,6 +13,7 @@ type Scenario struct {
 	Name    string   `json:"name"`
 	Handler string   `json:"handler"`
 	Base    string   `json:"base"`
+	Guards  string   `json:"guards,omitempty"` // "off" when the run had its guards switched off
 	Diagram *Diagram `json:"diagram"`
 }
 
@@ -68,7 +69,7 @@ type seqBuilder struct {
 // and drop their values, which can be secrets.
 func SequenceFrom(sc Scenario, partOf func(string) string) Sequence {
 	b := &seqBuilder{
-		seq:    Sequence{Title: sc.Name, Entry: sc.Handler, Source: "seqtrace", Fragments: map[string]Fragment{}},
+		seq:    Sequence{Title: sc.Name, Entry: sc.Handler, Source: "seqtrace", Guards: sc.Guards, Fragments: map[string]Fragment{}},
 		partOf: partOf, seen: map[string]bool{}, count: map[string]int{},
 	}
 	b.participant(sc.Diagram.Root.From)

@@ -171,6 +171,14 @@ class LinkTest(unittest.TestCase):
         self.assertFalse(any(x.get("joined") for x in seq["messages"]))
         self.assertEqual(seq["messages"][1]["handler"], "api.(*App).getOrder")
 
+    def test_stitch_keeps_guards_off(self):
+        server = server_part()
+        server["sequences"]["get-order-server"]["guards"] = "off"
+        m = merge.merge([({"cmd": "go", "prefix": None}, server), ({"cmd": "ts", "prefix": "web"}, client_part())])
+        links.link(m)
+        self.assertEqual(m["sequences"]["open-order"]["guards"], "off")
+        self.assertNotIn("guards", self.linked()[0]["sequences"]["open-order"])
+
     def test_route_join_adds_the_handler_call(self):
         m, counts = self.linked()
         self.assertEqual(counts["joined"], 2)

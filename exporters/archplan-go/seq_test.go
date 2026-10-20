@@ -123,3 +123,18 @@ func TestParseStepsRejectsBadJSON(t *testing.T) {
 		t.Fatal("want an error")
 	}
 }
+
+func TestSequenceCarriesGuardsOff(t *testing.T) {
+	scs, err := ParseSteps([]byte(stitchedSample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scs[0].Guards = "off"
+	if s := SequenceFrom(scs[0], func(string) string { return "" }); s.Guards != "off" {
+		t.Errorf("guards = %q", s.Guards)
+	}
+	scs, _ = ParseSteps([]byte(`[{"name": "x", "guards": "off", "diagram": {"root": {"from": "a", "to": "b", "fn": "F"}}}]`))
+	if len(scs) != 1 || scs[0].Guards != "off" {
+		t.Errorf("parsed = %+v", scs)
+	}
+}

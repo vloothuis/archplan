@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 
 from .core.hotspots import NotGit, git
-from .detectors.security_common import call_file, component_of, decls, guards, participant, target, zones
+from .detectors.security_common import call_file, component_of, decls, guards, guards_off, participant, target, zones
 from .detectors.security_unguarded_entry import guarded, hit, runs
 from .detectors.security_untested_denial import PARAMS, shows_refusal
 
@@ -45,19 +45,21 @@ def entries(ctx) -> list:
         e = by.setdefault(key, {"entry": key, "auth": d.get("value") if d else None,
                                 "component": t["component"] if t else participant(ctx, msgs[0].get("to")),
                                 "components": [], "guards": [], "sinks": {}, "files": [], "sequences": [],
-                                "guarded": False, "refused": False})
+                                "guarded": False, "refused": False, "judged": False})
         if sid not in e["sequences"]:
             e["sequences"].append(sid)
         e["components"] = list(dict.fromkeys(e["components"] + [c for c in (participant(ctx, m.get("to"))
                                                                             for m in msgs) if c]))
-        e["guarded"] = e["guarded"] or guarded(ctx, d, msgs)
+        off = guards_off(seqs.get(sid))  # ran without guards: reach, but no guard evidence
+        e["judged"] = e["judged"] or not off
+        e["guarded"] = e["guarded"] or (not off and guarded(ctx, d, msgs))
         used = [g for g in every if any(hit(ctx, g, m) for m in msgs)]
         e["guards"] += [g["id"] for g in used if g["id"] not in e["guards"]]
         for s, v in sinks:
             if any(hit(ctx, s, m) for m in msgs):
                 e["sinks"][s["id"]] = "write" if "write" in (v, e["sinks"].get(s["id"])) else v or "read"
         need = guards(ctx, "authz") if e["auth"] == "authz" else every
-        e["refused"] = e["refused"] or shows_refusal(ctx, t or {"name": None, "component": None}, need, msgs,
+        e["refused"] = e["refused"] or not off and shows_refusal(ctx, t or {"name": None, "component": None}, need, msgs,
                                                      title, titles)
         files = [t["file"] if t else None] + [g["file"] for g in used] \
             + [s["file"] for s, _ in sinks if s["id"] in e["sinks"]] + [call_file(ctx, m) for m in msgs]
@@ -65,8 +67,8 @@ def entries(ctx) -> list:
     out = []
     for e in by.values():
         e["zones"] = list(dict.fromkeys(zone[c] for c in e["components"] if zone.get(c)))
-        ok = e.pop("guarded")
-        e["gaps"] = (["unguarded"] if every and not ok and e["auth"] != "none" else []) \
+        ok, judged = e.pop("guarded"), e.pop("judged")
+        e["gaps"] = (["unguarded"] if every and judged and not ok and e["auth"] != "none" else []) \
             + (["no refusal"] if ok and e["auth"] in ("required", "authz") and not e["refused"] else [])
         worst = "write" if "write" in e["sinks"].values() else "read" if e["sinks"] else None
         e["risk"] = (EXPOSURE.get(worst, 5) + AUTH.get(e["auth"], 10) + 5 * max(0, len(e["zones"]) - 1)

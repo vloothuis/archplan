@@ -312,6 +312,19 @@ class SecurityTest(unittest.TestCase):
         seqs["get-order-anon"]["messages"][0]["outcome"] = "status:403"
         self.assertEqual(run(security_untested_denial, m), [])
 
+    def test_guards_off(self):
+        m = model()
+        m["sequences"]["list-orders"]["guards"] = "off"  # a test server without an access policy
+        fs = [f["evidence"]["entry"] for f in run(security_unguarded_entry, m)]
+        self.assertEqual(fs, ["internal/web.(*App).export"])
+        es = {e["entry"]: e for e in blast.entries(Ctx(m))}
+        lst = es["internal/web/orders.go:listOrders"]
+        self.assertEqual((lst["gaps"], lst["sequences"], lst["components"]), ([], ["list-orders"], ["web", "orders"]))
+        # a run with guards on still decides
+        m["sequences"]["list-orders-acl"] = {**m["sequences"]["list-orders"], "guards": None}
+        self.assertIn("internal/web.(*App).listOrders",
+                      [f["evidence"]["entry"] for f in run(security_unguarded_entry, m)])
+
     def test_blast_radius(self):
         m = model()
         m["declarations"] += [

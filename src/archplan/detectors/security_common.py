@@ -29,6 +29,13 @@ def guards(ctx, level: str | None = None) -> list:
             if d.get("value") is True or d.get("value") in ("authn", "authz") and level in (None, d["value"])]
 
 
+def guards_off(seq) -> bool:
+    """Whether a sequence ran with its guards switched off (`"guards": "off"`),
+    such as a test server without an access policy. Its calls still show
+    structure and reach, but say nothing about guards."""
+    return isinstance(seq, dict) and seq.get("guards") == "off"
+
+
 def short(fid: str) -> str:
     """The bare name of a function id: `a/b.go:Name`, `pkg.(*T).Name`, `M.f/2` give Name or f."""
     s = fid.rsplit(":", 1)[-1] if ":" in fid and "/" in fid.split(":")[0] else fid

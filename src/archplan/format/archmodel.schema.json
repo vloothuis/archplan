@@ -144,6 +144,7 @@
           "source": { "type": "string" },
           "participants": { "type": "array", "items": { "type": "string" } },
           "stitched": { "type": "array", "items": { "type": "string" } },
+          "guards": { "enum": ["off"] },
           "fragments": {
             "type": "object",
             "additionalProperties": {

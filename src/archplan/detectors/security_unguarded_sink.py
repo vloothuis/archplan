@@ -8,7 +8,8 @@ reads candidates first and filters them after. An authentication guard (`guard=a
 caller is, so it does not count: a signed-in reader who reaches a write sink
 without a permission check is what this detector is for. Calls inside any
 guard are the guard's own: an authentication guard may read the caller's
-record before anything is authorized.
+record before anything is authorized. Sequences marked `"guards": "off"`
+ran without guards and are left out.
 
 One finding per entry point and sink, with the sequences that show it."""
 
@@ -17,7 +18,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from .common import Weight, finding, focus, plural
-from .security_common import called, decls, guards, matches, participant, short, target
+from .security_common import called, decls, guards, guards_off, matches, participant, short, target
 
 ID = "security.unguarded_sink"
 NAME = "Sink reached without an authorization guard"
@@ -37,7 +38,7 @@ def run(ctx, params) -> list:
     first = {}  # sequence id -> the component of its entry
     for sid, seq in sorted((ctx.model.get("sequences") or {}).items()):
         entry, msgs = (seq or {}).get("entry"), [m for m in (seq or {}).get("messages") or [] if isinstance(m, dict)]
-        if not entry or not msgs:
+        if not entry or not msgs or guards_off(seq):
             continue
         first[sid] = participant(ctx, msgs[0].get("to"))
         checked, seen, inside, reads = False, set(), None, []
