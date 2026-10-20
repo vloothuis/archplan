@@ -10,6 +10,8 @@
   archplan mcp                   MCP server on stdio, for an agent
   archplan watch                 one line per human comment, plan change or decided suggestion
   archplan hotspots [--since N]  components that change often, and ones that change together
+  archplan blast [--diff REF] [FILE ...]  what traced entry points reach, what a change touches,
+                                 and the security tests to add
   archplan profile [infer|show|list|use NAME]  the architecture profile: roles, rules and where the code breaks them
   archplan check [--format github] [--tighten]  new findings (cycles, rule breaks, ...) and the ratchet;
                                  exit 1 when there are new findings or a ratchet metric got worse
@@ -359,6 +361,20 @@ def cmd_hotspots(a):
         return print(json.dumps(res, indent=2, ensure_ascii=False))
     print(hotspots.text(res))
     print(f"\n({time.monotonic() - t:.1f}s; cached in {p.path('hotspots.json').relative_to(p.root)})", file=sys.stderr)
+
+
+def cmd_blast(a):
+    from . import blast
+    from .detectors import Context
+    ctx = Context(project(a))
+    files = a.files or None
+    if a.diff:
+        try:
+            files = blast.changed(ctx, a.diff) + (files or [])
+        except ValueError as e:
+            die(str(e))
+    rep = blast.report(ctx, files, a.limit)
+    print(json.dumps(rep, indent=2, ensure_ascii=False) if a.json else blast.text(rep))
 
 
 def cmd_profile(a):
@@ -867,6 +883,12 @@ def main(argv=None):
     s.add_argument("--since", type=int, default=365, metavar="DAYS", help="days of history (default: 365)")
     s.add_argument("--json", action="store_true", help="the full analysis as JSON")
     s.add_argument("--refresh", action="store_true", help="ignore the cache in .archplan/hotspots.json")
+    s = add("blast", cmd_blast, "what each traced entry point reaches, what a change touches, and the security "
+                                "tests to add")
+    s.add_argument("files", nargs="*", help="changed files: show the entry points they touch")
+    s.add_argument("--diff", metavar="REF", help="the files changed since the merge base with REF, such as develop")
+    s.add_argument("--limit", type=int, default=20)
+    s.add_argument("--json", action="store_true")
     s = add("exporters", cmd_exporters, "list the exporters, which match this repository and which are installed")
     s.add_argument("root", nargs="?", help="repository root (default: the project root, or .)")
     s.add_argument("--json", action="store_true")

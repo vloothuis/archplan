@@ -185,6 +185,7 @@ In a message, `@[Label](anchor)` mentions a model item, for example
 | `archplan mcp` | the MCP server, on stdio |
 | `archplan watch` | one line per human comment, plan change or decided suggestion |
 | `archplan hotspots [--since DAYS] [--json]` | components that change most, and pairs that change together without a dependency |
+| `archplan blast [--diff REF] [FILE ...] [--json]` | what traced entry points reach, the entry points a change touches, and the security tests to add |
 | `archplan profile [infer\|show] [--json]` | propose an architecture profile, or show how the code conforms to it |
 | `archplan profile list`, `archplan profile use NAME` | the framework profiles that match, with their fit; propose one of them |
 | `archplan check [--format github] [--all] [--update-baseline] [--tighten] [--loosen REASON] [--export] [--min-weight N] [--json]` | new findings and the ratchet; exit 1 when there are new findings or a ratchet metric got worse, 2 on errors |
@@ -521,6 +522,7 @@ The security detectors read the declarations:
 | `security.unchecked_entry` | an entry point declared `auth=authz` whose code, with the functions of its file that it calls and the file's plugs and filters, names no authorization guard. Static, so it covers entry points no test runs; a traced request that passes the guard clears it. Medium. |
 | `security.unguarded_sink` | a trace that calls a write sink before any authorization guard (`guard` or `guard=authz`), strong; or a read sink with no such guard anywhere in the trace, medium. Calls inside a guard are its own. A `guard=authn` guard does not count. Needs sequences. |
 | `security.untested_denial` | an entry point declared `auth=required` or `auth=authz` whose traced requests pass the guard it needs, but none shows the guard or the entry point refusing a caller (a call `outcome` such as `raise`, `error`, `halt` or `status:403`, or a test title such as "rejects another user"). Names the guard to make fail and the sinks the request reaches. Medium; weak when the traces record no outcomes. Needs sequences. |
+| `security.risk_hotspot` | a component in the top quarter by commits that lies on the traced path of entry points that reach sinks. Its weight follows the riskiest of those entry points (see Blast radius). Needs sequences and the cached `archplan hotspots`. |
 | `security.untraced` | a declared guard or entry point that no trace calls, in a component the traces do visit: a guard wired nowhere, or a route nothing reaches. Weak. Needs sequences. |
 | `security.open_entry` | an entry point declared `auth=none` without a reason |
 | `security.zone_dependency` | a dependency from a more trusted zone to a less trusted one, or one that skips a declared zone |
@@ -530,6 +532,26 @@ The security detectors read the declarations:
 Zones are ordered by the `order` setting of `security.zone_dependency`,
 from the least trusted: `internet`, `dmz`, `internal`, `restricted` by
 default.
+
+### Blast radius
+
+`archplan blast` lists what each traced entry point reaches: the components
+its requests pass, its guards, the sinks it reads or writes and the zones it
+crosses. Each entry point gets a risk score. A write sink adds the most,
+then a read sink, then `auth=authz`. Gaps add more: no guard on its traced
+requests, or no test that shows a refusal. The output ends with the
+security tests to add, by risk.
+
+`archplan blast --diff develop` (or `archplan blast FILE ...`) lists the
+entry points that the change touches, so you can review those paths and run
+their tests first. A file touches an entry point when it declares the entry
+point, a guard or a sink on its path, or when it is in a component that the
+entry point's requests pass. The agent gets the same from `get_blast_radius`.
+
+With the cached `archplan hotspots`, `security.risk_hotspot` marks the
+components that change often (the top quarter by commits, at least 5) and
+that lie on paths to sinks. Traces only cover what the tests run, so an
+entry point that no test runs has no blast radius.
 
 ## Exporters
 
