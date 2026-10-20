@@ -6,7 +6,8 @@
 #
 # For each test it enables Erlang call tracing on the project's own modules
 # (remote calls only, arity only: argument values are never recorded),
-# rebuilds the call tree per process, and writes one JSON file per test to
+# rebuilds the call tree per process, notes the calls that refused (see
+# outcome/1: only the kind of the return value is kept), and writes one JSON file per test to
 # ARCHPLAN_TRACE_DIR (default: <repo root>/.archplan/sequences).
 # archplan_export.exs turns these files into archmodel sequences.
 #
@@ -150,11 +151,11 @@ defmodule ArchplanTrace do
       {:trace, pid, :call, {m, f, a}} ->
         tracer_loop(call(st, pid, m, f, a))
 
-      {:trace, pid, :return_from, _mfa, _value} ->
-        tracer_loop(ret(st, pid))
+      {:trace, pid, :return_from, _mfa, value} ->
+        tracer_loop(ret(st, pid, outcome(value)))
 
       {:trace, pid, :exception_from, _mfa, _value} ->
-        tracer_loop(ret(st, pid))
+        tracer_loop(ret(st, pid, "raise"))
 
       {:start, key} ->
         # A shared process belongs to the only running test, also one that
@@ -186,8 +187,8 @@ defmodule ArchplanTrace do
     receive do
       {:trace_delivered, :all, ^ref} -> st
       {:trace, pid, :call, {m, f, a}} -> drain(call(st, pid, m, f, a), ref)
-      {:trace, pid, :return_from, _, _} -> drain(ret(st, pid), ref)
-      {:trace, pid, :exception_from, _, _} -> drain(ret(st, pid), ref)
+      {:trace, pid, :return_from, _, value} -> drain(ret(st, pid, outcome(value)), ref)
+      {:trace, pid, :exception_from, _, _} -> drain(ret(st, pid, "raise"), ref)
     end
   end
 
@@ -243,11 +244,22 @@ defmodule ArchplanTrace do
   defp controller?(m),
     do: function_exported?(m, :action, 2) and function_exported?(m, :call, 2) and function_exported?(m, :init, 1)
 
-  defp ret(st, pid) do
+  # The kind of a return value that can mean a refusal, nil for any other:
+  # an error, false, a halted conn or LiveView mount, or a conn with a 4xx
+  # status. A call that raised is "raise". The value itself is never kept.
+  defp outcome({:error, _}), do: "error"
+  defp outcome(:error), do: "error"
+  defp outcome(false), do: "false"
+  defp outcome({:halt, _}), do: "halt"
+  defp outcome(%{__struct__: Plug.Conn, halted: true}), do: "halt"
+  defp outcome(%{__struct__: Plug.Conn, status: s}) when is_integer(s) and s >= 400 and s < 500, do: "status:#{s}"
+  defp outcome(_), do: nil
+
+  defp ret(st, pid, outcome) do
     with {owner, actor, async} <- st.procs[pid],
          owner = resolve(st, owner),
          %{^owner => t} <- st.tests do
-      %{st | tests: Map.put(st.tests, owner, pop(t, pid, {actor, async}))}
+      %{st | tests: Map.put(st.tests, owner, pop(t, pid, {actor, async}, outcome))}
     else
       _ -> st
     end
@@ -256,17 +268,19 @@ defmodule ArchplanTrace do
   defp resolve(st, :shared), do: only_test(st)
   defp resolve(_st, owner), do: owner
 
-  defp pop(t, pid, actor) do
+  defp pop(t, pid, actor, outcome) do
     case Map.get(t.stacks, pid, []) do
       [] -> t
       [:skip | rest] -> %{t | stacks: Map.put(t.stacks, pid, rest)}
       [{:same, _} | rest] -> %{t | stacks: Map.put(t.stacks, pid, rest)}
-      [{:node, _, _, _, _, _} = node | rest] -> finish_node(t, pid, node, rest, actor)
+      [{:node, _, _, _, _, _} = node | rest] -> finish_node(t, pid, node, rest, actor, outcome)
     end
   end
 
-  defp finish_node(t, pid, {:node, m, f, a, order, kids}, rest, {actor, async}) do
-    node = [C.mod_name(m), Atom.to_string(f), a, Enum.reverse(kids)]
+  # A finished node is [module, fun, arity, children], with its outcome after
+  # the children when it has one.
+  defp finish_node(t, pid, {:node, m, f, a, order, kids}, rest, {actor, async}, outcome) do
+    node = [C.mod_name(m), Atom.to_string(f), a, Enum.reverse(kids)] ++ List.wrap(outcome)
 
     case add_child(rest, node) do
       {:ok, rest} ->
@@ -299,7 +313,7 @@ defmodule ArchplanTrace do
     case t.stacks[pid] do
       [_ | _] ->
         {_, actor, async} = st.procs[pid] || {nil, "process", "process"}
-        close_all(%{st | tests: Map.put(st.tests, key, pop(t, pid, {actor, async}))}, key, pid)
+        close_all(%{st | tests: Map.put(st.tests, key, pop(t, pid, {actor, async}, nil))}, key, pid)
 
       _ ->
         st

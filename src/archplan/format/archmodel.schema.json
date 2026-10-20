@@ -167,7 +167,8 @@
                 "depth": { "type": "integer", "minimum": 0 },
                 "fragment": { "type": "string" },
                 "async": { "type": "boolean" },
-                "via": { "type": "string" }
+                "via": { "type": "string" },
+                "outcome": { "type": "string" }
               }
             }
           }
