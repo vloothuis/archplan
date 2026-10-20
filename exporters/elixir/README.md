@@ -134,6 +134,7 @@ How it works:
 - It turns on call tracing for all processes for the whole run. It does not wait for ExUnit's test events: ExUnit sends them without waiting for formatters, so a test can be running before its start event arrives.
 - It gives each process to a test: the test process by its label, other processes through their `$callers` (tasks, LiveView tests) or `$ancestors`. A process with no test there, such as one the application started, belongs to the only running test. While several tests run, its calls are dropped.
 - It records module, function and arity only. Argument and return values are never recorded.
+- It records the kind of outcome of a call that may have refused: `raise`, `error` (`{:error, _}` or `:error`), `false`, `halt` (a halted conn or `{:halt, _}`), or `status:4xx` (a conn with a 4xx status). The message gets it as `outcome`. `security.untested_denial` uses it to find guards that no test shows refusing a caller.
 - It keeps calls into another module. Calls within the same module are not kept, with one exception: when a Phoenix controller's `call/2` applies an action, the step is named after the action, such as `Systems.Storage.Controller.export/2`. The trace's `entry` is the first such action.
 - The export keeps only calls that cross a component boundary.
 

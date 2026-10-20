@@ -1113,9 +1113,10 @@ defmodule ArchplanElixir.Export do
   defp ancestors(_frags, nil), do: []
   defp ancestors(frags, id), do: [id | ancestors(frags, frags[id] && frags[id]["parent"])]
 
-  # A trace node is [module, fun, arity, children]. Returns component-level
-  # nodes %{from, to, label, children}.
-  defp nodes([mod, fun, arity, children], from, comp_of, depth, max_depth) do
+  # A trace node is [module, fun, arity, children], with an outcome after the
+  # children when the call refused. Returns component-level nodes
+  # %{from, to, label, children, outcome}.
+  defp nodes([mod, fun, arity, children | outcome], from, comp_of, depth, max_depth) do
     case comp_of[mod] do
       to when to != nil and to != from ->
         kids =
@@ -1123,7 +1124,8 @@ defmodule ArchplanElixir.Export do
             do: [],
             else: Enum.flat_map(children, &nodes(&1, to, comp_of, depth + 1, max_depth))
 
-        [%{from: from, to: to, label: "#{mod}.#{fun}/#{arity}", children: kids, repeat: 1}]
+        [%{from: from, to: to, label: "#{mod}.#{fun}/#{arity}", children: kids, repeat: 1,
+           outcome: List.first(outcome)}]
 
       _ ->
         Enum.flat_map(children, &nodes(&1, from, comp_of, depth, max_depth))
@@ -1158,6 +1160,7 @@ defmodule ArchplanElixir.Export do
       msg =
         %{"id" => "#{key}##{count}", "from" => n.from, "to" => n.to, "label" => n.label, "depth" => depth}
         |> put("fragment", frag_here)
+        |> put("outcome", n.outcome)
         |> then(fn m -> if n[:via], do: Map.merge(m, %{"async" => true, "via" => n.via}), else: m end)
 
       flatten(n.children, depth + 1, frag_here, {[msg | msgs], frags, %{st | count: Map.put(st.count, key, count)}})

@@ -226,6 +226,9 @@ Ordered calls for one scenario, usually from traces.
 - `fragment` names the innermost loop or alternative the message is in.
 - `async` marks a call on another process, goroutine, task or queue. `via`
   says how.
+- `outcome` marks a call that may have refused: `raise`, `error`, `false`,
+  `halt`, or `status:<code>` for a 4xx response. Leave it out for any other
+  return. It is the kind of the return value, never the value.
 - Labels must not contain argument values. Traces can carry secrets.
 
 ## signatures

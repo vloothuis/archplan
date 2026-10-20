@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from archplan.detectors import (security_gateway, security_open_entry, security_unguarded_entry,  # noqa: E402
                                 security_unchecked_entry, security_unguarded_path, security_unguarded_sink,
-                                security_untraced, security_zone_dependency)
+                                security_untested_denial, security_untraced, security_zone_dependency)
 from archplan.detectors.common import graph  # noqa: E402
 from archplan.detectors.security_common import called, short  # noqa: E402
 
@@ -269,6 +269,42 @@ class SecurityTest(unittest.TestCase):
         del m["sequences"]["login"]["messages"][-1]
         self.assertEqual([f["title"] for f in run(security_unguarded_sink, m)],
                          ["login reads through List without any authorization check."])
+
+    def test_untested_denial(self):
+        m = model()
+        m["declarations"].append(
+            decl("function", "internal/orders/store.go:Find", "sink", "read", file="internal/orders/store.go"))
+        # getOrder passes the guard; listOrders passes none (unguarded_entry's); export is undeclared.
+        [f] = run(security_untested_denial, m)
+        self.assertEqual(f["evidence"]["entry"], "internal/web/orders.go:getOrder")
+        self.assertEqual(f["evidence"]["sequences"], ["get-order"])
+        self.assertEqual(f["evidence"]["guards"], ["internal/auth/verifier.go:VerifySubject"])
+        self.assertEqual(f["evidence"]["sinks"], ["internal/orders/store.go:Find"])
+        self.assertIn("expect Find not to be called", f["evidence"]["moves"][0])
+        self.assertEqual(f["strength"], "weak")  # no outcomes: test titles only
+        self.assertIn("only test titles", f["detail"])
+        seqs = m["sequences"]
+        # A failed test does not count; a passing one titled as a refusal does.
+        seqs["get-order-denied"] = {"title": "rejects another user (failed)",
+                                    "entry": "internal/web.(*App).getOrder", "messages": [
+                                        msg("Caller", "web", "(*App).getOrder(w, r)", 0)]}
+        self.assertEqual(len(run(security_untested_denial, m)), 1)
+        seqs["get-order-denied"]["title"] = "rejects another user"
+        self.assertEqual(run(security_untested_denial, m), [])
+        # With outcomes, a guard that refused clears it, and findings are medium.
+        del seqs["get-order-denied"]
+        seqs["list-orders"]["messages"][0]["outcome"] = "status:404"
+        [f] = run(security_untested_denial, m)
+        self.assertEqual(f["strength"], "medium")
+        seqs["get-order-anon"] = {"title": "get order", "entry": "internal/web.(*App).getOrder", "messages": [
+            msg("Caller", "web", "(*App).getOrder(w, r)", 0),
+            {**msg("web", "internal/auth.Verifier", "(*Verifier).VerifySubject(ctx, raw)", 1), "outcome": "error"}]}
+        self.assertEqual(run(security_untested_denial, m), [])
+        # A refusal by another call does not count; one by the entry point does.
+        seqs["get-order-anon"]["messages"][1] = {**msg("web", "orders", "Find(id)", 1), "outcome": "raise"}
+        self.assertEqual(len(run(security_untested_denial, m)), 1)
+        seqs["get-order-anon"]["messages"][0]["outcome"] = "status:403"
+        self.assertEqual(run(security_untested_denial, m), [])
 
     def test_untraced(self):
         m = model()

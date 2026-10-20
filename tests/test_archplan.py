@@ -473,6 +473,8 @@ class ElixirTraceTest(unittest.TestCase):
                          "lib/shop.ex": textwrap.dedent("""\
                              defmodule Shop.Auth do
                                def check(conn), do: conn
+                               def refuse(_conn), do: {:error, :forbidden}
+                               def boom(_conn), do: raise "no"
                              end
 
                              defmodule Shop.Store do
@@ -485,6 +487,14 @@ class ElixirTraceTest(unittest.TestCase):
                                def call(conn, action), do: apply(__MODULE__, action, [conn, %{}])
                                def action(conn, _opts), do: conn
                                def show(conn, _params), do: Shop.Auth.check(conn) && Shop.Store.get(1)
+                               def edit(conn, _params) do
+                                 Shop.Auth.refuse(conn)
+                                 try do
+                                   Shop.Auth.boom(conn)
+                                 rescue
+                                   _ -> false
+                                 end
+                               end
                              end
                              """),
                          "test/test_helper.exs": "ExUnit.start()\n",
@@ -494,6 +504,9 @@ class ElixirTraceTest(unittest.TestCase):
                                test "show" do
                                  Shop.Store.setup()
                                  for _ <- 1..5, do: Shop.OrderController.call(:conn, :show)
+                               end
+                               test "edit" do
+                                 Shop.OrderController.call(:conn, :edit)
                                end
                              end
                              """),
@@ -511,6 +524,12 @@ class ElixirTraceTest(unittest.TestCase):
             self.assertEqual(out.returncode, 0, out.stderr[-2000:])
             show = json.loads((root / "seq" / "order-show.json").read_text())
             get = json.loads((root / "seq" / "store-get.json").read_text())
+            edit = json.loads((root / "seq" / "order-edit.json").read_text())
+            write(root, {".archplan/elixir.json": '{"min_modules": 1}'})
+            out = subprocess.run(["sh", str(wrapper), "export", "-o", "m.json", "--root", str(root),
+                                  "--sequences", str(root / "seq")], cwd=root, capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0, out.stderr[-2000:])
+            seqs = json.loads((root / "m.json").read_text())["sequences"]
         # the test's own setup call is left out; the action names the step
         self.assertEqual(show["entry"], "Shop.OrderController.show/2")
         self.assertEqual({t["actor"] for t in show["trees"]}, {"browser"})
@@ -518,6 +537,13 @@ class ElixirTraceTest(unittest.TestCase):
                          ["Shop.OrderController", "show", 2, [["Shop.Auth", "check", 1, []],
                                                               ["Shop.Store", "get", 1, []]]])
         self.assertEqual(len(show["trees"]), 5)
+        # calls that may have refused carry the kind of their outcome, never the value
+        self.assertEqual(edit["trees"][0]["root"],
+                         ["Shop.OrderController", "edit", 2, [["Shop.Auth", "refuse", 1, [], "error"],
+                                                              ["Shop.Auth", "boom", 1, [], "raise"]], "false"])
+        self.assertEqual([(m["label"], m.get("outcome")) for m in seqs["order-edit"]["messages"]],
+                         [("Shop.OrderController.edit/2", "false"), ("Shop.Auth.refuse/1", "error"),
+                          ("Shop.Auth.boom/1", "raise")])
         # the task belongs to its test, which runs at the same time as the other
         self.assertEqual(get["calls"], 5)
         self.assertEqual({t["actor"] for t in get["trees"]}, {"process"})
