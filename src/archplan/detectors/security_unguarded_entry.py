@@ -10,7 +10,8 @@ request; `auth=authz` needs an authorization guard (`guard` or
 own entry is judged on the whole sequence. Entry points without an auth
 declaration are reported too, as weak, once the project declares any guard:
 their trace shows no guard either. `auth=none` entry points are skipped, and
-so is an entry point with any request that passes the guard it needs. One
+so is an entry point with any request that passes the guard it needs.
+Sequences marked `"guards": "off"` ran without guards and are left out. One
 finding per entry point, with the sequences that show it."""
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from .common import Weight, finding, focus, plural
-from .security_common import CALL, call_file, called, decls, matches, name, participant, short, target
+from .security_common import CALL, call_file, called, decls, guards_off, matches, name, participant, short, target
 from .security_common import guards as all_guards
 
 ID = "security.unguarded_entry"
@@ -92,7 +93,10 @@ def run(ctx, params) -> list:
     guards = all_guards(ctx)
     by_entry = defaultdict(list)  # entry -> [(sequence id, components on its path)]
     declared, safe = {}, set()
+    seqs = ctx.model.get("sequences") or {}
     for entry, d, sid, msgs in runs(ctx):
+        if guards_off(seqs.get(sid)):
+            continue
         value = d.get("value") if d else None
         if value == "none" or (value is None and not (params["report_undeclared"] and guards)):
             continue

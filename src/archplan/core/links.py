@@ -128,6 +128,8 @@ def stitch(m: dict) -> int:
                 continue
             out += graft(m, s, msg, server, seqs[server])
             gone.add(server)
+            if seqs[server].get("guards") == "off":
+                s["guards"] = "off"
             s.setdefault("stitched", []).append(server)
             changed = True
             n += 1

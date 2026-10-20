@@ -141,6 +141,11 @@ nested calls. A participant is a package path; it maps to the component that
 holds the package. Argument values are dropped, because traces can hold
 secrets.
 
+A scenario with `"guards": "off"` ran with its guards switched off, such as
+a test against a server without an access policy. The exporter copies it to
+the sequence, and the security detectors that judge guards leave the
+sequence out.
+
 A step can have these fields besides `from`, `to`, `fn`, `args` and
 `children`. The exporter copies each one to the message.
 

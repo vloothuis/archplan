@@ -10,7 +10,8 @@ Traces without outcomes, such as those of other exporters, show a refusal by
 their title only, such as "rejects another user's order": then findings are
 weak. Entry points declared `auth=required` or `auth=authz` with a traced
 request that passes the guard they need are judged; one with no such request
-is for security.unguarded_entry. Failed tests are left out. The finding names
+is for security.unguarded_entry. Failed tests, and sequences marked
+`"guards": "off"`, are left out. The finding names
 the guard to make fail and the sinks the request reaches, so a test can
 check they are not reached."""
 
@@ -20,7 +21,7 @@ import re
 from collections import defaultdict
 
 from .common import Weight, finding, focus, plural
-from .security_common import decls, guards, participant, target
+from .security_common import decls, guards, guards_off, participant, target
 from .security_unguarded_entry import guarded, hit, runs
 
 ID = "security.untested_denial"
@@ -60,7 +61,7 @@ def run(ctx, params) -> list:
         if not d or d.get("value") not in ("required", "authz"):
             continue
         title = (seqs.get(sid) or {}).get("title") or sid
-        if title.endswith("(failed)"):
+        if title.endswith("(failed)") or guards_off(seqs.get(sid)):
             continue
         eid = d["target"]["id"]
         need = guards(ctx, "authz") if d["value"] == "authz" else guards(ctx)

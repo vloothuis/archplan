@@ -234,6 +234,15 @@ Ordered calls for one scenario, usually from traces.
   [Calls between processes](#calls-between-processes).
 - Labels must not contain argument values. Traces can carry secrets.
 
+A sequence can have `"guards": "off"` when it ran with its guards switched
+off, such as a test against a server without an access policy. Its calls
+still count for structure, blast radius and `security.untraced`. The
+detectors that judge guards (`security.unguarded_entry`,
+`security.unguarded_sink`, `security.untested_denial`) leave it out, and
+blast radius does not call its entry point unguarded because of it. When
+archplan joins a server sequence with `"guards": "off"` under a client's
+call, the client's sequence gets `"guards": "off"` too.
+
 ### Calls between processes
 
 A browser app calls its server over HTTP. A sequence shows that call as one
