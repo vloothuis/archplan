@@ -189,6 +189,7 @@ In a message, `@[Label](anchor)` mentions a model item, for example
 | `archplan profile [infer\|show] [--json]` | propose an architecture profile, or show how the code conforms to it |
 | `archplan profile list`, `archplan profile use NAME` | the framework profiles that match, with their fit; propose one of them |
 | `archplan check [--format github] [--all] [--update-baseline] [--tighten] [--loosen REASON] [--export] [--min-weight N] [--json]` | new findings and the ratchet; exit 1 when there are new findings or a ratchet metric got worse, 2 on errors |
+| `archplan ci [--base REF] [--base-model PATH] [--trust-config] [--no-export] [--summary PATH] [--sarif PATH] [--format github] [--all] [--min-weight N] [--json]` | check for a pull request: export, fail only on findings that are new against the base and the baseline, write a markdown summary and SARIF; exit codes as check. See [docs/ci.md](docs/ci.md) |
 | `archplan detectors [--json]` | each detector: group, needs, whether it is on, missing data and its finding count |
 | `archplan detectors enable\|disable\|trust\|run ID [--json]` | switch a detector on or off, approve an external one, or run one |
 | `archplan annotators [--json]` | which annotator reads and writes each declaration key, and whether it is approved |
@@ -323,18 +324,23 @@ Commit that file. From then on only new findings show.
 0 when there are none, and 2 on errors. `--update-baseline` accepts all
 current findings, for a first run on an existing codebase. `--min-weight N`
 leaves out new findings that weigh less than N; set a default with
-`"check": {"min_weight": 40}` in `.archplan/config.json`. A GitHub Actions
-step for a Python project:
+`"check": {"min_weight": 40}` in `.archplan/config.json`.
+
+`--export` runs the configured export command first. It runs only once a
+person approved that command with `archplan trust`.
+
+For pull requests, use `archplan ci`. It runs the export command, compares
+with the base branch, and writes a summary and SARIF. A GitHub Actions step:
 
 ```yaml
 - run: pip install git+https://github.com/vloothuis/archplan
-- run: archplan export-python -o .archplan/model.archmodel.json
-- run: archplan check --format github
+- run: archplan ci --base origin/${{ github.base_ref }} --format github
+  env:
+    ARCHPLAN_CI_TRUST: "1"
 ```
 
-`--export` runs the configured export command first. It runs only once a
-person approved that command with `archplan trust`, so in CI run the
-exporter yourself, as above.
+[docs/ci.md](docs/ci.md) has the full workflow and explains when
+`ARCHPLAN_CI_TRUST` is safe.
 
 ### The ratchet
 
@@ -563,7 +569,10 @@ An exporter writes an [archmodel/1](src/archplan/format/archmodel.md) file.
 `archplan init` picks one from the files in the repository:
 
 - **Go** (`go.mod`): [`exporters/archplan-go`](exporters/archplan-go), run with
-  `go run github.com/vloothuis/archplan/exporters/archplan-go@latest`. It reads
+  `go run github.com/vloothuis/archplan/exporters/archplan-go@v0.YYMM.N`.
+  `archplan init` writes the exporter version that was released with the
+  running archplan, so the model does not change when a new exporter comes
+  out. A development build writes `@latest`. It reads
   `.go-arch-lint.yml` when present, and seqtrace call traces with `-steps`.
   It lists file references and the routes registered on a `net/http`
   `ServeMux`.

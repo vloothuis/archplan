@@ -121,7 +121,8 @@ it lists the new ones, those the human has not accepted or dismissed.
 - Never accept or dismiss findings yourself. That is the human's call.
 
 `archplan check` prints the new findings in a terminal and exits with 1 when
-there are any. In CI, use `archplan check --format github`.
+there are any. In CI, use `archplan ci --base <base branch> --format github`.
+It fails only on findings that the pull request adds.
 
 Detectors make the findings. `archplan detectors` lists them, with the data
 each one needs and what is missing. When a detector cannot run, tell the
@@ -246,6 +247,7 @@ progress.
 | `archplan profile` | the architecture profile and its rule breaks |
 | `archplan profile list` | the framework profiles that match, with their fit |
 | `archplan check` | new findings; exit 1 when there are any |
+| `archplan ci [--base REF]` | check for a pull request: findings new against the base, a summary and SARIF |
 | `archplan detectors` | the detectors, their needs, missing data and finding counts |
 | `archplan schema [tables]` | database tables, their owners, and foreign keys across components |
 | `archplan glossary candidates` | glossary candidate terms per component |
