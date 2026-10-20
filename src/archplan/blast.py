@@ -48,8 +48,8 @@ def entries(ctx) -> list:
                                 "guarded": False, "refused": False})
         if sid not in e["sequences"]:
             e["sequences"].append(sid)
-        e["components"] += [c for c in (participant(ctx, m.get("to")) for m in msgs)
-                            if c and c not in e["components"]]
+        e["components"] = list(dict.fromkeys(e["components"] + [c for c in (participant(ctx, m.get("to"))
+                                                                            for m in msgs) if c]))
         e["guarded"] = e["guarded"] or guarded(ctx, d, msgs)
         used = [g for g in every if any(hit(ctx, g, m) for m in msgs)]
         e["guards"] += [g["id"] for g in used if g["id"] not in e["guards"]]
@@ -61,7 +61,7 @@ def entries(ctx) -> list:
                                                      title, titles)
         files = [t["file"] if t else None] + [g["file"] for g in used] \
             + [s["file"] for s, _ in sinks if s["id"] in e["sinks"]] + [call_file(ctx, m) for m in msgs]
-        e["files"] += [f for f in files if f and f not in e["files"]]
+        e["files"] = list(dict.fromkeys(e["files"] + [f for f in files if f]))
     out = []
     for e in by.values():
         e["zones"] = list(dict.fromkeys(zone[c] for c in e["components"] if zone.get(c)))

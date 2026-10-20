@@ -23,15 +23,22 @@ type Diagram struct {
 }
 
 // Step is one call, or a loop when Repeat is set. A loop has no endpoints;
-// its Children are one iteration. Args are "name=value" strings.
+// its Children are one iteration. Args are "name=value" strings. Outcome
+// marks a refusing return (error, false, status:<4xx>). A call to another
+// process has Via "http" and a Route; its Children can hold the server's
+// call tree. Span is the id that correlates a client call with the server
+// trace it caused.
 type Step struct {
-	From     string   `json:"from,omitempty"`
-	To       string   `json:"to,omitempty"`
-	Fn       string   `json:"fn,omitempty"`
-	Via      string   `json:"via,omitempty"` // set for a call on another goroutine
-	Args     []string `json:"args,omitempty"`
-	Repeat   int      `json:"repeat,omitempty"`
-	Children []Step   `json:"children,omitempty"`
+	From     string     `json:"from,omitempty"`
+	To       string     `json:"to,omitempty"`
+	Fn       string     `json:"fn,omitempty"`
+	Via      string     `json:"via,omitempty"` // set for a call on another goroutine, or "http"
+	Outcome  string     `json:"outcome,omitempty"`
+	Route    *HTTPRoute `json:"route,omitempty"`
+	Span     string     `json:"span,omitempty"`
+	Args     []string   `json:"args,omitempty"`
+	Repeat   int        `json:"repeat,omitempty"`
+	Children []Step     `json:"children,omitempty"`
 }
 
 // IsLoop reports whether s is a loop rather than a call.
@@ -107,7 +114,7 @@ func (b *seqBuilder) walk(s Step, depth int, frag string) {
 	b.seq.Messages = append(b.seq.Messages, Message{
 		ID: key + "#" + strconv.Itoa(b.count[key]), From: from, To: to,
 		Label: s.Fn + "(" + argNames(s.Args) + ")", Depth: depth, Fragment: frag,
-		Async: s.Via != "", Via: s.Via,
+		Async: s.Via != "", Via: s.Via, Outcome: s.Outcome, Route: s.Route, Span: s.Span,
 	})
 	for _, c := range s.Children {
 		b.walk(c, depth+1, frag)

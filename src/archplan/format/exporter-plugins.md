@@ -38,6 +38,9 @@ asks a person before a command runs for the first time in a directory.
   for code you trust.
 - The agent, the editor and `archplan check --export` never ask. They run
   only an approved command.
+- When `export` is a list, the approval covers the whole list, and the
+  files named in each command. A changed, added or removed entry, or a
+  changed prefix, needs a new approval.
 
 - The command writes the model to the path given for `{out}`, usually
   `.archplan/model.archmodel.json`. When it has no output option, it may
@@ -56,6 +59,47 @@ asks a person before a command runs for the first time in a directory.
   weights exact.
 - The command must not change the source files, and must not need the network
   after its install step.
+
+### Several exporters
+
+A project can have parts in more than one language, such as a Go server and
+a TypeScript app in `frontend/`. Then `export` in `.archplan/config.json`
+is a list. Each entry is a command, or an object with the command and a
+prefix:
+
+```json
+"export": [
+  "go run github.com/vloothuis/archplan/exporters/archplan-go@latest -steps steps.json -o {out}",
+  { "cmd": "archplan export-ts -C frontend -o {out}", "prefix": "web" }
+]
+```
+
+- archplan runs the commands in order, from the repository root.
+- In each command, archplan replaces `{out}` with a file of its own:
+  `.archplan/parts/1.archmodel.json` for the first entry, and so on. A
+  command without `{out}` prints its model on standard output instead.
+- archplan merges the parts into `.archplan/model.archmodel.json`. Paths in
+  every part are relative to the repository root, as in a single model.
+- Component ids of different parts must differ. A `prefix` renames every
+  component id of its part to `<prefix>/<id>`, wherever the part names a
+  component. Use it when two exporters would use the same ids. When two
+  parts still use the same component, type or sequence id, the export
+  stops and names the id and both commands.
+- Layers with the same id become one layer. Lists such as `dependencies`,
+  `signatures` and `routes` are joined. The `source` section comes from the
+  first part, with the languages, capabilities and generators of all parts.
+- When a part's policy denies by default, the merged policy does too. Each
+  component of a part that allows by default then gets a rule that allows
+  its dependencies, so its own policy keeps its meaning.
+- After the merge, archplan joins calls between processes: a browser
+  sequence's HTTP call with the server code it reaches. See
+  [Calls between processes](archmodel.md#calls-between-processes).
+- `.archplan/parts/` is not committed.
+
+`archplan init --export CMD --export CMD` writes such a list.
+`archplan exporters` suggests one when exporters match different folders.
+
+A string `export` works as before. `{out}` in it becomes the model path.
 
 Exit codes:
 
@@ -84,6 +128,8 @@ Optional, in order of value to archplan:
 - `files`: the file-level references that architecture profiles check.
 - `types` with `fields`, `implements` and `uses`.
 - `sequences`, from traces.
+- `routes`: the HTTP routes and their handlers, so archplan can join a
+  browser's call to the server code.
 - `policy`, `layers` and `vocabulary`.
 
 archplan computes the vocabulary itself when a model has none.
@@ -118,8 +164,8 @@ could not run as "not checked", with the reason.
 ## Paths and ids
 
 - Every path is relative to the repository root and uses `/`. This covers
-  component `path` and `match`, `files` keys and refs, type `file`, and the
-  file part of `evidence`.
+  component `path` and `match`, `files` keys and refs, type and route
+  `file`, and the file part of `evidence`.
 - No path may be absolute, start with `~`, or contain a `..` segment.
 - Leave out paths outside the repository, such as dependencies in a package
   cache. Model third-party code as external components (`"kind": "external"`)
@@ -128,6 +174,7 @@ could not run as "not checked", with the reason.
   - dependency `from` and `to` name components;
   - a `files` entry's `component` names a component;
   - type `component`, field `ref`, `implements` and `uses` name types;
+  - a route's `component` names a component;
   - a component's `layer` names a layer.
 - Ids must be stable between runs (see [IDs](archmodel.md#ids)).
 

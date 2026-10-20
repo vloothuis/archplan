@@ -28,6 +28,7 @@ JSON Schema: [`archmodel.schema.json`](archmodel.schema.json).
   "signatures": [ ... ],
   "literals": [ ... ],
   "enums": [ ... ],
+  "routes": [ ... ],
   "schema": { ... },
   "vocabulary": { ... },
   "declarations": [ ... ],
@@ -229,7 +230,57 @@ Ordered calls for one scenario, usually from traces.
 - `outcome` marks a call that may have refused: `raise`, `error`, `false`,
   `halt`, or `status:<code>` for a 4xx response. Leave it out for any other
   return. It is the kind of the return value, never the value.
+- `route` and `span` mark a call to another process over HTTP. See
+  [Calls between processes](#calls-between-processes).
 - Labels must not contain argument values. Traces can carry secrets.
+
+### Calls between processes
+
+A browser app calls its server over HTTP. A sequence shows that call as one
+message, the hop:
+
+```json
+{ "id": "web/api>Server:fetch#1", "from": "web/api", "to": "Server", "label": "fetch()",
+  "depth": 1, "async": true, "via": "http",
+  "route": { "method": "GET", "path": "/api/v1/orders/{id}" }, "span": "4f2a9c" }
+```
+
+- `async` is true and `via` is `"http"`.
+- `route.method` is the HTTP method in upper case. Leave it out when it is
+  not known.
+- `route.path` is the path pattern, not the requested URL. Write a path
+  parameter as `{id}`. archplan also reads `:id`, `${id}` and `[id]`. A
+  literal path, such as `/api/v1/orders/T-1`, also works, but it can hold
+  ids and should be avoided.
+- `to` is the server's component when the client knows it. Otherwise it is
+  a free name, such as `Server`.
+- `span` is an id that the client and the server both record for this
+  request, for example from an `X-Seqtrace-Span` header. It is only needed
+  when the two traces are separate.
+
+A hop can reach the server's code in three ways.
+
+1. **One trace.** The trace already holds the server's calls: they follow
+   the hop, one level deeper. The first of them calls the handler.
+2. **Two traces, joined by span.** The server's trace is a sequence of its
+   own. Its first message has the same `span` as the hop. After the export,
+   archplan moves the server's messages under the hop and removes the
+   server's sequence. The client's sequence gets `"stitched": ["<server
+   sequence id>"]`. The server's first message now comes from the hop's
+   `to`, and message ids are numbered again.
+3. **The route only.** There is no server trace. archplan finds the route
+   in [`routes`](#routes) that matches the hop's method and path. It adds a
+   message under the hop that calls the route's handler, marked
+   `"joined": "route"`.
+
+In each case, archplan sets the hop's `to` to the route's component when it
+was a free name, and adds `"handler": "<handler id>"` to the hop. The
+security detectors and the blast radius then treat the browser call as a
+call of the server's entry point: its components and files count as part
+of the entry point's path.
+
+A participant that names a folder or file of the repository, such as
+`frontend/src/api`, becomes the component that owns it.
 
 ## signatures
 
@@ -278,6 +329,33 @@ colon.
   belongs to, such as `handle_event/3`.
 - Exporters keep only values without whitespace and at most 64 characters,
   at most 200 per file, and leave out test files.
+
+## routes
+
+Optional. The HTTP routes the server serves, and the function that serves
+each one. archplan uses them to join a browser's call to the server code
+(see [Calls between processes](#calls-between-processes)).
+
+```json
+"routes": [
+  { "method": "GET", "pattern": "/api/v1/orders/{id}", "handler": "internal/api.(*App).getOrder",
+    "component": "api", "file": "internal/api/orders.go", "line": 40 }
+]
+```
+
+- `method` is the HTTP method in upper case, or `*` when the route takes
+  any method.
+- `pattern` is the path pattern. `{id}` matches one path segment and
+  `{rest...}` the rest of the path. A pattern that ends in `/` matches
+  every path below it, as in Go's `ServeMux`. `:id`, `*` and `**` work too.
+- `handler` is the id of the function that serves the route, as in
+  `signatures` or `declarations`. Leave it out when the handler has no id,
+  such as an anonymous function.
+- `file` and `line` are where the handler is declared, or where the route is
+  registered when the handler is not known.
+- When several routes match a call, the most specific one wins: literal
+  segments count more than parameters, and a route with a method more than
+  one with `*`.
 
 ## enums
 
@@ -445,6 +523,7 @@ Notes in the target model become open questions in the plan.
 | types | `go/types` | structs, `@type`, behaviours as interfaces | classes, dataclasses, `Protocol` and ABCs as interfaces | classes, interfaces, type aliases, enums, exported functions; React components as functions, Vue and Svelte files as modules |
 | implements | structural (`types.Implements`) | `@behaviour` | base classes, Protocol conformance | `extends` and `implements` |
 | sequences | seqtrace, OpenTelemetry | `:telemetry`, OpenTelemetry | OpenTelemetry, `sys.setprofile` | OpenTelemetry |
+| routes | `net/http` `ServeMux` `Handle` and `HandleFunc` | | | |
 
 The `lite` exporter (`archplan export-lite`) covers Java, Kotlin, Scala, C#,
 PHP, Ruby, Rust and Swift with regular expressions:

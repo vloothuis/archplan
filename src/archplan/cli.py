@@ -112,8 +112,9 @@ def cmd_init(a):
     root = Path(a.root or ".").resolve()
     if (r := find_root(root)) and r != root and not a.force:
         die(f"{r} already has an archplan project; run archplan there, or pass --force")
+    export = a.export[0] if a.export and len(a.export) == 1 else a.export
     try:
-        p = init(root, a.export, a.port, a.force)
+        p = init(root, export, a.port, a.force)
     except ProjectError as e:
         die(str(e))
     print(f"created {p.dir}/config.json")
@@ -127,6 +128,13 @@ def cmd_init(a):
                    else "it runs code from this repository (for example the project's own compiler or build files)")
             print(f"not approved yet: {why}. Read the command, then run `archplan trust` in a terminal.")
             print("next: archplan trust && archplan export && archplan up")
+        found = getattr(p, "found", None) or {}
+        pick = next((r for r in found.get("exporters") or [] if r["name"] == found.get("pick")), None)
+        others = [r for r in found.get("exporters") or []
+                  if pick and r.get("command") and r["name"] not in (pick["name"], "lite") and r["match"] != pick["match"]]
+        for r in others[:3]:
+            print(f"{r['name']} also matches {r['match']}/. To export both, make \"export\" a list of commands that "
+                  "each write to {out} (see `archplan exporters`).")
     else:
         print("no exporter for this language yet: set \"export\" in config.json to a command that writes "
               f"{p.model_path.relative_to(p.root)} (format: archmodel/1), then run archplan export")
@@ -815,7 +823,9 @@ def main(argv=None):
 
     s = add("init", cmd_init, "set up .archplan/ in a repository")
     s.add_argument("root", nargs="?", help="repository root (default: .)")
-    s.add_argument("--export", help="command that writes the as-is model (default: detected from the language)")
+    s.add_argument("--export", action="append",
+                   help="command that writes the as-is model (default: detected from the language); repeat it to "
+                        "merge the models of several exporters, each writing to {out}")
     s.add_argument("--port", type=int)
     s.add_argument("--force", action="store_true")
     s = add("export", cmd_export, "re-export the as-is model from the code")
