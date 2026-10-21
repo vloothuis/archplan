@@ -449,6 +449,19 @@ class SecurityTest(unittest.TestCase):
         self.assertIn("internal/web.(*App).listOrders",
                       [f["evidence"]["entry"] for f in run(security_unguarded_entry, m)])
 
+    def test_refused_before_a_sink(self):
+        m = model()
+        m["sequences"]["list-orders"]["messages"][0]["outcome"] = "status:405"  # a method check
+        fs = [f["evidence"]["entry"] for f in run(security_unguarded_entry, m)]
+        self.assertEqual(fs, ["internal/web.(*App).export"])
+        self.assertEqual({e["entry"]: e for e in blast.entries(Ctx(m))}["internal/web/orders.go:listOrders"]["gaps"],
+                         [])
+        # refused after it reached a sink: still judged
+        m["declarations"].append(
+            decl("function", "internal/orders/store.go:List", "sink", "read", file="internal/orders/store.go"))
+        self.assertIn("internal/web.(*App).listOrders",
+                      [f["evidence"]["entry"] for f in run(security_unguarded_entry, m)])
+
     def test_blast_radius(self):
         m = model()
         m["declarations"] += [

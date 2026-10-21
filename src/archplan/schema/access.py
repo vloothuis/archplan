@@ -115,7 +115,7 @@ PRISMA_WRITES = {"create", "createMany", "update", "updateMany", "upsert", "dele
 def lang_of(path: str) -> str | None:
     ext = path.rsplit(".", 1)[-1] if "." in path else ""
     return {"ex": "elixir", "exs": "elixir", "py": "python", "rb": "ruby", "ts": "ts", "tsx": "ts", "js": "ts",
-            "mjs": "ts", "jsx": "ts"}.get(ext)
+            "mjs": "ts", "jsx": "ts", "go": "go"}.get(ext)
 
 
 def component_of(model: dict, path: str | None) -> str | None:

@@ -20,7 +20,7 @@ import re
 
 from .core.hotspots import NotGit, git
 from .detectors.security_common import call_file, component_of, decls, guards, guards_off, participant, target, zones
-from .detectors.security_unguarded_entry import guarded, hit, runs
+from .detectors.security_unguarded_entry import guarded, hit, runs, turned_away
 from .detectors.security_untested_denial import PARAMS, shows_refusal
 
 EXPOSURE = {"write": 30, "read": 20}
@@ -51,7 +51,7 @@ def entries(ctx) -> list:
         e["components"] = list(dict.fromkeys(e["components"] + [c for c in (participant(ctx, m.get("to"))
                                                                             for m in msgs) if c]))
         off = guards_off(seqs.get(sid))  # ran without guards: reach, but no guard evidence
-        e["judged"] = e["judged"] or not off
+        e["judged"] = e["judged"] or not (off or turned_away(ctx, msgs))
         e["guarded"] = e["guarded"] or (not off and guarded(ctx, d, msgs))
         used = [g for g in every if any(hit(ctx, g, m) for m in msgs)]
         e["guards"] += [g["id"] for g in used if g["id"] not in e["guards"]]
