@@ -2618,6 +2618,32 @@ class NewDetectorsTest(TempProject):
         (f,) = self.found("concepts.raw_ids")
         self.assertEqual((f["evidence"]["component"], f["evidence"]["owner"]), ("orders", "billing"))
         self.assertIn("InvoiceId", f["evidence"]["moves"][0])
+        self.assertIn("raw ids of Invoice from billing", f["title"])
+
+    def test_raw_ids_concept(self):
+        # RecordID once named filter, the only component whose Record has an id; audit has a Record too
+        comps = {c: {"name": c, "path": f"internal/{c}"} for c in ("store", "filter", "audit", "comments")}
+        f = lambda n, t="string": {"name": n, "type": t}
+        t = lambda c, n, *fs: (f"{c}.{n}", {"name": n, "component": c, "kind": "struct",
+                                             "file": f"internal/{c}/{n.lower()}.go", "fields": list(fs)})
+        types = dict([t("store", "Relation", f("RecordID", "int64"), f("TargetID"), f("ParentTargetID")),
+                      t("filter", "Record", f("ID"), f("Type")), t("audit", "Record", f("Op")),
+                      t("comments", "Target", f("ID"), f("Type"))])
+        self.p.model_path.write_text(json.dumps({"format": "archmodel/1", "components": comps, "types": types,
+                                                 "dependencies": []}))
+        fs = {f["evidence"]["owner"]: f for f in self.found("concepts.raw_ids")}
+        self.assertEqual(set(fs), {None, "comments"})
+        self.assertEqual(fs[None]["title"], "store holds raw ids whose concept is unclear: RecordID.")
+        self.assertEqual((fs[None]["evidence"]["concepts"], fs[None]["components"]), ([], ["store"]))
+        self.assertEqual([x["field"] for x in fs["comments"]["evidence"]["fields"]], ["TargetID"])  # not ParentTargetID
+        self.assertEqual(fs["comments"]["title"], "store holds raw ids of Target from comments: TargetID.")
+        types["filter.Record"]["fields"][0] = f("ID", "int64")  # one Record, with a number id like RecordID
+        del types["audit.Record"]
+        self.p.model_path.write_text(json.dumps({"format": "archmodel/1", "components": comps, "types": types,
+                                                 "dependencies": []}))
+        os.utime(self.p.model_path, None)
+        fs = {f["evidence"]["owner"]: f for f in self.found("concepts.raw_ids")}
+        self.assertEqual(fs["filter"]["evidence"]["concepts"], ["record"])
 
     def test_untyped_bag(self):
         (f,) = self.found("concepts.untyped_bag")  # Order is used by billing and shipping; Order.meta is a map
