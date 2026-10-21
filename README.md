@@ -217,7 +217,10 @@ code's imports do not explain why they change together.
 
 The analysis maps each changed file to a component with the model's `match`
 patterns and `path`. Commits that touch more than 50 files are skipped as bulk
-changes. Only git runs, with hooks, fsmonitor and signature checks switched
+changes. Cleanup commits do not count towards coupled pairs: commits whose
+conventional-commit type is `chore`, `ci`, `style` or `build`, or whose scope
+is `lint`, `ci`, `fmt` or `format` (such as `feat(ci): ...`). They still count
+as changes for hotspots. Only git runs, with hooks, fsmonitor and signature checks switched
 off. The result is cached per HEAD in `.archplan/hotspots.json`.
 
 The same pass also counts co-change per file, for the files in the model's
@@ -271,7 +274,7 @@ follow it".
 | `vocabulary.leak` | a component uses a term of a concept it should not (needs glossaries) |
 | `types.fields` | a type with 25 or more fields, 3 or more groups of related fields, or 6 or more boolean flags |
 | `types.synonyms` | types in different components that share 70% or more of their field names |
-| `history.coupling` | components that change together without a dependency (from the cached `archplan hotspots`) |
+| `history.coupling` | components that change together without a dependency (from the cached `archplan hotspots`). Two components that implement the same interface are expected to change together, so their pair needs degree `sibling_degree` (default 0.8) instead of `degree` (default 0.5) |
 | `history.modularity_violation` | files in different components that change together while neither refers to the other: no import, call or type reference, also not through a package's `__init__.py` or `index.ts` (needs `files` and the cached `archplan hotspots`). After Xiao, Cai and Kazman (DRSpaces, DV8). One finding per component pair, or per file name repeated across components (such as `api/schema.py`). It weighs shared commits, degree and bug-fix commits on the files; `fix_words` lists the words that mark a commit subject as a bug fix. Unlike `history.coupling`, it works per file and also reports files whose components do depend on each other |
 | `concepts.state_flags` | types that keep their state in 3 or more boolean flags (`is_*`, `has_*`, a flag next to a `*_at` timestamp); one finding per component |
 | `concepts.data_clump` | the same 3 or more field names in types of 2 or more components, such as street, city and zip |

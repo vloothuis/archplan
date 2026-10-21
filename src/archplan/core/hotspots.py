@@ -33,9 +33,15 @@ MIN_TOGETHER = 3
 MIN_DEGREE = 0.3
 MAX_PAIRS = 200
 MAX_OWNERS = 30  # authors kept per component, with their commit counts, for the ownership detector
-VERSION = 4      # of the cached result: 2 added owners, 3 added cochange, 4 left tests out of pairs
+VERSION = 5      # of the cached result: 2 added owners, 3 added cochange, 4 left tests out of pairs, 5 cleanup
 # Test files: a commit that changes only tests in two components says little about their coupling.
 TEST = re.compile(r"(^|/)(tests?|spec|__tests__)/|_test\.\w+$|(^|/)test_[^/]*\.py$|\.(test|spec)\.\w+$|_spec\.rb$")
+# Cleanup commits: a conventional-commit subject whose type or scope marks
+# chores, CI, formatting or the build. They touch many files for reasons
+# outside the design, so they do not count towards coupled pairs.
+CONVENTIONAL = re.compile(r"^\s*([A-Za-z]+)(?:\(([^)]*)\))?!?:")
+CLEANUP_TYPES = {"chore", "ci", "style", "build"}
+CLEANUP_SCOPES = {"lint", "ci", "fmt", "format"}
 
 # File-level co-change (cochange in the result). A commit with more files is a
 # bulk change for this purpose; ignored files do not count towards its size.
@@ -101,6 +107,16 @@ def history(top: Path, since_days: int, max_commits: int = MAX_COMMITS) -> list:
         sha, email, date, subject = (head.split("\x1f", 3) + ["", "", ""])[:4]
         commits.append((sha, email.lower(), date, [f for f in files.splitlines() if f.strip()], subject.strip()))
     return commits
+
+
+def cleanup(subject: str) -> bool:
+    """Whether a commit subject marks a cleanup commit, such as `chore: ...`,
+    `ci!: ...` or `feat(lint): ...`."""
+    m = CONVENTIONAL.match(subject or "")
+    if not m:
+        return False
+    scopes = {x.strip().lower() for x in (m.group(2) or "").split(",")}
+    return m.group(1).lower() in CLEANUP_TYPES or bool(scopes & CLEANUP_SCOPES)
 
 
 class Mapper:
@@ -174,14 +190,15 @@ def analyse(commits: list, model: dict, prefix: str | None = None, hint: str = "
             max_files: int = MAX_FILES, min_together: int = MIN_TOGETHER, min_degree: float = MIN_DEGREE,
             max_pairs: int = MAX_PAIRS) -> dict:
     """Change counts per component and coupled pairs, from commits as history()
-    returns them."""
+    returns them. Cleanup commits (see cleanup()) count as changes, but not
+    towards pairs: neither as shared commits nor in the degree."""
     mapper = Mapper(model.get("components") or {})
     used = [c for c in commits if len(c[3]) <= max_files]
     if prefix is None:
         prefix = best_prefix({f for c in used for f in c[3]}, mapper, hint)
     n_commits, authors, files, last = Counter(), defaultdict(Counter), defaultdict(set), {}
-    together, unmapped = Counter(), set()
-    for sha, email, date, paths, *_ in used:
+    together, n_paired, unmapped, n_cleanup = Counter(), Counter(), set(), 0
+    for sha, email, date, paths, *rest in used:
         comps, code = set(), set()
         for f in paths:
             cid = mapper(f[len(prefix):]) if f.startswith(prefix) else None
@@ -196,17 +213,21 @@ def analyse(commits: list, model: dict, prefix: str | None = None, hint: str = "
             n_commits[cid] += 1
             authors[cid][email] += 1
             last.setdefault(cid, date)  # newest first
+        if rest and cleanup(rest[0]):
+            n_cleanup += 1
+            continue
+        n_paired.update(comps)
         together.update(combinations(sorted(code), 2))
     deps = {(d["from"], d["to"]) for d in model.get("dependencies") or []}
     pairs = []
     for (a, b), n in together.items():
-        deg = n / min(n_commits[a], n_commits[b])
+        deg = n / min(n_paired[a], n_paired[b])
         if n >= min_together and deg >= min_degree:
             pairs.append({"a": a, "b": b, "together": n, "degree": round(deg, 3),
                           "dependency": (a, b) in deps or (b, a) in deps})
     pairs.sort(key=lambda x: (-x["together"] * x["degree"], x["a"], x["b"]))
     return {"commits": len(used), "skipped": len(commits) - len(used), "unmapped": len(unmapped),
-            "prefix": prefix,
+            "cleanup": n_cleanup, "prefix": prefix,
             "components": {cid: {"commits": n, "authors": len(authors[cid]), "files": len(files[cid]),
                                  "last": last[cid]} for cid, n in n_commits.most_common()},
             "pairs": pairs[:max_pairs],
