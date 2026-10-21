@@ -10,12 +10,15 @@ GROUP = "history"
 NEEDS = {"git"}
 COUPLING_DEGREE = 0.5
 COUPLING_TOGETHER = 5
-PARAMS = {"degree": COUPLING_DEGREE, "together": COUPLING_TOGETHER}
-
+# Sibling implementations of the same interface are expected to change together
+# when the interface does, so such a pair needs a strong degree to be reported.
+SIBLING_DEGREE = 0.8
+PARAMS = {"degree": COUPLING_DEGREE, "together": COUPLING_TOGETHER, "sibling_degree": SIBLING_DEGREE}
 
 
 def run(ctx, params) -> list:
-    return coupling_findings(ctx.hotspots, ctx.model, params["degree"], params["together"])
+    return coupling_findings(ctx.hotspots, ctx.model, params["degree"], params["together"],
+                             params.get("sibling_degree", SIBLING_DEGREE))
 
 
 def interfaces(model: dict) -> dict:
@@ -30,8 +33,10 @@ def interfaces(model: dict) -> dict:
     return out
 
 
-def coupling_findings(res: dict, model: dict, degree: float = COUPLING_DEGREE, together: int = COUPLING_TOGETHER) -> list:
-    """Hidden coupling from the cached hotspots analysis."""
+def coupling_findings(res: dict, model: dict, degree: float = COUPLING_DEGREE, together: int = COUPLING_TOGETHER,
+                      sibling_degree: float = SIBLING_DEGREE) -> list:
+    """Hidden coupling from the cached hotspots analysis. A pair whose
+    components implement the same interface needs sibling_degree."""
     comps = model.get("components") or {}
     deps = {(d["from"], d["to"]) for d in model.get("dependencies") or []}
     impl = interfaces(model)
@@ -43,6 +48,8 @@ def coupling_findings(res: dict, model: dict, degree: float = COUPLING_DEGREE, t
         if x["degree"] < degree or x["together"] < together:
             continue
         shared = sorted(impl.get(a, set()) & impl.get(b, set()))
+        if shared and x["degree"] < sibling_degree:
+            continue
         out.append(finding(
             "history.coupling", tuple(sorted((a, b))),
             f"{comp_name(model, a)} and {comp_name(model, b)} change together but do not depend on each other.",
