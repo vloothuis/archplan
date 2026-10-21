@@ -2839,6 +2839,10 @@ class NewDetectorsTest(TempProject):
         self.assertEqual(d["fixes"], [{"subject": "Fix rounding", "changed": ["a.py"], "missed": ["b.py"]},
                                       {"subject": "bugfix", "changed": ["c.py"], "missed": ["a.py", "b.py"]}])
         self.assertIsNone(drift({"cochange": cc}, ["a.py"]))
+        # d.py never changed: missed only when the cache lists every changed file
+        self.assertEqual(drift({"cochange": cc}, ["a.py", "d.py"])["fixes_apart"], 0)
+        self.assertEqual(drift({"cochange": {**cc, "all_files": True}}, ["a.py", "d.py"])["fixes"][0]["missed"],
+                         ["d.py"])
         self.assertIsNone(drift({"pairs": []}, ["a.py", "b.py"]))
 
     def test_missing_operation(self):

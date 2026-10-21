@@ -14,8 +14,8 @@ fix missed may still have the bug. Yokomori and Inoue (2024, arXiv
 This works per file, not per line: a commit to a file need not touch the
 copy in it. A bug fix is the most likely kind of commit to touch the logic,
 so only fixes count as drift. A file whose commits the cache cut off
-(MAX_FILE_SHAS in core.hotspots) cannot show that a fix missed it, and is left out of the
-missed files. This module never runs git."""
+(MAX_FILE_SHAS in core.hotspots) cannot show that a fix missed it, and is
+left out of the missed files. This module never runs git."""
 
 from __future__ import annotations
 
@@ -56,7 +56,8 @@ def drift(hotspots: dict | None, files, is_fix=None) -> dict | None:
         xs = [s for s in (v.get("shas") or []) if isinstance(s, str)] if isinstance(v, dict) else []
         shas[f] = set(xs)
         n = v.get("commits") if isinstance(v, dict) else 0
-        if not isinstance(n, int) or n <= len(xs):
+        # an older cache lists only the files in pairs: a file it leaves out may have changed
+        if (isinstance(v, dict) or cc.get("all_files") is True) and (not isinstance(n, int) or n <= len(xs)):
             complete.add(f)
     together, apart = 0, []
     for s in sorted(set().union(*shas.values()), key=lambda s: (rank.get(s, len(rank)), s)):

@@ -257,7 +257,7 @@ def cochange(commits: list, model: dict, prefix: str = "", max_files: int = FILE
     subjects of all those commits, newest first, so a detector can count bug
     fixes without git.
 
-    {"commits", "skipped", "max_files", "files": {path: {"commits", "shas"}},
+    {"commits", "skipped", "max_files", "files": {path: {"commits", "shas"}}, "all_files": true,
      "pairs": [{"a", "b", "together", "degree", "shas"}], "subjects": {sha: subject}}"""
     known = set(model.get("files") or {})
     n_file, shas_of, together, skipped, used = Counter(), defaultdict(list), defaultdict(list), 0, 0
@@ -288,8 +288,8 @@ def cochange(commits: list, model: dict, prefix: str = "", max_files: int = FILE
     files = {f: {"commits": n_file[f], "shas": shas_of[f][:MAX_FILE_SHAS]} for f in sorted(n_file)}
     wanted = {s for x in pairs for s in x["shas"]} | {s for v in files.values() for s in v["shas"]}
     subjects = {c[0][:10]: c[4][:SUBJECT_MAX] for c in commits if len(c) > 4 and c[0][:10] in wanted}
-    return {"commits": used, "skipped": skipped, "max_files": max_files, "files": files, "pairs": pairs,
-            "subjects": subjects}
+    return {"commits": used, "skipped": skipped, "max_files": max_files, "files": files, "all_files": True,
+            "pairs": pairs, "subjects": subjects}
 
 
 def hotspots(p: Project, since_days: int = 365, *, refresh: bool = False, **kw) -> dict:
