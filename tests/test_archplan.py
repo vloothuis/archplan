@@ -1207,6 +1207,12 @@ class ArchitectureTest(unittest.TestCase):
         m2 = dict(m, files={})
         m2["types"] = {f"T{i}": {"file": f} for i, f in enumerate(m["files"])}
         self.assertTrue(A.analyse(p, m2)["warnings"])
+        # re-exporting only helps when the exporter writes a files section
+        for gen, again in (("archplan-go", True), ("archplan exporters/elixir", True),
+                           ("custom + archplan export-ts", True), ("custom", False), (None, False)):
+            w = A.analyse(p, dict(m2, source={"generator": gen}))["warnings"][0]
+            self.assertEqual("Re-export" in w, again, gen)
+            self.assertEqual("does not emit a files section" in w, not again, gen)
 
     def test_django(self):
         from archplan import architecture as A
