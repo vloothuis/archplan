@@ -4,6 +4,13 @@ string values across components, or one string compared in many components.
 When the model's enums section declares a value set that holds them, the
 move is to use it.
 
+It also reports scattered decisions: the same test, on the same field with
+the same set of values (status in ("paid", "shipped")), written in several
+components. That is one rule decided in several places. Only identical sets
+count: a test on fewer or other values is usually a different rule. The
+values of one test are the compares on one line, or the case clauses of one
+match (CASE_GAP lines apart at most).
+
 literals: [{value, component, file, line, context: compare|case|assign|default|arg, field?, target?}]
 enums:    [{name, component, values}]"""
 
@@ -20,7 +27,8 @@ NAME = "Strings used as enums"
 GROUP = "concepts"
 NEEDS = {"literals"}
 PARAMS = {"min_values": 2, "max_values": 20, "min_components": 2, "value_components": 3,
-          "max_findings": 40}
+          "decision_components": 2, "max_findings": 40}
+CASE_GAP = 15  # lines between two case clauses of one match
 CONTEXTS = ("compare", "case", "assign", "default", "arg")
 COMMON = {"ok", "error", "nil", "none", "null", "true", "false", "undefined", "id", "name", "type", "data", "value",
           "get", "post", "put", "delete", "patch"}
@@ -29,6 +37,64 @@ COMMON = {"ok", "error", "nil", "none", "null", "true", "false", "undefined", "i
 GENERIC = {"value", "values", "key", "item", "result", "method", "target", "input", "arg", "args", "opts", "options",
            "params", "param", "attrs", "x", "v", "s", "k", "get", "read", "fetch", "event", "msg", "message"}
 WORDISH = re.compile(r"[A-Za-z][A-Za-z0-9_:\-]{0,59}")  # no dotted paths, no sentences
+
+
+def decisions(literals: list) -> dict:
+    """{(field, values): [(component, file:line)]}: the tests of a field
+    against a set of two or more string values."""
+    runs = defaultdict(list)
+    for x in literals:
+        v, fld, ctx = x.get("value"), x.get("field"), x.get("context")
+        if ctx not in ("compare", "case") or not isinstance(v, str) or not WORDISH.fullmatch(v) \
+                or not isinstance(fld, str) or not key(fld) or key(fld) in GENERIC or not x.get("file") \
+                or not isinstance(x.get("line"), int):
+            continue
+        runs[(x.get("component"), x["file"], key(fld), ctx)].append((x["line"], v))
+    out = defaultdict(list)
+    for (c, f, fld, ctx), xs in runs.items():
+        xs.sort()
+        groups = []
+        for line, v in xs:
+            gap = 0 if ctx == "compare" else CASE_GAP
+            if groups and line - groups[-1][-1][0] <= gap:
+                groups[-1].append((line, v))
+            else:
+                groups.append([(line, v)])
+        for g in groups:
+            vals = tuple(sorted({v for _, v in g}))
+            if len(vals) >= 2:
+                out[(fld, vals)].append((c, f"{f}:{g[0][0]}"))
+    return out
+
+
+def decision_findings(ctx, params) -> list:
+    out = []
+    for (fld, vals), sites in sorted(decisions(ctx.literals).items()):
+        sites.sort(key=lambda x: x[1])
+        comps = sorted({c for c, _ in sites if c})
+        if len(comps) < params["decision_components"]:
+            continue
+        owners = sorted({t.get("component") for t in ctx.types.values()
+                         if any(f.get("name") and key(f["name"]) == fld for f in t.get("fields") or [])} - {None})
+        owner = owners[0] if len(owners) == 1 else None
+        where = ", ".join(ctx.name(c) for c in comps[:3]) + (", …" if len(comps) > 3 else "")
+        shown = ", ".join(f"'{v}'" for v in vals[:4]) + (", …" if len(vals) > 4 else "")
+        out.append(ctx.finding(
+            ("decision", fld, *vals),
+            f"The same test, {fld} in {shown}, is written in {plural(len(comps), 'component')} ({where}).",
+            "Sites: " + ", ".join(s for _, s in sites[:4]) + ".",
+            "weak", f"{plural(len(sites), 'site')} in {plural(len(comps), 'component')}, the same values",
+            comps, [s.rsplit(":", 1)[0] for _, s in sites],
+            {"kind": "decision", "name": fld, "values": list(vals), "components": comps[:EXAMPLES],
+             "sites": [s for _, s in sites][:EXAMPLES], **({"owner": owner} if owner else {}),
+             "moves": [f"Give {ctx.name(owner) if owner else 'the component that owns ' + fld} one named predicate "
+                       f"for this test, such as is_<state>({fld}), and call it from these places.",
+                       "If the places mean different things by it, give each meaning its own name instead."]},
+            focus=[focus("components", comps)],
+            weight=Weight(25, "scattered decision").spread(len(comps), per=8, cap=16)
+            .repetition(len(sites), "sites", per=3, cap=9, single=0)
+            .add("values", len(vals), min(6, 2 * (len(vals) - 2)))))
+    return out
 
 
 def run(ctx, params) -> list:
@@ -100,4 +166,4 @@ def run(ctx, params) -> list:
              "sites": [s for s in e["sites"] if s][:EXAMPLES], "moves": moves}, focus=fc,
             weight=Weight(20, "string enum").spread(len(comps), per=7, cap=16)
             .repetition(n_sites, "sites", per=3, cap=10, single=-4)))
-    return out
+    return out + decision_findings(ctx, params)[:params["max_findings"]]

@@ -32,10 +32,11 @@ from ..core.store import NotFound
 from . import external
 from .common import GROUPS, STRENGTHS, Weight, comp_name, finding, fingerprint, graph, namer, reweigh
 
-BUILTIN = ["profile_rule", "profile_pair", "structure_cycle", "structure_tangle", "layers_upward", "layers_policy",
+BUILTIN = ["profile_rule", "profile_pair", "structure_cycle", "structure_tangle", "structure_repeated_orchestration",
+           "layers_upward", "layers_policy",
            "vocabulary_leak", "types_fields", "types_synonyms", "history_coupling", "history_modularity",
            "concepts_state_flags", "concepts_data_clump", "concepts_raw_ids", "concepts_untyped_bag",
-           "concepts_units_in_names", "concepts_string_enum", "concepts_bool_params",
+           "concepts_units_in_names", "concepts_string_enum", "concepts_bool_params", "concepts_missing_operation",
            "boundaries_stability", "boundaries_unused_public", "boundaries_balance", "evolution_ownership",
            "data_shared_table", "data_cross_fk", "data_polymorphic", "data_json_bag", "data_flag_columns",
            "data_repeated_columns", "data_enum_mismatch", "data_orphan_table",
