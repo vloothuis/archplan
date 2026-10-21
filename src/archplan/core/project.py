@@ -255,7 +255,13 @@ class Project:
 
     @property
     def model_path(self) -> Path:
-        return self.root / self.config.get("model", f"{DIR}/model.archmodel.json")
+        """config.json "model". The config is repository data and export
+        writes this file, so it must stay inside the repository."""
+        rel = self.config.get("model") or f"{DIR}/model.archmodel.json"
+        p = self.root / str(rel)
+        if p.resolve() == self.root or not p.resolve().is_relative_to(self.root):
+            raise ProjectError(f"the model path in .archplan/config.json is outside the repository: {rel!r}")
+        return p
 
     @property
     def target_path(self) -> Path:
@@ -407,8 +413,7 @@ class Project:
             m = self._export_parts(entries, timeout)
         else:
             before = etag(self.model_path)
-            out = self._run(entries[0]["cmd"], self.model_path.relative_to(self.root).as_posix()
-                            if self.model_path.is_relative_to(self.root) else str(self.model_path), timeout)
+            out = self._run(entries[0]["cmd"], self.model_path.relative_to(self.root).as_posix(), timeout)
             if etag(self.model_path) == before and out.lstrip().startswith("{"):
                 self.model_path.parent.mkdir(parents=True, exist_ok=True)
                 write_atomic(self.model_path, out)

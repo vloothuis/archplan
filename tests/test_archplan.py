@@ -646,6 +646,23 @@ class TrustTest(TempProject):
         self.assertNotEqual(r.returncode, 0)
         self.assertFalse(p.trusted())
 
+    def test_model_path_stays_in_repository(self):
+        p = project.init(self.root)
+        outside = Path(self.tmp.name) / "victim.txt"
+        outside.write_text("keep")
+        os.symlink(Path(self.tmp.name), self.root / "up")
+        for bad in ["../victim.txt", str(outside), "up/victim.txt", "."]:
+            cfg = json.loads((p.dir / "config.json").read_text())
+            cfg["model"] = bad
+            (p.dir / "config.json").write_text(json.dumps(cfg))
+            with self.assertRaises(project.ProjectError, msg=bad):
+                project.Project(self.root).export()
+        self.assertEqual(outside.read_text(), "keep")
+        cfg["model"], cfg["export"] = ".archplan/as-is.json", "archplan export-python -o {out}"
+        (p.dir / "config.json").write_text(json.dumps(cfg))
+        project.Project(self.root).export()
+        self.assertTrue((p.dir / "as-is.json").is_file())
+
     def test_prompt_shows_hidden_characters(self):
         self.assertEqual(cli.shown("ls\x1b[2K\rmake\u202e"), "ls\\u001b[2K\\u000dmake\\u202e")
 
