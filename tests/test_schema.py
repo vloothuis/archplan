@@ -626,6 +626,36 @@ class OwnersTest(TempDir):
         sch = schema.build(self.root, self.model, sources=[], live=self.live, owners=["entities"])
         self.assertEqual(len(sch["warnings"]), 1)
 
+    def test_fts_shadow_tables(self):
+        db = self.root / "fts.db"
+        con = sqlite3.connect(db)
+        con.executescript("CREATE TABLE comments (id TEXT); CREATE VIRTUAL TABLE search USING fts5(body);"
+                          "CREATE TABLE notes_data (id TEXT);")  # no notes table: not a shadow
+        con.close()
+        lv = {"kind": "sqlite", **live.sqlite(db)}
+        self.assertIn("search_idx", lv["tables"])
+        write(self.root, {"internal/store/store.go":
+                          'package store\n\nconst q = "SELECT body FROM search WHERE search MATCH ?"\n'})
+        sch = schema.build(self.root, self.model, sources=[], live=lv, owners={"search": "store"})
+        self.assertEqual({t: (mp.get("component"), mp.get("through")) for t, mp in sch["maps"].items()
+                          if t.startswith("search")},
+                         {"search": ("store", None), **{f"search_{s}": ("store", "search")
+                                                        for s in ("data", "idx", "config", "content", "docsize")}})
+        fs = data_orphan_table.run(Ctx({**self.model, "schema": sch}), data_orphan_table.PARAMS)
+        orphans = {f["evidence"]["table"] for f in fs}
+        self.assertIn("notes_data", orphans)
+        self.assertFalse({t for t in orphans if t.startswith("search")})
+
+    def test_sql_in_go_comments(self):
+        write(self.root, {"internal/store/store.go":
+                          'package store\n\n// UPDATE relations SET x = 1\n/* DELETE FROM tags\n */\n'
+                          'const q = "SELECT id FROM tags // not a comment"\n'})
+        sch = schema.build(self.root, self.model, sources=[], live=self.live)
+        self.assertEqual({(a["table"], a["mode"]) for a in sch["access"] if a["component"] == "store"},
+                         {("tags", "read")})
+        self.assertEqual(access.strip_go_comments('a // b\n"//" `/*` /* c\nd */ e'),
+                         'a     \n"//" `/*`     \n     e')
+
     def test_enrich_reads_the_config(self):
         from types import SimpleNamespace
         (self.root / ".archplan").mkdir()
