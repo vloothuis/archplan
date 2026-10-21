@@ -112,16 +112,32 @@ PRISMA = re.compile(r"\b\w+\.(\w+)\.(findMany|findUnique|findUniqueOrThrow|findF
 PRISMA_WRITES = {"create", "createMany", "update", "updateMany", "upsert", "delete", "deleteMany"}
 
 
-GO_TOKENS = re.compile(r'"(?:[^"\\\n]|\\.)*"|`[^`]*`|\'(?:[^\'\\\n]|\\.)*\'|//[^\n]*|/\*.*?\*/', re.S)
+GO_NEXT = re.compile(r"[\"'`]|//|/\*")
+GO_QUOTED = {q: re.compile(rf"(?:[^{q}\\\n]|\\.)*") for q in "\"'"}  # the rest of a line's string or rune
 
 
 def strip_go_comments(text: str) -> str:
     """text with its Go comments blanked out, so SQL quoted in a comment does
-    not count. Offsets and line breaks stay, so line numbers still match."""
-    def blank(m):
-        s = m.group(0)
-        return re.sub(r"[^\n]", " ", s) if s[:2] in ("//", "/*") else s
-    return GO_TOKENS.sub(blank, text) if "/" in text else text
+    not count. Offsets and line breaks stay, so line numbers still match.
+    One pass: an unclosed comment or raw string runs to the end of the file,
+    so a file full of them cannot make this quadratic."""
+    if "/" not in text:
+        return text
+    out, start, i, n = [], 0, 0, len(text)
+    while (m := GO_NEXT.search(text, i)) is not None:
+        j, tok = m.start(), m.group(0)
+        if tok in ("//", "/*"):
+            k = text.find("\n", j) if tok == "//" else text.find("*/", j + 2)
+            k = n if k < 0 else k if tok == "//" else k + 2
+            out += [text[start:j], re.sub(r"[^\n]", " ", text[j:k])]
+            start = i = k
+        elif tok == "`":
+            k = text.find("`", j + 1)
+            i = n if k < 0 else k + 1
+        else:
+            i = GO_QUOTED[tok].match(text, j + 1).end() + 1
+    out.append(text[start:])
+    return "".join(out)
 
 
 def source_text(rd, path: str) -> str:
