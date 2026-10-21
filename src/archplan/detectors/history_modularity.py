@@ -43,25 +43,19 @@ finding names the files and the bug-fix cost."""
 from __future__ import annotations
 
 import math
-import re
 from collections import Counter, defaultdict
 
 from ..core.hotspots import Mapper
 from .common import COMMON_FIELDS, EXAMPLES, Weight, finding, focus, namer, plural
 from .concepts_string_enum import COMMON, WORDISH
+from .drift import FIX_WORDS, fix_test
 from .fields import key
 
 ID = "history.modularity_violation"
 NAME = "Modularity violations"
 GROUP = "history"
 NEEDS = {"git", "files", "cochange"}
-# Words in a commit subject that mark a bug fix. A word list, not a regular
-# expression: config.json is repo data, and a crafted pattern could backtrack
-# without end on the commit subjects.
-FIX_WORDS = ["fix", "fixes", "fixed", "fixing", "bug", "bugs", "bugfix", "bugfixes", "hotfix", "hotfixes",
-             "regression", "crash", "crashes", "crashed", "broken", ":bug:", ":ambulance:", ":adhesive_bandage:"]
 PARAMS = {"together": 3, "degree": 0.5, "within_component": False, "fix_words": FIX_WORDS, "rare_files": 0.1}
-WORD = re.compile(r":[a-z_]+:|[a-z0-9]+")
 BARRELS = {"__init__.py", "index.ts", "index.tsx", "index.js", "index.jsx", "index.mjs", "mod.rs", "lib.rs"}
 
 
@@ -140,8 +134,7 @@ def groups(pairs: list) -> list:
 
 def modularity_findings(res: dict, model: dict, params: dict | None = None) -> list:
     params = {**PARAMS, **(params or {})}
-    words = {w.lower() for w in params["fix_words"]}
-    is_fix = lambda subj: not words.isdisjoint(WORD.findall(subj.lower()))
+    is_fix = fix_test(params["fix_words"])
     cc = res.get("cochange") or {}
     files = model.get("files") or {}
     comps = model.get("components") or {}
@@ -150,7 +143,7 @@ def modularity_findings(res: dict, model: dict, params: dict | None = None) -> l
     related = relations(model)
     shared_by = knowledge(model, params["rare_files"])
     subjects = cc.get("subjects") or {}
-    fixes = {s for s, subj in subjects.items() if isinstance(subj, str) and is_fix(subj)}
+    fixes = {s for s, subj in subjects.items() if is_fix(subj)}
     file_shas = {f: set(v.get("shas") or []) for f, v in (cc.get("files") or {}).items() if isinstance(v, dict)}
     pairs = []
     for x in cc.get("pairs") or []:

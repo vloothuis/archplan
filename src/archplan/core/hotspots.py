@@ -33,7 +33,8 @@ MIN_TOGETHER = 3
 MIN_DEGREE = 0.3
 MAX_PAIRS = 200
 MAX_OWNERS = 30  # authors kept per component, with their commit counts, for the ownership detector
-VERSION = 5      # of the cached result: 2 added owners, 3 added cochange, 4 left tests out of pairs, 5 cleanup
+VERSION = 6      # of the cached result: 2 added owners, 3 added cochange, 4 left tests out of pairs, 5 cleanup,
+                 # 6 every changed file in cochange.files
 # Test files: a commit that changes only tests in two components says little about their coupling.
 TEST = re.compile(r"(^|/)(tests?|spec|__tests__)/|_test\.\w+$|(^|/)test_[^/]*\.py$|\.(test|spec)\.\w+$|_spec\.rb$")
 # Cleanup commits: a conventional-commit subject whose type or scope marks
@@ -251,10 +252,12 @@ def cochange(commits: list, model: dict, prefix: str = "", max_files: int = FILE
     out, number more than max_files is skipped. A pair needs min_together
     shared commits, and degree (shared commits over the commits of the file
     that changes least) of at least min_degree. The strongest max_pairs are
-    kept, with their commits; subjects lists those commits' subjects, so a
-    detector can count bug fixes without git.
+    kept, with their commits. files has every model file a used commit
+    changed, with its newest MAX_FILE_SHAS commits; subjects lists the
+    subjects of all those commits, newest first, so a detector can count bug
+    fixes without git.
 
-    {"commits", "skipped", "max_files", "files": {path: {"commits", "shas"}},
+    {"commits", "skipped", "max_files", "files": {path: {"commits", "shas"}}, "all_files": true,
      "pairs": [{"a", "b", "together", "degree", "shas"}], "subjects": {sha: subject}}"""
     known = set(model.get("files") or {})
     n_file, shas_of, together, skipped, used = Counter(), defaultdict(list), defaultdict(list), 0, 0
@@ -282,12 +285,11 @@ def cochange(commits: list, model: dict, prefix: str = "", max_files: int = FILE
             pairs.append({"a": a, "b": b, "together": n, "degree": round(deg, 3), "shas": shas[:MAX_FILE_SHAS]})
     pairs.sort(key=lambda x: (-x["together"] * x["degree"], x["a"], x["b"]))
     pairs = pairs[:max_pairs]
-    in_pairs = sorted({f for x in pairs for f in (x["a"], x["b"])})
-    files = {f: {"commits": n_file[f], "shas": shas_of[f][:MAX_FILE_SHAS]} for f in in_pairs}
+    files = {f: {"commits": n_file[f], "shas": shas_of[f][:MAX_FILE_SHAS]} for f in sorted(n_file)}
     wanted = {s for x in pairs for s in x["shas"]} | {s for v in files.values() for s in v["shas"]}
     subjects = {c[0][:10]: c[4][:SUBJECT_MAX] for c in commits if len(c) > 4 and c[0][:10] in wanted}
-    return {"commits": used, "skipped": skipped, "max_files": max_files, "files": files, "pairs": pairs,
-            "subjects": subjects}
+    return {"commits": used, "skipped": skipped, "max_files": max_files, "files": files, "all_files": True,
+            "pairs": pairs, "subjects": subjects}
 
 
 def hotspots(p: Project, since_days: int = 365, *, refresh: bool = False, **kw) -> dict:

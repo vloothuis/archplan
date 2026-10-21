@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from .common import EXAMPLES, Weight, focus, plural
+from .drift import drift, move, weigh
 from .security_common import call_file, called, participant
 
 ID = "structure.repeated_orchestration"
@@ -96,25 +97,30 @@ def run(ctx, params) -> list:
         entry_comps = sorted({home[e] for e in es if home.get(e)})
         shown = " → ".join(f"{label(p)}.{fn}" for p, fn in r)
         together, pairs = cochange(ctx, [file_of.get(e) for e in es])
+        d = drift(ctx.hotspots, [file_of.get(e) for e in es])
+        missed = d["fixes"][0] if d and d["fixes_apart"] else None
         title = f"{plural(len(es), 'entry point')} make the same {len(r)} calls: {shown}."
         out.append(ctx.finding(
             tuple(f"{p}:{fn}" for p, fn in r), title,
             "In " + ", ".join(es[:4]) + (f" and {len(es) - 4} more" if len(es) > 4 else "") + "."
-            + (f" Their files change together in {together} of {pairs} pairs." if pairs and ctx.hotspots else ""),
+            + (f" Their files change together in {together} of {pairs} pairs." if pairs and ctx.hotspots else "")
+            + (f" {plural(d['fixes_apart'], 'bug fix', 'bug fixes')} changed some of them and missed others, "
+               f"such as '{missed['subject']}'." if missed else ""),
             "medium", f"{plural(len(r), 'call')} repeated by {plural(len(es), 'entry point')}",
             entry_comps + comps, [file_of.get(e) for e in es],
             {"steps": [{"participant": p, "function": fn} for p, fn in r], "entries": es[:EXAMPLES],
              **({"cochange": {"pairs": pairs, "together": together}} if pairs and ctx.hotspots else {}),
-             "moves": ["Give the use case one home: an application service or pipeline step that makes these "
+             **({"history": d} if d else {}),
+             "moves": move(d) + ["Give the use case one home: an application service or pipeline step that makes these "
                        "calls, and let each entry point call it.",
                        "If the calls are a cross-cutting concern (access checks, transactions, logging), move "
                        "them into a middleware or decorator instead.",
                        "Leave them if the entry points will grow apart: shared steps today are not one rule."]},
             focus=[focus("sequences", [sid for e in es for sid in seq_of[e]][:EXAMPLES]),
                    focus("components", entry_comps + comps)],
-            weight=Weight(25, "repeated orchestration").spread(len(es), "entry points", per=6, cap=15,
+            weight=weigh(Weight(25, "repeated orchestration").spread(len(es), "entry points", per=6, cap=15,
                                                                free=params["min_entries"] - 1)
             .spread(len(r), "steps", per=6, cap=12, free=params["min_steps"] - 1)
             .add("changes together", f"{together} of {pairs} pairs",
-                 15 * together / pairs - 5 if pairs and ctx.hotspots else 0)))
+                 15 * together / pairs - 5 if pairs and ctx.hotspots else 0), d, together=False)))
     return out

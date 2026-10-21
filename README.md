@@ -278,6 +278,7 @@ follow it".
 | `types.synonyms` | types in different components that share 70% or more of their field names. With glossaries, types named after separate concepts, each owned by its own component, weigh less; types all named after one concept weigh more, and the move keeps the owner's type |
 | `history.coupling` | components that change together without a dependency (from the cached `archplan hotspots`). Two components that implement the same interface are expected to change together, so their pair needs degree `sibling_degree` (default 0.8) instead of `degree` (default 0.5) |
 | `history.modularity_violation` | files in different components that change together while neither refers to the other: no import, call or type reference, also not through a package's `__init__.py` or `index.ts` (needs `files` and the cached `archplan hotspots`). After Xiao, Cai and Kazman (DRSpaces, DV8). One finding per component pair, or per file name repeated across components (such as `api/schema.py`). It weighs shared commits, degree and bug-fix commits on the files; `fix_words` lists the words that mark a commit subject as a bug fix. Unlike `history.coupling`, it works per file and also reports files whose components do depend on each other. When the files share string literals or field names that few other files use (at most `rare_files` of them, default 10%), the finding names them as the likely shared knowledge |
+| `history.large_active_file` | a file of `min_lines` (400) or more lines with `min_commits` (10) or more commits that changes for 2 or more reasons: groups of partner files that change with it in different commits (a partner shares `min_together` commits and `min_degree` of them) (needs `files` and the cached `archplan hotspots`). Each group is a responsibility to extract next to its partners; the part that changes alone can stay. After Lefever, Cai, Kazman and Fang (arXiv 2302.09153) |
 | `concepts.state_flags` | types that keep their state in 3 or more boolean flags (`is_*`, `has_*`, a flag next to a `*_at` timestamp); one finding per component |
 | `concepts.data_clump` | the same 3 or more field names in types of 2 or more components, such as street, city and zip |
 | `concepts.raw_ids` | fields such as `invoice_id` that hold another component's concept as a plain string or number |
@@ -289,6 +290,8 @@ follow it".
 | `boundaries.stability` | components in the zone of pain (stable and concrete) or of uselessness (abstract and unused), from Martin's metrics |
 | `boundaries.balance` | dependencies out of balance, after Khononov's balanced coupling: strong coupling (`min_strength`, default `functional`: the two change together; `intrusive`: the downstream writes the upstream's tables or reads them with SQL; `model`: it uses the upstream's concrete types or queries its tables through their ORM types) over a long distance (`far` folder steps, plus `owner_distance` for different owners) on a volatile upstream (among the `volatile_share` most changed components, with `min_commits` or more). Needs the cached `archplan hotspots`. The strength, distance and volatility of every dependency are in the result's extras |
 | `boundaries.unused_public` | files with public types in a component others depend on, which only that component uses (needs `files`) |
+| `boundaries.misplaced_file` | files whose links point to another component more than to their own (needs `files`). The links are the files a file refers to, the files that refer to it (`incoming`, default 0.5), and the files it changes together with (degree `min_degree` or more, cached hotspots). A reference to a file many files use, or from a file that uses many, counts less (`hub`); so does one to an enclosing component's files. The other component needs `min_links` votes, `ratio` times those of the file's own component and `min_share` of all. When the words of the file's identifiers are much closer to its own component, it is left out. One finding per component pair; the move is `move_type` for the file's types, and the finding says when that removes the dependency. After Jabeen et al. (arXiv 2610.19769) and PairSmell (Zhong et al., arXiv 2411.01012) |
+| `boundaries.unrelated_parts` | a component whose files fall into 2 or more groups of `min_group` files that neither refer to each other nor change together: a split candidate. Groups whose words are alike weigh less. After PairSmell's inapt collocated pairs |
 | `evolution.ownership` | components with many active authors and no clear owner, and authors spread over many components (cached hotspots) |
 
 Each finding has a weight from 0 to 100: how much it matters. A detector
@@ -296,7 +299,14 @@ starts from a base for its kind and adds factors: how many components,
 files and sites are involved, one occurrence or a series, where a term
 occurs, how many components depend on the ones involved, how often they
 change (from the cached `archplan hotspots`) and whether a dependency points
-up the layers. `weight_basis` lists each factor with its effect. The
+up the layers. `weight_basis` lists each factor with its effect.
+Findings about duplicated knowledge (a scattered decision of
+`concepts.string_enum`, `concepts.missing_operation` and
+`structure.repeated_orchestration`) also weigh the history of the copies'
+files: commits that changed several copies, and, weighing more, bug fixes
+that changed some copies and missed others. Such a fix suggests the copies
+have drifted apart (after Yokomori and Inoue, arXiv 2409.08555). The finding names
+the fix and the files it missed in `evidence.history`. The
 strength follows from the weight: strong from 65, medium from 40, else weak.
 For a vocabulary leak, a term that only shows up in comments weighs least,
 then strings, local names, field names, function names, type names, and the

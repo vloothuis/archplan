@@ -2807,6 +2807,46 @@ class NewDetectorsTest(TempProject):
         self.assertEqual(f["components"], ["billing", "orders", "shipping"])
         self.assertEqual(f["evidence"]["sites"], ["lib/billing/x.ex:20", "lib/orders/x.ex:10", "lib/shipping/x.ex:30"])
         self.assertIn("The same test, status in 'paid', 'shipped', is written in 3 components", f["title"])
+        self.assertNotIn("history", f["evidence"])
+        # history (newest first): the copies changed together twice, and one bug fix missed a copy
+        for c in ("orders", "billing", "shipping"):
+            m["files"][f"lib/{c}/x.ex"] = {"component": c, "refs": []}
+        self.p.model_path.write_text(json.dumps(m))
+        c = lambda i, subject, *fs: (f"d{i:02d}".ljust(40, "0"), "a@x", "2026-01-01", list(fs), subject)
+        commits = [c(1, "fix: refunded orders count as paid", "lib/orders/x.ex", "lib/billing/x.ex"),
+                   c(2, "add shipped", "lib/orders/x.ex", "lib/billing/x.ex", "lib/shipping/x.ex"),
+                   c(3, "fix typo", "lib/shipping/x.ex")]  # older than the other copies' first commit: no miss
+        self.p.path("hotspots.json").write_text(json.dumps({"key": {}, "result": {
+            "head": "abc", "since_days": 365, **hotspots.analyse(commits, m)}}))
+        (g,) = [f for f in self.found("concepts.string_enum") if f["evidence"]["kind"] == "decision"]
+        h = g["evidence"]["history"]
+        self.assertEqual((h["together"], h["fixes_apart"]), (2, 1))
+        self.assertEqual(h["fixes"][0], {"subject": "fix: refunded orders count as paid",
+                                         "changed": ["lib/billing/x.ex", "lib/orders/x.ex"],
+                                         "missed": ["lib/shipping/x.ex"]})
+        self.assertIn("1 bug fix changed some copies and missed others, such as 'fix: refunded orders count as "
+                      "paid' in billing/x.ex, orders/x.ex, not in shipping/x.ex.", g["detail"])
+        self.assertTrue(g["evidence"]["moves"][0].startswith("Check shipping/x.ex"))
+        self.assertGreater(g["weight"], f["weight"])
+
+    def test_drift(self):
+        from archplan.detectors.drift import drift
+        cc = {"files": {"a.py": {"commits": 2, "shas": ["s1", "s2"]}, "b.py": {"commits": 1, "shas": ["s2"]},
+                        "c.py": {"commits": 300, "shas": ["s3"]}},  # cut off: cannot show a miss
+              "subjects": {"s3": "bugfix", "s1": "Fix rounding", "s2": "add vat"}}  # newest first
+        d = drift({"cochange": cc}, ["a.py", "b.py", "c.py", "a.py"])
+        self.assertEqual((d["files"], d["together"], d["fixes_apart"]), (3, 1, 2))
+        self.assertEqual(d["fixes"], [{"subject": "bugfix", "changed": ["c.py"], "missed": ["a.py", "b.py"]},
+                                      {"subject": "Fix rounding", "changed": ["a.py"], "missed": ["b.py"]}])
+        # a fix older than a file's first commit cannot have missed it: b.py may not have existed yet
+        old = {**cc, "subjects": {"s2": "add vat", "s1": "Fix rounding"}}
+        self.assertEqual(drift({"cochange": old}, ["a.py", "b.py"])["fixes_apart"], 0)
+        self.assertIsNone(drift({"cochange": cc}, ["a.py"]))
+        # d.py never changed: missed only when the cache lists every changed file
+        self.assertEqual(drift({"cochange": cc}, ["a.py", "d.py"])["fixes_apart"], 0)
+        self.assertEqual(drift({"cochange": {**cc, "all_files": True}}, ["a.py", "d.py"])["fixes"][0]["missed"],
+                         ["d.py"])
+        self.assertIsNone(drift({"pairs": []}, ["a.py", "b.py"]))
 
     def test_missing_operation(self):
         m = concept_model()
@@ -2843,6 +2883,16 @@ class NewDetectorsTest(TempProject):
         self.assertEqual(f["evidence"]["existing"], ["orders.total/1"])
         self.assertIn("Call orders.total/1 in orders", f["evidence"]["moves"][0])
         self.assertEqual(f["components"], ["orders", "billing", "shipping"])
+        for c in ("billing", "shipping"):
+            m["files"][f"lib/{c}/x.ex"] = {"component": c, "refs": []}
+        self.p.model_path.write_text(json.dumps(m))
+        commits = [("e1".ljust(40, "0"), "a@x", "2026-01-01", ["lib/billing/x.ex"], "Fix total for refunds")]
+        self.p.path("hotspots.json").write_text(json.dumps({"key": {}, "result": {
+            "head": "abc", "since_days": 365, **hotspots.analyse(commits, m)}}))
+        g = {f["evidence"]["operation"]: f for f in self.found("concepts.missing_operation")}["total"]
+        self.assertEqual(g["evidence"]["history"]["fixes_apart"], 1)
+        self.assertIn("not in shipping/x.ex", g["detail"])
+        self.assertGreater(g["weight"], f["weight"])
 
     def test_repeated_orchestration(self):
         m = concept_model()
@@ -2865,6 +2915,105 @@ class NewDetectorsTest(TempProject):
         self.assertEqual(f["title"], "3 entry points make the same 3 calls: Repo.get → billing.check → Repo.save.")
         self.assertEqual(f["focus"][0]["view"], "sequences")
         self.assertEqual(f["components"], ["orders", "core", "billing"])
+
+    def test_misplaced_file(self):
+        m = concept_model()
+        ref = lambda *fs: [{"to": f} for f in fs]
+        bill = ["lib/billing/tax.ex", "lib/billing/rates.ex"]
+        m["files"].update({f: {"component": "billing", "refs": []} for f in bill})
+        # pricing.ex in orders uses only billing's files
+        m["files"]["lib/orders/pricing.ex"] = {"component": "orders", "refs": ref(*bill, "lib/billing/invoice.ex")}
+        # label.ex in shipping only uses billing, and nothing else links shipping and billing
+        m["files"]["lib/shipping/label.ex"] = {"component": "shipping", "refs": ref(*bill, "lib/billing/invoice.ex")}
+        m["types"]["shipping.Label"] = {"name": "Label", "component": "shipping", "file": "lib/shipping/label.ex"}
+        # util.ex in core is used by everyone: shared, not misplaced
+        for f in ("lib/orders/order.ex", "lib/billing/invoice.ex", "lib/shipping/parcel.ex"):
+            m["files"][f]["refs"] += ref("lib/core/util.ex")
+        # a nested component that uses its parent's files is layered, not misplaced
+        m["components"]["billing.pdf"] = {"name": "pdf", "path": "lib/billing/pdf", "match": ["lib/billing/pdf/**"]}
+        m["files"]["lib/billing/pdf/render.ex"] = {"component": "billing.pdf", "refs": ref(*bill, "lib/billing/invoice.ex")}
+        self.p.model_path.write_text(json.dumps(m))
+        fs = {tuple(f["components"]): f for f in self.found("boundaries.misplaced_file")}
+        self.assertEqual(set(fs), {("orders", "billing"), ("shipping", "billing")})
+        f = fs[("orders", "billing")]
+        self.assertEqual(f["files"], ["lib/orders/pricing.ex"])
+        self.assertEqual(f["evidence"]["files"][0], {"file": "lib/orders/pricing.ex", "own": 0, "other": 3})
+        self.assertEqual(f["title"], "orders/pricing.ex in orders has most of its links to billing "
+                                     "(weighted links: 3.0 to billing, 0.0 to orders).")
+        self.assertFalse(f["evidence"]["removes_dependency"])  # invoice.ex still refers to order.ex
+        g = fs[("shipping", "billing")]
+        self.assertTrue(g["evidence"]["removes_dependency"])
+        # a reference to a file that many use counts less (hub)
+        from archplan.detectors import Context
+        from archplan.detectors.boundaries_misplaced import FileGraph
+        fg = FileGraph(Context(self.p))
+        self.assertEqual(fg.users["lib/billing/tax.ex"], 3)
+        self.assertEqual(fg.votes("lib/orders/pricing.ex", hub=2)["billing"], 2 / 3 * 3)
+        self.assertIn("Move shipping/label.ex to billing, with Label (move_type billing).", g["evidence"]["moves"][0])
+        self.assertGreater(g["weight"], f["weight"])
+        # words: pricing.ex reads like orders, not like billing, so its links alone do not move it
+        write = lambda f, text: (self.root / f).parent.mkdir(parents=True, exist_ok=True) or (self.root / f).write_text(text)
+        write("lib/orders/pricing.ex", "def order_line_quantity(order_line), do: order_line.quantity_ordered")
+        write("lib/orders/order.ex", "defmodule Order do def order_line_quantity(order_line) end")
+        for f in bill + ["lib/billing/invoice.ex"]:
+            write(f, "def vat_ledger_posting(ledger_entry), do: ledger_entry.vat")
+        fs = {tuple(f["components"]): f for f in self.found("boundaries.misplaced_file")}
+        self.assertNotIn(("orders", "billing"), fs)
+        x = fs[("shipping", "billing")]["evidence"]["files"][0]  # no words for label.ex: kept
+        self.assertNotIn("words_own", x)
+        from archplan import detectors
+        detectors.configure(self.p, "boundaries.misplaced_file", params={"terms": False})
+        self.assertIn(("orders", "billing"), {tuple(f["components"]) for f in self.found("boundaries.misplaced_file")})
+
+    def test_unrelated_parts(self):
+        m = concept_model()
+        ref = lambda *fs: [{"to": f} for f in fs]
+        # core: repo.ex with cache, clock and util is one group; mail.ex and smtp.ex another; tz.ex links to nothing
+        m["files"].update({"lib/core/mail.ex": {"component": "core", "refs": ref("lib/core/smtp.ex")},
+                           "lib/core/smtp.ex": {"component": "core", "refs": []},
+                           "lib/core/tz.ex": {"component": "core", "refs": []},
+                           "lib/core/__init__.py": {"component": "core", "refs": ref("lib/core/repo.ex",
+                                                                                     "lib/core/mail.ex")}})
+        self.p.model_path.write_text(json.dumps(m))
+        (f,) = self.found("boundaries.unrelated_parts")
+        self.assertEqual(f["components"], ["core"])
+        self.assertEqual([g["files"] for g in f["evidence"]["groups"]],
+                         [["lib/core/cache.ex", "lib/core/clock.ex", "lib/core/repo.ex", "lib/core/util.ex"],
+                          ["lib/core/mail.ex", "lib/core/smtp.ex"]])
+        self.assertEqual(f["evidence"]["loose"], ["lib/core/tz.ex"])
+        self.assertEqual(f["evidence"]["groups"][0]["types"], ["core.Cache", "core.Clock", "core.Repo", "core.Util"])
+        self.assertIn("Split core: give the group of mail.ex, smtp.ex its own component", f["evidence"]["moves"][0])
+        # changing together links the groups
+        c = lambda i: (f"u{i}".ljust(40, "0"), "a@x", "2026-01-01", ["lib/core/mail.ex", "lib/core/repo.ex"], "x")
+        self.p.path("hotspots.json").write_text(json.dumps({"key": {}, "result": {
+            "head": "abc", "since_days": 365, **hotspots.analyse([c(i) for i in range(3)], m)}}))
+        self.assertEqual(self.found("boundaries.unrelated_parts"), [])
+
+    def test_large_active_file(self):
+        m = concept_model()
+        big = "lib/orders/order.ex"
+        for f in ("lib/orders/tax.ex", "lib/orders/vat.ex", "lib/orders/mail.ex", "lib/shipping/label.ex"):
+            m["files"][f] = {"component": f.split("/")[1], "refs": []}
+        self.p.model_path.write_text(json.dumps(m))
+        (self.root / "lib/orders").mkdir(parents=True)
+        (self.root / big).write_text("x\n" * 500)
+        c = lambda i, subject, *fs: (f"o{i:02d}".ljust(40, "0"), "a@x", "2026-01-01", [big, *fs], subject)
+        commits = ([c(i, f"tax {i}", "lib/orders/tax.ex", "lib/orders/vat.ex") for i in range(5)]
+                   + [c(10 + i, f"fix label {i}", "lib/shipping/label.ex") for i in range(4)]
+                   + [c(20 + i, f"alone {i}") for i in range(3)])
+        self.p.path("hotspots.json").write_text(json.dumps({"key": {}, "result": {
+            "head": "abc", "since_days": 365, **hotspots.analyse(commits, m)}}))
+        (f,) = self.found("history.large_active_file")
+        ev = f["evidence"]
+        self.assertEqual((ev["file"], ev["lines"], ev["commits"], ev["alone"], ev["bug_fixes"]), (big, 500, 12, 3, 4))
+        self.assertEqual([(r["partners"], r["commits"], r["components"]) for r in ev["responsibilities"]],
+                         [(["lib/orders/tax.ex", "lib/orders/vat.ex"], 5, ["orders"]),
+                          (["lib/shipping/label.ex"], 4, ["shipping"])])
+        self.assertEqual(ev["responsibilities"][1]["subjects"], ["fix label 0", "fix label 1", "fix label 2"])
+        self.assertIn("orders/order.ex (500 lines, 12 commits) changes for 2 reasons", f["title"])
+        self.assertIn("into its own module in shipping", ev["moves"][1])
+        (self.root / big).write_text("x\n" * 50)  # small: not a finding
+        self.assertEqual(self.found("history.large_active_file"), [])
 
     def test_synonyms_glossary(self):
         from archplan.detectors.types_synonyms import synonym_findings

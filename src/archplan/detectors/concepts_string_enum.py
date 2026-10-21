@@ -20,6 +20,7 @@ import re
 from collections import Counter, defaultdict
 
 from .common import EXAMPLES, Weight, focus, plural
+from .drift import drift, move, sentence, weigh
 from .fields import key
 
 ID = "concepts.string_enum"
@@ -79,21 +80,24 @@ def decision_findings(ctx, params) -> list:
         owner = owners[0] if len(owners) == 1 else None
         where = ", ".join(ctx.name(c) for c in comps[:3]) + (", …" if len(comps) > 3 else "")
         shown = ", ".join(f"'{v}'" for v in vals[:4]) + (", …" if len(vals) > 4 else "")
+        files = [s.rsplit(":", 1)[0] for _, s in sites]
+        d = drift(ctx.hotspots, files)
         out.append(ctx.finding(
             ("decision", fld, *vals),
             f"The same test, {fld} in {shown}, is written in {plural(len(comps), 'component')} ({where}).",
-            "Sites: " + ", ".join(s for _, s in sites[:4]) + ".",
+            " ".join(x for x in ("Sites: " + ", ".join(s for _, s in sites[:4]) + ".", sentence(d)) if x),
             "weak", f"{plural(len(sites), 'site')} in {plural(len(comps), 'component')}, the same values",
-            comps, [s.rsplit(":", 1)[0] for _, s in sites],
+            comps, files,
             {"kind": "decision", "name": fld, "values": list(vals), "components": comps[:EXAMPLES],
              "sites": [s for _, s in sites][:EXAMPLES], **({"owner": owner} if owner else {}),
-             "moves": [f"Give {ctx.name(owner) if owner else 'the component that owns ' + fld} one named predicate "
+             **({"history": d} if d else {}),
+             "moves": move(d) + [f"Give {ctx.name(owner) if owner else 'the component that owns ' + fld} one named predicate "
                        f"for this test, such as is_<state>({fld}), and call it from these places.",
                        "If the places mean different things by it, give each meaning its own name instead."]},
             focus=[focus("components", comps)],
-            weight=Weight(25, "scattered decision").spread(len(comps), per=8, cap=16)
-            .repetition(len(sites), "sites", per=3, cap=9, single=0)
-            .add("values", len(vals), min(6, 2 * (len(vals) - 2)))))
+            weight=weigh(Weight(25, "scattered decision").spread(len(comps), per=8, cap=16)
+                         .repetition(len(sites), "sites", per=3, cap=9, single=0)
+                         .add("values", len(vals), min(6, 2 * (len(vals) - 2))), d)))
     return out
 
 

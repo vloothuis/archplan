@@ -29,6 +29,7 @@ from collections import defaultdict
 
 from ..core.vocab import is_test
 from .common import EXAMPLES, Weight, focus, plural
+from .drift import drift, move, sentence, weigh
 from .fields import words
 
 ID = "concepts.missing_operation"
@@ -157,21 +158,25 @@ def run(ctx, params) -> list:
                  [f"Give {ctx.name(owner)} one operation {op}({', '.join(tnames)}) and replace these functions "
                   "with calls to it."]) + \
             ["Check the bodies first: if the copies compute different things, give each its own name instead."]
+        d = drift(ctx.hotspots, [s.get("file") for s in sigs])
+        moves = move(d) + moves
         out.append(ctx.finding(
             (owner, *subject, op, returns), title,
-            "Such as " + ", ".join(f"{s.get('id')} ({ctx.name(s['component'])})" for s in sigs[:4]) + ".",
+            " ".join(x for x in ("Such as " + ", ".join(f"{s.get('id')} ({ctx.name(s['component'])})"
+                                                         for s in sigs[:4]) + ".", sentence(d)) if x),
             "medium", f"{plural(len(sigs), 'function')} in {plural(len(comps), 'component')}, on "
             f"{' and '.join(tnames)}" + (f", returning {returns}" if returns else ""),
             [owner] + comps, [s.get("file") for s in sigs],
             {"owner": owner, "types": list(subject), "operation": op, "returns": returns or None,
              "functions": [{"id": s.get("id"), "component": s["component"], "file": s.get("file"),
                             "line": s.get("line")} for s in sigs[:EXAMPLES]],
-             **({"existing": [s.get("id") for s in have[:3]]} if have else {}), "moves": moves},
+             **({"existing": [s.get("id") for s in have[:3]]} if have else {}), **({"history": d} if d else {}),
+             "moves": moves},
             focus=[focus("components", [owner] + comps), focus("types", list(subject))],
-            weight=Weight(30, "missing operation").spread(len(comps), per=8, cap=16)
-            .repetition(len(sigs), "functions", per=3, cap=6, single=0)
-            .add("the owner already has it", have[0].get("id") if have else None, 10 if have else 0)
-            .add("no return types", "unknown", 0 if returns else -6)
-            .add("types from parameter names", sum(id(s) in named for s in sigs),
-                 -6 if any(id(s) in named for s in sigs) else 0)))
+            weight=weigh(Weight(30, "missing operation").spread(len(comps), per=8, cap=16)
+                         .repetition(len(sigs), "functions", per=3, cap=6, single=0)
+                         .add("the owner already has it", have[0].get("id") if have else None, 10 if have else 0)
+                         .add("no return types", "unknown", 0 if returns else -6)
+                         .add("types from parameter names", sum(id(s) in named for s in sigs),
+                              -6 if any(id(s) in named for s in sigs) else 0), d)))
     return out
