@@ -2664,6 +2664,28 @@ class NewDetectorsTest(TempProject):
         self.assertEqual(fs["timeout"]["evidence"]["units"], {"ms": ["orders"], "s": ["shipping"]})
         self.assertEqual(fs["amount"]["strength"], "weak")
 
+    def test_units_in_names_bound_words(self):
+        """max, min and total qualify a quantity: MaxBytes is a byte field, a bare Max is not one."""
+        from archplan.detectors.concepts_units_in_names import split
+        self.assertEqual(split("MaxBytes"), ("bytes", "bytes"))
+        self.assertEqual(split("default_timeout_ms"), ("timeout", "ms"))
+        self.assertEqual(split("Max"), ("", None))
+        comps = {c: {"name": c, "path": f"lib/{c}", "match": [f"lib/{c}/**"]} for c in ("exec", "img", "meta", "net")}
+        f = lambda n, t="int": {"name": n, "type": t}
+        types = {"exec.Runner": {"name": "Runner", "component": "exec", "kind": "struct", "fields": [f("maxBytes")]},
+                 "img.Config": {"name": "Config", "component": "img", "kind": "struct",
+                                "fields": [f("MaxBytes"), f("TotalBytes")]},
+                 "meta.PropertyDef": {"name": "PropertyDef", "component": "meta", "kind": "struct",
+                                      "fields": [f("Max", "float64"), f("Min", "float64"), f("Timeout")]},
+                 "net.Client": {"name": "Client", "component": "net", "kind": "struct",
+                                "fields": [f("MaxTimeoutMs"), f("Count")]}}
+        self.p.model_path.write_text(json.dumps({"format": "archmodel/1", "components": comps, "types": types,
+                                                 "dependencies": []}))
+        os.utime(self.p.model_path, None)
+        fs = {f["evidence"]["base"]: f for f in self.found("concepts.units_in_names")}
+        self.assertEqual(set(fs), {"timeout"})
+        self.assertEqual(fs["timeout"]["evidence"]["units"], {"ms": ["net"], "no unit": ["meta"]})
+
     def test_stability(self):
         from archplan import detectors
         fs = detectors.run(self.p, only={"boundaries.stability"})

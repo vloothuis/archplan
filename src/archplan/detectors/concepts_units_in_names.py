@@ -22,17 +22,21 @@ UNITS = {"ms": "ms", "millis": "ms", "milliseconds": "ms", "msec": "ms", "msecs"
          "bytes": "bytes", "kb": "kb", "mb": "mb", "gb": "gb", "pct": "percent", "percent": "percent",
          "percentage": "percent", "px": "px"}
 NONE = "no unit"
+QUALIFIERS = {"max", "min", "maximum", "minimum", "limit", "default", "total", "count"}
 NUMBER = re.compile(r"\b(u?int\d*|integer|float\d*|double|decimal|number|numeric|long|short|bigint|real)\b")
 
 
 def split(name: str):
-    """(base, unit or None): timeout_ms -> (timeout, ms); amountInCents -> (amount, cents)."""
-    w = words(name)
-    if len(w) >= 2 and w[-1] in UNITS:
+    """(base, unit or None): timeout_ms -> (timeout, ms); amountInCents -> (amount, cents).
+    Bound words qualify a quantity and are dropped: max_timeout_ms -> (timeout, ms);
+    MaxBytes -> (bytes, bytes); a bare Max -> ("", None)."""
+    raw = words(name)
+    w = [x for x in raw if x not in QUALIFIERS]
+    if w and w[-1] in UNITS and (len(raw) >= 2 or len(w[-1]) > 2):
         base = w[:-1]
         if len(base) >= 2 and base[-1] == "in":
             base = base[:-1]
-        return "_".join(base), UNITS[w[-1]]
+        return "_".join(base) or UNITS[w[-1]], UNITS[w[-1]]
     return "_".join(w), None
 
 

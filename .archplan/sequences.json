@@ -1,0 +1,140 @@
+{
+  "format": "archplan-sequences/1",
+  "sequences": {
+    "export-and-enrich": {
+      "title": "Export and enrich the model",
+      "entry": "Project.export()",
+      "source": "tests",
+      "participants": [
+        "Test",
+        "archplan",
+        "archplan.core",
+        "archplan.schema"
+      ],
+      "messages": [
+        {
+          "id": "Test>archplan:Project.export()#1",
+          "from": "Test",
+          "to": "archplan",
+          "label": "Project.export()",
+          "depth": 0
+        },
+        {
+          "id": "archplan>archplan.core:export#1",
+          "from": "archplan",
+          "to": "archplan.core",
+          "label": "archplan.core.project.export()",
+          "depth": 1
+        },
+        {
+          "id": "archplan>archplan.core:exclude#2",
+          "from": "archplan",
+          "to": "archplan.core",
+          "label": "archplan.core.project.exclude()",
+          "depth": 1
+        },
+        {
+          "id": "archplan>archplan.core:inside#3",
+          "from": "archplan",
+          "to": "archplan.core",
+          "label": "archplan.core.safeio.inside()",
+          "depth": 1
+        },
+        {
+          "id": "archplan>archplan.schema:enrich#4",
+          "from": "archplan",
+          "to": "archplan.schema",
+          "label": "archplan.schema.enrich()",
+          "depth": 1
+        },
+        {
+          "id": "archplan.schema>archplan.core:load#5",
+          "from": "archplan.schema",
+          "to": "archplan.core",
+          "label": "archplan.core.exclude.load()",
+          "depth": 2
+        },
+        {
+          "id": "archplan.schema>archplan.core:walk#6",
+          "from": "archplan.schema",
+          "to": "archplan.core",
+          "label": "archplan.core.safeio.walk()",
+          "depth": 2
+        }
+      ]
+    },
+    "schema-discovery": {
+      "title": "Discover and map database tables",
+      "entry": "schema.build()",
+      "source": "tests",
+      "participants": [
+        "Test",
+        "archplan.schema",
+        "archplan.core"
+      ],
+      "messages": [
+        {
+          "id": "Test>archplan.schema:schema.build()#1",
+          "from": "Test",
+          "to": "archplan.schema",
+          "label": "schema.build()",
+          "depth": 0
+        },
+        {
+          "id": "archplan.schema>archplan.core:load#1",
+          "from": "archplan.schema",
+          "to": "archplan.core",
+          "label": "archplan.core.exclude.load()",
+          "depth": 1
+        },
+        {
+          "id": "archplan.schema>archplan.core:walk#2",
+          "from": "archplan.schema",
+          "to": "archplan.core",
+          "label": "archplan.core.safeio.walk()",
+          "depth": 1
+        }
+      ]
+    },
+    "run-findings": {
+      "title": "Run architecture findings",
+      "entry": "detectors.run()",
+      "source": "tests",
+      "participants": [
+        "Test",
+        "archplan.detectors",
+        "archplan.core"
+      ],
+      "messages": [
+        {
+          "id": "Test>archplan.detectors:detectors.run()#1",
+          "from": "Test",
+          "to": "archplan.detectors",
+          "label": "detectors.run()",
+          "depth": 0
+        },
+        {
+          "id": "archplan.detectors>archplan.core:model#1",
+          "from": "archplan.detectors",
+          "to": "archplan.core",
+          "label": "archplan.core.architecture.model()",
+          "depth": 1
+        },
+        {
+          "id": "archplan.detectors>archplan.core:target_or_model#2",
+          "from": "archplan.detectors",
+          "to": "archplan.core",
+          "label": "archplan.core.project.target_or_model()",
+          "depth": 1
+        },
+        {
+          "id": "archplan.detectors>archplan.core:state#3",
+          "from": "archplan.detectors",
+          "to": "archplan.core",
+          "label": "archplan.core.architecture.state()",
+          "depth": 1
+        }
+      ]
+    }
+  }
+}
