@@ -2807,6 +2807,39 @@ class NewDetectorsTest(TempProject):
         self.assertEqual(f["components"], ["billing", "orders", "shipping"])
         self.assertEqual(f["evidence"]["sites"], ["lib/billing/x.ex:20", "lib/orders/x.ex:10", "lib/shipping/x.ex:30"])
         self.assertIn("The same test, status in 'paid', 'shipped', is written in 3 components", f["title"])
+        self.assertNotIn("history", f["evidence"])
+        # history: the copies changed together twice, and two bug fixes missed copies
+        for c in ("orders", "billing", "shipping"):
+            m["files"][f"lib/{c}/x.ex"] = {"component": c, "refs": []}
+        self.p.model_path.write_text(json.dumps(m))
+        c = lambda i, subject, *fs: (f"d{i:02d}".ljust(40, "0"), "a@x", "2026-01-01", list(fs), subject)
+        commits = [c(1, "fix: refunded orders count as paid", "lib/orders/x.ex", "lib/billing/x.ex"),
+                   c(2, "add shipped", "lib/orders/x.ex", "lib/billing/x.ex", "lib/shipping/x.ex"),
+                   c(3, "fix typo", "lib/shipping/x.ex")]  # a fix that misses the other two copies
+        self.p.path("hotspots.json").write_text(json.dumps({"key": {}, "result": {
+            "head": "abc", "since_days": 365, **hotspots.analyse(commits, m)}}))
+        (g,) = [f for f in self.found("concepts.string_enum") if f["evidence"]["kind"] == "decision"]
+        h = g["evidence"]["history"]
+        self.assertEqual((h["together"], h["fixes_apart"]), (2, 2))
+        self.assertEqual(h["fixes"][0], {"subject": "fix: refunded orders count as paid",
+                                         "changed": ["lib/billing/x.ex", "lib/orders/x.ex"],
+                                         "missed": ["lib/shipping/x.ex"]})
+        self.assertIn("2 bug fixes changed some copies and missed others, such as 'fix: refunded orders count as "
+                      "paid' in billing/x.ex, orders/x.ex, not in shipping/x.ex.", g["detail"])
+        self.assertTrue(g["evidence"]["moves"][0].startswith("Check shipping/x.ex"))
+        self.assertGreater(g["weight"], f["weight"])
+
+    def test_drift(self):
+        from archplan.detectors.drift import drift
+        cc = {"files": {"a.py": {"commits": 2, "shas": ["s1", "s2"]}, "b.py": {"commits": 1, "shas": ["s2"]},
+                        "c.py": {"commits": 300, "shas": ["s3"]}},  # cut off: cannot show a miss
+              "subjects": {"s1": "Fix rounding", "s2": "add vat", "s3": "bugfix"}}
+        d = drift({"cochange": cc}, ["a.py", "b.py", "c.py", "a.py"])
+        self.assertEqual((d["files"], d["together"], d["fixes_apart"]), (3, 1, 2))
+        self.assertEqual(d["fixes"], [{"subject": "Fix rounding", "changed": ["a.py"], "missed": ["b.py"]},
+                                      {"subject": "bugfix", "changed": ["c.py"], "missed": ["a.py", "b.py"]}])
+        self.assertIsNone(drift({"cochange": cc}, ["a.py"]))
+        self.assertIsNone(drift({"pairs": []}, ["a.py", "b.py"]))
 
     def test_missing_operation(self):
         m = concept_model()
@@ -2843,6 +2876,16 @@ class NewDetectorsTest(TempProject):
         self.assertEqual(f["evidence"]["existing"], ["orders.total/1"])
         self.assertIn("Call orders.total/1 in orders", f["evidence"]["moves"][0])
         self.assertEqual(f["components"], ["orders", "billing", "shipping"])
+        for c in ("billing", "shipping"):
+            m["files"][f"lib/{c}/x.ex"] = {"component": c, "refs": []}
+        self.p.model_path.write_text(json.dumps(m))
+        commits = [("e1".ljust(40, "0"), "a@x", "2026-01-01", ["lib/billing/x.ex"], "Fix total for refunds")]
+        self.p.path("hotspots.json").write_text(json.dumps({"key": {}, "result": {
+            "head": "abc", "since_days": 365, **hotspots.analyse(commits, m)}}))
+        g = {f["evidence"]["operation"]: f for f in self.found("concepts.missing_operation")}["total"]
+        self.assertEqual(g["evidence"]["history"]["fixes_apart"], 1)
+        self.assertIn("not in shipping/x.ex", g["detail"])
+        self.assertGreater(g["weight"], f["weight"])
 
     def test_repeated_orchestration(self):
         m = concept_model()

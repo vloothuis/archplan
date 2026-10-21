@@ -296,7 +296,14 @@ starts from a base for its kind and adds factors: how many components,
 files and sites are involved, one occurrence or a series, where a term
 occurs, how many components depend on the ones involved, how often they
 change (from the cached `archplan hotspots`) and whether a dependency points
-up the layers. `weight_basis` lists each factor with its effect. The
+up the layers. `weight_basis` lists each factor with its effect.
+Findings about duplicated knowledge (a scattered decision of
+`concepts.string_enum`, `concepts.missing_operation` and
+`structure.repeated_orchestration`) also weigh the history of the copies'
+files: commits that changed several copies, and, weighing more, bug fixes
+that changed some copies and missed others. Such a fix suggests the copies
+have drifted apart (after Mondal et al., arXiv 2409.08555). The finding names
+the fix and the files it missed in `evidence.history`. The
 strength follows from the weight: strong from 65, medium from 40, else weak.
 For a vocabulary leak, a term that only shows up in comments weighs least,
 then strings, local names, field names, function names, type names, and the
