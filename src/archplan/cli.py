@@ -31,6 +31,7 @@
   archplan export-elixir         exporter for Elixir/Mix projects (needs mix)
   archplan export-ts             exporter for TypeScript and JavaScript projects (needs node)
   archplan trace-elixir          run mix tests and record call sequences
+  archplan trace-python          run Python tests (pytest, unittest or Django) and record call sequences
 """
 
 from __future__ import annotations
@@ -892,6 +893,9 @@ def main(argv=None):
         if argv[1:2] in (["-h"], ["--help"]):
             argv = [argv[0]]
         elixir(argv[0].split("-")[0], argv[1:])
+    if argv and argv[0] == "trace-python":
+        from .core import pytrace
+        sys.exit(pytrace.main(argv[1:]))
     ap = argparse.ArgumentParser(prog="archplan", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--version", action="version", version=f"archplan {__version__}")
     sub = ap.add_subparsers(dest="cmd", metavar="command")

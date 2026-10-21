@@ -140,7 +140,9 @@ from `.archplan/sequences.json` in the project root. The file has format
 shape. Each sequence needs `participants` and `messages` lists. Keep argument
 values out of labels. A missing file means no sequences; a malformed file stops
 the export with an error. When the file has sequences, the model lists the
-`calls` capability.
+`calls` capability. The Python exporter also reads the trace files that
+`archplan trace-python` writes to `.archplan/sequences`; a sequence in
+`sequences.json` replaces a traced one with the same id.
 
 ## Capabilities
 

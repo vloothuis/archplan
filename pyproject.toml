@@ -14,4 +14,4 @@ dependencies = []
 archplan = "archplan.cli:main"
 
 [tool.setuptools.package-data]
-archplan = ["static/*", "static/vendor/*", "format/*", "elixir/*", "ts/*", "contrib/*.md", "contrib/profiles/*.json", "contrib/exporters/*.json"]
+archplan = ["static/*", "static/vendor/*", "format/*", "elixir/*", "python/*", "ts/*", "contrib/*.md", "contrib/profiles/*.json", "contrib/exporters/*.json"]

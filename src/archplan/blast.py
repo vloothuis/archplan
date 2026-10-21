@@ -183,6 +183,8 @@ def untraced(languages: list) -> str:
     """Why there is nothing to report, and how a model in these languages gets sequences."""
     if "elixir" in languages:
         return "The model has no sequences: trace the tests first (see `archplan trace-elixir`)."
+    if "python" in languages:
+        return "The model has no sequences: trace the tests first with `archplan trace-python`, then export."
     if "go" in languages:
         return ("The model has no sequences: record the tests with seqtrace and pass its steps.json "
                 "to archplan-go with `-steps`.")
