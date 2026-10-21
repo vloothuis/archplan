@@ -13,6 +13,11 @@ Live sources run only on request (`archplan schema --sqlite FILE` or
 `archplan schema --postgres --url-env VAR`). Their result is kept in
 .archplan/schema-live.json, so later exports keep it; the URL is not.
 
+Owners: config.json's schema.owners first, then the ORM type's component
+(or the declaring file's), the component that writes the table most, the
+owner of a join table's table, and last the component whose files hold the
+CREATE TABLE statement (see owners).
+
 build() returns the section; enrich() adds it to the project's model after
 an export."""
 
@@ -24,6 +29,7 @@ from pathlib import Path
 
 from . import access as access_mod
 from . import ddl, django, ecto, prisma, rails
+from . import owners as owners_mod
 from ..core.safeio import model_base, prefix_of, read_file, read_text
 from ..core.safeio import walk as safe_walk
 from .core import finish, merge_table
@@ -188,8 +194,10 @@ def read_sources(root: Path, sources: list, live: dict | None, model: dict) -> t
     return tables, enums, maps, used
 
 
-def build(root: Path, model: dict, sources: list | None = None, live: dict | None = None) -> dict | None:
-    """The schema section for the model, or None when there is no source."""
+def build(root: Path, model: dict, sources: list | None = None, live: dict | None = None,
+          owners=None) -> dict | None:
+    """The schema section for the model, or None when there is no source.
+    owners is config.json's schema.owners: {table name or glob: component}."""
     sources = detect(root) if sources is None else sources
     if not sources and not live:
         return None
@@ -220,11 +228,15 @@ def build(root: Path, model: dict, sources: list | None = None, live: dict | Non
         maps[table] = {**out, **{k: mp[k] for k in ("file", "line", "module", "class", "through") if k in mp}}
     acc = access_mod.access(model, base, tables, maps, prisma=any(s["kind"] == "prisma" for s in used))
     access_mod.owners(maps, acc, tables)
+    for table, comp in owners_mod.created(model, base, root, pre, tables, walk, SQL_NAMES).items():
+        if not (maps.get(table) or {}).get("component"):
+            maps.setdefault(table, {}).update({"component": comp, "via": "create"})
+    warnings = owners_mod.apply_config(maps, tables, owners, model.get("components") or {})
     # the private keys used for access mapping stay out of the model
     clean = {t: {k: v for k, v in mp.items() if k in ("type", "component", "via", "through")}
              for t, mp in sorted(maps.items()) if mp.get("component") or mp.get("type")}
     return {"sources": used, "tables": dict(sorted(tables.items())), "enums": dict(sorted(enums.items())),
-            "maps": clean, "access": acc}
+            "maps": clean, "access": acc, **({"warnings": warnings} if warnings else {})}
 
 
 def read_live(p) -> dict | None:
@@ -243,7 +255,9 @@ def enrich(p, live: dict | None = None, force: bool = False) -> dict | None:
         return None
     if live is not None:
         write_json(p.path(LIVE), live)
-    sch = build(p.root, model, live=live if live is not None else read_live(p))
+    cfg = p.config.get("schema")
+    sch = build(p.root, model, live=live if live is not None else read_live(p),
+                owners=cfg.get("owners") if isinstance(cfg, dict) else None)
     if sch is None:
         return None
     sch["generator"] = "archplan"

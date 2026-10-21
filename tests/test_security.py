@@ -125,6 +125,94 @@ def invoice(request, id):
 '''
 
 
+GO_ACTIONS = '''package dataentry
+
+import (
+	"net/http"
+	"strings"
+
+	"example.com/rela/internal/jobs"
+)
+
+func (h *Handler) handleV1Action(w http.ResponseWriter, r *http.Request) {
+	ops := actionOps{store: h.store}
+	name := strings.TrimSpace(r.URL.Path)
+	if err := ops.run(r.Context(), name); err != nil {
+		w.WriteHeader(http.StatusForbidden)
+	}
+}
+
+func (h *Handler) handleV1Bulk(w http.ResponseWriter, r *http.Request) {
+	ops := newActionOps(h.store)
+	_ = ops.run(r.Context(), "bulk")
+}
+
+func (h *Handler) handleV1Export(w http.ResponseWriter, r *http.Request) {
+	_ = h.exporter.run(r.Context())
+}
+
+func (h *Handler) handleV1Jobs(w http.ResponseWriter, r *http.Request, runner *jobs.Runner) {
+	runner.run(r.Context())
+}
+'''
+
+GO_OPS = '''package dataentry
+
+type actionOps struct{ store Store }
+
+func newActionOps(s Store) *actionOps { return &actionOps{store: s} }
+
+func (o actionOps) run(ctx context.Context, name string) error {
+	if err := o.authorize(ctx, name); err != nil {
+		return err
+	}
+	return o.store.Do(name)
+}
+'''
+
+GO_PERMS = '''package dataentry
+
+func (o *actionOps) authorize(ctx context.Context, name string) error {
+	if !holdsActionPermission(ctx, name) {
+		return errDenied
+	}
+	return nil
+}
+
+func holdsActionPermission(ctx context.Context, name string) bool { return name != "" }
+'''
+
+GO_EXPORT = '''package dataentry
+
+type exportOps struct{}
+
+func (e *exportOps) run(ctx context.Context) error { return nil }
+'''
+
+
+def go_sig(sid, file, line, params=(), returns=None, comp="dataentry"):
+    return {"id": sid, "component": comp, "file": file, "line": line, "name": short(sid),
+            "params": [{"name": n, "type": t} for n, t in params], "returns": returns, "public": False}
+
+
+GO_SIGS = [
+    *[go_sig(f"internal/dataentry.(*Handler).{n}", "internal/dataentry/actions.go", line,
+             [("w", "http.ResponseWriter"), ("r", "*http.Request")]
+             + ([("runner", "*jobs.Runner")] if n == "handleV1Jobs" else []))
+      for n, line in (("handleV1Action", 10), ("handleV1Bulk", 18), ("handleV1Export", 23), ("handleV1Jobs", 27))],
+    go_sig("internal/dataentry.newActionOps", "internal/dataentry/actions_ops.go", 5, [("s", "Store")], "*actionOps"),
+    go_sig("internal/dataentry.actionOps.run", "internal/dataentry/actions_ops.go", 7,
+           [("ctx", "context.Context"), ("name", "string")], "error"),
+    go_sig("internal/dataentry.(*actionOps).authorize", "internal/dataentry/perms.go", 3,
+           [("ctx", "context.Context"), ("name", "string")], "error"),
+    go_sig("internal/dataentry.holdsActionPermission", "internal/dataentry/perms.go", 10,
+           [("ctx", "context.Context"), ("name", "string")], "bool"),
+    go_sig("internal/dataentry.(*exportOps).run", "internal/dataentry/export_ops.go", 5,
+           [("ctx", "context.Context")], "error"),
+    go_sig("internal/jobs.(*Runner).run", "internal/jobs/run.go", 3, [("ctx", "context.Context")], comp="jobs"),
+]
+
+
 class SecurityTest(unittest.TestCase):
     def test_names(self):
         self.assertEqual(short("internal/web/orders.go:getOrder"), "getOrder")
@@ -214,6 +302,42 @@ class SecurityTest(unittest.TestCase):
         m["components"]["auth"]["path"] = "lib/policy.ex"
         fs = run(security_unchecked_entry, m, files)
         self.assertEqual([f["evidence"]["entry"] for f in fs], ["shop/views.py:report"])
+
+    def test_unchecked_entry_follows_the_package(self):
+        go = {
+            "internal/dataentry/actions.go": GO_ACTIONS, "internal/dataentry/actions_ops.go": GO_OPS,
+            "internal/dataentry/perms.go": GO_PERMS, "internal/dataentry/export_ops.go": GO_EXPORT,
+            "internal/jobs/run.go": "package jobs\n\nfunc (r *Runner) run(ctx context.Context) {\n"
+                                    "\tholdsActionPermission(ctx, \"x\")\n}\n"}
+        m = model()
+        m["components"]["dataentry"] = {"name": "Dataentry", "path": "internal/dataentry", "kind": "internal"}
+        m["components"]["jobs"] = {"name": "Jobs", "path": "internal/jobs", "kind": "internal"}
+        m["signatures"] = GO_SIGS
+        m["declarations"] = [
+            decl("function", "internal/dataentry.holdsActionPermission", "guard", "authz",
+                 file="internal/dataentry/perms.go"),
+            *[decl("entrypoint", f"internal/dataentry.(*Handler).{n}", "auth", "authz",
+                   file="internal/dataentry/actions.go", name=n)
+              for n in ("handleV1Action", "handleV1Bulk", "handleV1Export", "handleV1Jobs")]]
+        fs = {f["evidence"]["entry"]: f for f in run(security_unchecked_entry, m, go)}
+        # handleV1Action → actionOps.run (actions_ops.go) → actionOps.authorize (perms.go) → the guard.
+        # handleV1Bulk gets its actionOps from newActionOps. handleV1Export calls run on a field of unknown
+        # type: two types have a run method, so it reads neither. handleV1Jobs calls run on a jobs.Runner.
+        self.assertEqual(sorted(fs), ["internal/dataentry.(*Handler).handleV1Export",
+                                      "internal/dataentry.(*Handler).handleV1Jobs"])
+        self.assertEqual(fs["internal/dataentry.(*Handler).handleV1Export"]["evidence"]["read"],
+                         ["handleV1Export"])
+        self.assertEqual(fs["internal/dataentry.(*Handler).handleV1Jobs"]["evidence"]["read"], ["handleV1Jobs"])
+        # The cap counts the functions of all files.
+        fs = {f["evidence"]["entry"]: f for f in run(security_unchecked_entry, m, go, max_functions=2)}
+        self.assertIn("internal/dataentry.(*Handler).handleV1Action", fs)
+        self.assertEqual(fs["internal/dataentry.(*Handler).handleV1Action"]["evidence"]["read"],
+                         ["handleV1Action", "actionOps.run"])
+        self.assertEqual(fs["internal/dataentry.(*Handler).handleV1Action"]["evidence"]["files"],
+                         ["internal/dataentry/actions_ops.go"])
+        # Without signatures it reads only the entry point's file.
+        del m["signatures"]
+        self.assertEqual(len(run(security_unchecked_entry, m, go)), 4)
 
     def test_open_entry(self):
         fs = run(security_open_entry)
@@ -445,6 +569,28 @@ class SecurityTest(unittest.TestCase):
                                       file="internal/vault/seal.go"))
         self.assertEqual(run(security_unguarded_path, m), [])
         self.assertEqual(len(run(security_unguarded_path, m, sink_targets=True)), 1)
+
+    def test_unguarded_path_gated_by(self):
+        m = self.paths_model()
+        m["components"]["visibility"] = {"name": "Visibility", "path": "internal/visibility", "kind": "internal"}
+        m["dependencies"].append({"from": "visibility", "to": "export"})  # it wraps export at wiring
+        m["declarations"].append(decl("component", "export", "gated_by", ["visibility", "nowhere"]))
+        # web does not depend on visibility, so nothing says it gets export wrapped.
+        fs = run(security_unguarded_path, m)
+        self.assertEqual([(f["evidence"]["from"], f["evidence"]["to"]) for f in fs], [("export", "vault")])
+        m["dependencies"] += [{"from": "orders", "to": "visibility"}]
+        self.assertEqual(run(security_unguarded_path, m), [])  # web → orders → visibility
+        m["dependencies"].remove({"from": "orders", "to": "visibility"})
+        m["declarations"] = [d for d in m["declarations"] if d["key"] != "gated_by"]
+        m["declarations"].append(decl("component", "vault", "gated_by", ["visibility"]))
+        self.assertEqual(len(run(security_unguarded_path, m)), 1)
+        m["dependencies"].append({"from": "web", "to": "visibility"})
+        self.assertEqual(run(security_unguarded_path, m), [])  # the target itself is gated
+        # gated_by is not a gateway: it does not change security.gateway_bypass.
+        self.assertEqual(run(security_gateway, m), [])
+        m["declarations"].append(decl("component", "vault", "gateway", ["audit"]))
+        self.assertEqual(sorted((f["evidence"]["from"], f["evidence"]["to"]) for f in run(security_gateway, m)),
+                         [("export", "vault"), ("web", "vault")])
 
 
 if __name__ == "__main__":

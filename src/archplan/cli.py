@@ -677,7 +677,7 @@ def cmd_annotators(a):
         aid = own.get(k)
         state = "" if aid in (None, annotators.BUILTIN) else \
             "" if annotators.trust_state(p.root, specs[aid])[0] else "  (not approved)"
-        print(f"  {k:<16} {aid or 'not read'}{state}")
+        print(f"  {k:<18} {aid or 'not read'}{state}")
     for m in conflicts + [f"{f}: {e}" for f, e in errors]:
         print(f"warning: {m}", file=sys.stderr)
 
@@ -719,6 +719,8 @@ def cmd_schema(a):
     if not sch:
         die("no database schema found: no Django models, Ecto schemas, db/schema.rb, schema.prisma, schema.sql or "
             "structure.sql (or use --sqlite FILE, or --postgres --url-env VAR)")
+    for w in sch.get("warnings") or []:
+        print(f"warning: {w}", file=sys.stderr)
     if a.json:
         return print(json.dumps(sch, indent=2, ensure_ascii=False))
     print(schema.text(sch, a.action))

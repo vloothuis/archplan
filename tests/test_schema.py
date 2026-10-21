@@ -562,6 +562,82 @@ class AccessTest(TempDir):
         self.assertIsNone(access.write_at("elixir", "Repo.insert(Order.changeset(x))", mp, True))
 
 
+class OwnersTest(TempDir):
+    """Owners from config.json schema.owners and from CREATE TABLE statements,
+    for a Go project whose DDL is in string literals and migrations."""
+
+    def setUp(self):
+        super().setUp()
+        write(self.root, {
+            "internal/sqlitedb/schema.go": '''\
+                package sqlitedb
+
+                const schema = `
+                CREATE TABLE IF NOT EXISTS "entities" (id TEXT PRIMARY KEY);
+                CREATE TABLE comments (id TEXT PRIMARY KEY);
+                `
+            ''',
+            "internal/sqlitedb/schema_test.go": 'package sqlitedb\n\nconst q = "CREATE TABLE relations (id int)"\n',
+            "internal/sqlitecomments/db.go": 'package sqlitecomments\n\n'
+                                             'var ddl = "create table if not exists comment_threads (id text)"\n',
+            "internal/store/pgstore/migrations/0001_init.sql": "CREATE TABLE public.entities (id text);\n"
+                                                               "CREATE TABLE relations (id text);\n",
+            "internal/store/store.go": "package store\n",
+        })
+        db = self.root / "rela.db"
+        con = sqlite3.connect(db)
+        con.executescript("CREATE TABLE entities (id TEXT PRIMARY KEY); CREATE TABLE comments (id TEXT);"
+                          "CREATE TABLE comment_threads (id TEXT); CREATE TABLE relations (id TEXT);"
+                          "CREATE TABLE tags (id TEXT);")
+        con.close()
+        self.live = {"kind": "sqlite", **live.sqlite(db)}
+        comps = ("sqlitedb", "sqlitecomments", "store", "store/pgstore")
+        self.model = {
+            "components": {c.split("/")[-1]: {"name": c, "path": f"internal/{c}"} for c in comps},
+            "files": {f"internal/{c}/{f}": {"component": c.split("/")[-1], "refs": []}
+                      for c, f in (("sqlitedb", "schema.go"), ("sqlitedb", "schema_test.go"),
+                                   ("sqlitecomments", "db.go"), ("store", "store.go"))}}
+
+    def owners(self, sch):
+        return {t: (mp["component"], mp["via"]) for t, mp in sch["maps"].items()}
+
+    def test_create_table(self):
+        sch = schema.build(self.root, self.model, sources=[], live=self.live)
+        # entities: sqlitedb and pgstore both create it. relations: the test file does not count.
+        self.assertEqual(self.owners(sch), {"comments": ("sqlitedb", "create"),
+                                            "comment_threads": ("sqlitecomments", "create"),
+                                            "relations": ("pgstore", "create")})
+        self.assertNotIn("warnings", sch)
+
+    def test_config_wins(self):
+        cfg = {"entities": "store", "comment*": "sqlitecomments", "nosuch": "store", "tags": "ghost"}
+        sch = schema.build(self.root, self.model, sources=[], live=self.live, owners=cfg)
+        self.assertEqual(self.owners(sch), {"entities": ("store", "config"),
+                                            "comments": ("sqlitecomments", "config"),
+                                            "comment_threads": ("sqlitecomments", "config"),
+                                            "relations": ("pgstore", "create")})
+        self.assertEqual(sch["warnings"], ["schema owners: no component 'ghost' in the model",
+                                           "schema owners: 'nosuch' match no table"])
+        # An exact name wins over a glob, whatever their order.
+        sch = schema.build(self.root, self.model, sources=[], live=self.live,
+                           owners={"comment*": "store", "comments": "sqlitedb"})
+        self.assertEqual(self.owners(sch)["comments"], ("sqlitedb", "config"))
+        self.assertEqual(self.owners(sch)["comment_threads"], ("store", "config"))
+        sch = schema.build(self.root, self.model, sources=[], live=self.live, owners=["entities"])
+        self.assertEqual(len(sch["warnings"]), 1)
+
+    def test_enrich_reads_the_config(self):
+        from types import SimpleNamespace
+        (self.root / ".archplan").mkdir()
+        mp = self.root / ".archplan/model.json"
+        mp.write_text(json.dumps(self.model))
+        p = SimpleNamespace(root=self.root, model_path=mp, path=lambda n: self.root / ".archplan" / n,
+                            config={"schema": {"owners": {"entities": "store"}}})
+        sch = schema.enrich(p, live=self.live, force=True)
+        self.assertEqual(sch["maps"]["entities"], {"component": "store", "via": "config"})
+        self.assertEqual(json.loads(mp.read_text())["schema"]["maps"]["entities"]["via"], "config")
+
+
 class Ctx:
     """The parts of the detector context the data detectors use."""
 

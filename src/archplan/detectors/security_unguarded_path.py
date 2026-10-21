@@ -4,7 +4,11 @@ protected data on which no component can call a guard.
 This is a check on the static component graph, so it also covers code that no
 trace runs. A component on the path can check access when it is a guard's
 component, depends directly on one, or is a declared gateway of the target.
-The entry point's own component is left out: it usually calls the guard and
+A component declared `gated_by: [X]` also counts, for an entry component
+that depends on X directly or through other components: the wiring hands
+its consumers the component wrapped in X, such as a reader wrapped in a
+visibility decorator, so no static path shows the check. The target itself
+can be gated_by. The entry point's own component is left out: it usually calls the guard and
 the store itself, and only a trace can tell in which order (see
 security.unguarded_sink). What remains are paths through other components,
 such as an export or a script runner, that reach the data while none of them
@@ -52,6 +56,24 @@ def path(succ: dict, start: str, goal: str, blocked, max_hops: int) -> list | No
     return None
 
 
+def gated(ctx) -> dict:
+    """{component: [the components that wrap it at wiring]} (component.gated_by), for components in the model."""
+    comps = ctx.components
+    return {d["target"]["id"]: [g for g in d.get("value") or [] if g in comps]
+            for d in decls(ctx, "component", "gated_by") if d["target"].get("id") in comps}
+
+
+def reach(succ: dict, start: str) -> set:
+    """start and every component it depends on, directly or through others."""
+    seen, todo = {start}, [start]
+    while todo:
+        for m in succ.get(todo.pop(), ()):
+            if m not in seen:
+                seen.add(m)
+                todo.append(m)
+    return seen
+
+
 def run(ctx, params) -> list:
     zone = zones(ctx)
     guard = {g["component"] for g in guards(ctx) if g["component"]}
@@ -70,13 +92,18 @@ def run(ctx, params) -> list:
         succ.setdefault(a, set()).add(b)
     checks = guard | {a for a, bs in succ.items() if bs & guard}
     gate = gateways(ctx)
+    wraps = gated(ctx)
     hits = {}
     for e in sorted(entries):
+        # Components that e gets wrapped in a gate it depends on.
+        reached = reach(succ, e)
+        wrapped = {c for c, xs in wraps.items() if reached & set(xs)}
         for x in sorted(succ.get(e, ())):
-            if x in checks or x in goals or x in entries:
+            if x in checks or x in goals or x in entries or x in wrapped:
                 continue
-            for t in sorted(goals - {e}):
-                p = path(succ, x, t, lambda n: n in checks or n in gate.get(t, ()), params["max_hops"])
+            for t in sorted(goals - {e} - wrapped):
+                p = path(succ, x, t, lambda n: n in checks or n in wrapped or n in gate.get(t, ()),
+                         params["max_hops"])
                 if p:
                     hits.setdefault((x, t), {"path": p, "entries": []})["entries"].append(e)
     # A path through a component that has its own finding repeats it.
@@ -92,12 +119,15 @@ def run(ctx, params) -> list:
             f"{name(ctx, x)} reaches {name(ctx, t)} with no component on the way that can check access.",
             f"Path: {chain}. It starts from {', '.join(name(ctx, e) for e in es)}, which "
             f"{'has' if len(es) == 1 else 'have'} entry points. No component on it is a guard's, depends on "
-            f"one ({', '.join(name(ctx, g) for g in sorted(guard))}) or is a gateway of {name(ctx, t)}.",
+            f"one ({', '.join(name(ctx, g) for g in sorted(guard))}), is a gateway of {name(ctx, t)} "
+            "or is gated_by a component the entry component depends on.",
             "weak", f"static path: {chain}", [*es, *p], [],
             {"from": x, "to": t, "path": p, "entries": es, "guards": sorted(guard),
              "moves": [f"Let {name(ctx, x)} reach {name(ctx, t)} through a component that checks access.",
                        f"If {name(ctx, x)} checks access through a caller, declare that caller a gateway of "
-                       f"{name(ctx, t)}."]},
+                       f"{name(ctx, t)}.",
+                       f"If the wiring hands consumers {name(ctx, x)} wrapped in a component that checks access, "
+                       f"declare `gated_by: [that component]` on {name(ctx, x)}."]},
             focus=[focus("components", [*es, *p], list(zip(p, p[1:])))],
             weight=w))
     return out
