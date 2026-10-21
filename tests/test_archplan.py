@@ -2975,6 +2975,32 @@ class NewDetectorsTest(TempProject):
             "head": "abc", "since_days": 365, **hotspots.analyse([c(i) for i in range(3)], m)}}))
         self.assertEqual(self.found("boundaries.unrelated_parts"), [])
 
+    def test_large_active_file(self):
+        m = concept_model()
+        big = "lib/orders/order.ex"
+        for f in ("lib/orders/tax.ex", "lib/orders/vat.ex", "lib/orders/mail.ex", "lib/shipping/label.ex"):
+            m["files"][f] = {"component": f.split("/")[1], "refs": []}
+        self.p.model_path.write_text(json.dumps(m))
+        (self.root / "lib/orders").mkdir(parents=True)
+        (self.root / big).write_text("x\n" * 500)
+        c = lambda i, subject, *fs: (f"o{i:02d}".ljust(40, "0"), "a@x", "2026-01-01", [big, *fs], subject)
+        commits = ([c(i, f"tax {i}", "lib/orders/tax.ex", "lib/orders/vat.ex") for i in range(5)]
+                   + [c(10 + i, f"fix label {i}", "lib/shipping/label.ex") for i in range(4)]
+                   + [c(20 + i, f"alone {i}") for i in range(3)])
+        self.p.path("hotspots.json").write_text(json.dumps({"key": {}, "result": {
+            "head": "abc", "since_days": 365, **hotspots.analyse(commits, m)}}))
+        (f,) = self.found("history.large_active_file")
+        ev = f["evidence"]
+        self.assertEqual((ev["file"], ev["lines"], ev["commits"], ev["alone"], ev["bug_fixes"]), (big, 501, 12, 3, 4))
+        self.assertEqual([(r["partners"], r["commits"], r["components"]) for r in ev["responsibilities"]],
+                         [(["lib/orders/tax.ex", "lib/orders/vat.ex"], 5, ["orders"]),
+                          (["lib/shipping/label.ex"], 4, ["shipping"])])
+        self.assertEqual(ev["responsibilities"][1]["subjects"], ["fix label 0", "fix label 1", "fix label 2"])
+        self.assertIn("orders/order.ex (501 lines, 12 commits) changes for 2 reasons", f["title"])
+        self.assertIn("into its own module in shipping", ev["moves"][1])
+        (self.root / big).write_text("x\n" * 50)  # small: not a finding
+        self.assertEqual(self.found("history.large_active_file"), [])
+
     def test_synonyms_glossary(self):
         from archplan.detectors.types_synonyms import synonym_findings
         fs = [{"name": n} for n in ("first_name", "last_name", "email", "phone", "street")]
