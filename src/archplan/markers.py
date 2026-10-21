@@ -8,7 +8,10 @@ attributes and other comments allowed in between:
   def health(request): ...
 
 `guard` (or `guard=authn`, `guard=authz`) declares function.guard, `sink=write`
-or `sink=read` function.sink, `auth=required|authz|none` entrypoint.auth. A
+or `sink=read` function.sink, `auth=required|authz|none` entrypoint.auth.
+`validates` (or `validates=sql` and the other INPUTS), `interprets=sql`,
+`source` and `trusts` declare the input checks: function.validates,
+function.interprets, function.source and function.trusts. A
 component's zone is the `zone:` line in the front matter of the GLOSSARY.md
 in its folder, its gateways the `gateway:` line (`gateway: [a, b]`), and the
 components that wrap it at wiring the `gated_by:` line (`gated_by: [a]`).
@@ -47,6 +50,13 @@ TOKEN = re.compile(r'([a-z_]+)(?:=("(?:[^"\\]|\\.)*"|\S+))?')
 # cannot become a magic comment (coding:, frozen_string_literal:) or end a PHP comment (?>).
 UNSAFE = re.compile(r"[^\w .,;'()/?!&+%#@-]")
 AUTH = ("required", "authz", "none")
+# What a function reads its input as, when it runs or resolves it: a query, a
+# command, a file path, markup, an address, code or a template, or serialized objects.
+INPUTS = ("sql", "shell", "path", "html", "url", "code", "deserialize")
+# The marker word of each key that marker comments hold.
+WORDS = {"function.guard": "guard", "function.sink": "sink", "function.validates": "validates",
+         "function.interprets": "interprets", "function.source": "source", "function.trusts": "trusts",
+         "entrypoint.auth": "auth"}
 NOT_NAMES = frozenset("if for while switch return catch elif else when case unless until match new".split())
 STATEMENTS = frozenset("return await yield throw raise new else elif if for while do case when not and or in is "
                        "print puts assert del go defer".split())
@@ -138,6 +148,12 @@ def parse_marker(body: str) -> tuple:
             keys["function.guard"] = v or True
         elif k == "sink" and v in ("write", "read"):
             keys["function.sink"] = v
+        elif k == "validates" and v in (None, *INPUTS):
+            keys["function.validates"] = v or True
+        elif k == "interprets" and v in INPUTS:
+            keys["function.interprets"] = v
+        elif k in ("source", "trusts") and v is None:
+            keys[f"function.{k}"] = True
         elif k == "auth" and v in AUTH:
             keys["entrypoint.auth"] = v
         elif k == "reason" and v:
@@ -314,7 +330,7 @@ def read(root: Path, model: dict, keys, exclude=None) -> tuple:
                     value = _flow(v[0]) if k in LISTS else _scalar(v[0])
                     decls.append({"target": {"kind": "component", "id": cid}, "key": FRONT[k], "value": value,
                                   "file": rel, "line": v[1]})
-    if keys & {"function.guard", "function.sink", "entrypoint.auth"}:
+    if keys & set(WORDS):
         for f in list_files(root, exclude):
             prefix = comment_prefix(f)
             try:
@@ -351,8 +367,7 @@ def marker_line(indent: str, prefix: str, path: str, body: str) -> str:
 
 
 def token_of(key: str, value, reason) -> str:
-    token = {"function.guard": "guard" if value is True else f"guard={value}",
-             "function.sink": f"sink={value}"}.get(key, f"auth={value}")
+    token = WORDS[key] if value is True else f"{WORDS[key]}={value}"
     if reason:
         token += ' reason="' + UNSAFE.sub(" ", str(reason)) + '"'
     return token
@@ -370,7 +385,7 @@ def write_one(base: Path, model: dict, ch: dict) -> dict:
     try:
         if full in FRONT:
             return write_front(base, model, ch, full)
-        if full in ("function.guard", "function.sink", "entrypoint.auth"):
+        if full in WORDS:
             return write_marker(base, ch, full)
     except (OSError, UnicodeDecodeError) as e:
         return {"status": "conflict", "note": str(e)[:200]}
@@ -442,7 +457,7 @@ def write_marker(base: Path, ch: dict, full: str) -> dict:
     j = find_declaration(lines, at)
     if j is None:
         return {"status": "conflict", "note": f"{at.get('name') or 'the declaration'} is not in {rel} anymore"}
-    top, word = preamble(lines, j, prefix), {"function.guard": "guard", "function.sink": "sink"}.get(full, "auth")
+    top, word = preamble(lines, j, prefix), WORDS[full]
     go = rel.endswith(".go")
     existing = []
     for k in range(top, j):

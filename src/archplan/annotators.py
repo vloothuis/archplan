@@ -36,12 +36,13 @@ from .core.safeio import read_file
 from .detectors.external import NotRun, run_json, safe_path, text_of
 
 KEYS = ("component.zone", "component.gateway", "component.gated_by", "function.guard", "function.sink",
-        "entrypoint.auth")
+        "function.validates", "function.interprets", "function.source", "function.trusts", "entrypoint.auth")
 KINDS = ("component", "function", "entrypoint")
 BUILTIN = "builtin"
 ID = re.compile(r"[a-z][a-z0-9_-]{0,40}")
 ZONE = re.compile(r"[a-z][a-z0-9_-]{0,40}")
 COMPONENT = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./@-]{0,199}")
+ARITY = re.compile(r"/\d+$")
 MAX_GATEWAYS = 20
 MAX_ENTRY = 64 * 1024
 MAX_DECLARATIONS = 5000
@@ -64,6 +65,12 @@ def valid_value(key: str, v) -> bool:
         return v is True or v in GUARDS
     if key == "function.sink":
         return v in SINKS
+    if key == "function.validates":
+        return v is True or v in markers.INPUTS
+    if key == "function.interprets":
+        return v in markers.INPUTS
+    if key in ("function.source", "function.trusts"):
+        return v is True
     if key == "entrypoint.auth":
         return v in ("required", "authz", "none")
     return False
@@ -183,7 +190,7 @@ class Index:
         for i, x in items:
             if not isinstance(i, str) or not isinstance(x, dict) or not isinstance(x.get("file"), str):
                 continue
-            name = x.get("name") or i.rsplit(".", 1)[-1]
+            name = ARITY.sub("", x.get("name") or i.rsplit(".", 1)[-1])  # Elixir names carry it: show/2
             at = {"file": x["file"], "line": x.get("line") if isinstance(x.get("line"), int) else None, "name": name}
             self.by_id.setdefault(i, at)
             self.by_name[(x["file"], name)].append((at["line"] or 0, i))

@@ -5,7 +5,9 @@ requests pass, the guards they call, the sinks they reach and the zones they
 cross, and whether a test shows it refusing a caller. Its risk adds what it
 exposes (a write sink most, then a read sink; auth=authz more than
 auth=required) to its gaps (no guard on its traced requests, no traced
-refusal).
+refusal, input that reaches a function declared `interprets` or `trusts`
+before any check). For such input it also lists the calls that pass it on
+(see security.unchecked_input), for review.
 
 Turned around, a changed file touches the entry points that declare it as
 their entry point, guard or sink, or whose requests pass its component.
@@ -20,12 +22,17 @@ import re
 
 from .core.hotspots import NotGit, git
 from .detectors.security_common import call_file, component_of, decls, guards, guards_off, participant, target, zones
+from .detectors.security_unchecked_input import declared, inputs, review, walk
 from .detectors.security_unguarded_entry import guarded, hit, runs, turned_away
 from .detectors.security_untested_denial import PARAMS, shows_refusal
 
 EXPOSURE = {"write": 30, "read": 20}
 AUTH = {"authz": 20, "required": 15}
-GAPS = {"unguarded": 30, "no refusal": 20}
+GAPS = {"unguarded": 30, "no refusal": 20, "unchecked input": 25}
+# Input to send to an entry point that reaches a function of this kind unchecked.
+HOSTILE = {"sql": "holds a quote", "shell": "holds a ; or a $(...)", "path": "holds ../",
+           "html": "holds a <script> tag", "url": "names another host", "code": "holds code",
+           "deserialize": "holds a crafted object", "trusts": "is malformed"}
 
 
 def entries(ctx) -> list:
@@ -33,6 +40,8 @@ def entries(ctx) -> list:
     components, guards, sinks, zones, files, sequences, gaps, risk}]."""
     sinks = [(target(ctx, d), d.get("value")) for d in decls(ctx, "function", "sink")]
     every, zone = guards(ctx), zones(ctx)
+    ins = inputs(ctx)
+    checks = declared(ins)
     seqs = ctx.model.get("sequences") or {}
     titles = re.compile(PARAMS["titles"], re.I)
     by = {}
@@ -45,6 +54,7 @@ def entries(ctx) -> list:
         e = by.setdefault(key, {"entry": key, "auth": d.get("value") if d else None,
                                 "component": t["component"] if t else participant(ctx, msgs[0].get("to")),
                                 "components": [], "guards": [], "sinks": {}, "files": [], "sequences": [],
+                                "unchecked": {}, "calls": [],
                                 "guarded": False, "refused": False, "judged": False})
         if sid not in e["sequences"]:
             e["sequences"].append(sid)
@@ -64,16 +74,23 @@ def entries(ctx) -> list:
         files = [t["file"] if t else None] + [g["file"] for g in used] \
             + [s["file"] for s, _ in sinks if s["id"] in e["sinks"]] + [call_file(ctx, m) for m in msgs]
         e["files"] = list(dict.fromkeys(e["files"] + [f for f in files if f]))
+        if checks:
+            for _, t, kind, chain in walk(ctx, ins, key, msgs):
+                e["unchecked"][t["id"]] = kind
+                e["calls"] += chain
     out = []
     for e in by.values():
         e["zones"] = list(dict.fromkeys(zone[c] for c in e["components"] if zone.get(c)))
         ok, judged = e.pop("guarded"), e.pop("judged")
         e["gaps"] = (["unguarded"] if every and judged and not ok and e["auth"] != "none" else []) \
-            + (["no refusal"] if ok and e["auth"] in ("required", "authz") and not e["refused"] else [])
+            + (["no refusal"] if ok and e["auth"] in ("required", "authz") and not e["refused"] else []) \
+            + (["unchecked input"] if e["unchecked"] else [])
         worst = "write" if "write" in e["sinks"].values() else "read" if e["sinks"] else None
         e["risk"] = (EXPOSURE.get(worst, 5) + AUTH.get(e["auth"], 10) + 5 * max(0, len(e["zones"]) - 1)
                      + sum(GAPS[g] for g in e["gaps"]))
         e["sinks"] = [{"id": k, "kind": v} for k, v in e["sinks"].items()]
+        e["unchecked"] = [{"id": k, "kind": v} for k, v in e["unchecked"].items()]
+        e["review"] = review(ctx, e.pop("calls"))
         out.append(e)
     return sorted(out, key=lambda e: (-e["risk"], e["entry"]))
 
@@ -84,7 +101,9 @@ def touched(ctx, es: list, files: list) -> list:
     comps = {f: component_of(ctx, f) for f in files}
     out = []
     for e in es:
-        why = [f"{f} is on its path" for f in files if f in e["files"]]
+        review = {r.get("file") for r in e["review"]}
+        why = [f"{f} passes its unchecked input on" for f in files if f in review]
+        why += [f"{f} is on its path" for f in files if f in e["files"] and f not in review]
         why += [f"{f} is in {comps[f]}, which its requests pass" for f in files
                 if f not in e["files"] and comps[f] in e["components"]]
         if why:
@@ -107,8 +126,12 @@ def plan(es: list) -> list:
             tests.append(f"Make {e['guards'][0] if e['guards'] else 'its guard'} refuse the caller"
                          + (f"; expect {', '.join(s['id'] for s in e['sinks'])} not to be called." if e["sinks"]
                             else "."))
+        if "unchecked input" in e["gaps"]:
+            tests.append("Send it input that " + " or ".join(dict.fromkeys(HOSTILE[u["kind"]] for u in e["unchecked"]))
+                         + f"; expect a refusal before {', '.join(u['id'] for u in e['unchecked'][:3])}.")
         out.append({"entry": e["entry"], "auth": e["auth"], "risk": e["risk"], "gaps": e["gaps"],
-                    "writes": writes, "start_from": e["sequences"][0], "tests": tests})
+                    "writes": writes, "start_from": e["sequences"][0], "tests": tests,
+                    **({"review": e["review"][:20]} if e["unchecked"] else {})})
     return out
 
 
@@ -189,4 +212,7 @@ def text(rep: dict) -> str:
     for p in rep["plan"]:
         lines.append(f"  {p['entry']} (start from {p['start_from']}):")
         lines += [f"    - {t}" for t in p["tests"]]
+        if p.get("review"):
+            names = ", ".join(r["function"] for r in p["review"][:8]) + (", …" if len(p["review"]) > 8 else "")
+            lines.append(f"    Review first, as they pass its unchecked input on: {names}")
     return "\n".join(lines)

@@ -224,7 +224,8 @@ progress.
 - After a change, call `refresh_model`. The editor reloads the code's model,
   rebases the target onto it, and the plan shrinks by what you did. Report in
   the thread what changed and what is left.
-- To declare a component's trust zone, a guard function or whether an entry
+- To declare a component's trust zone, a guard function, an input check
+  (`validates`, `interprets`, `source`, `trusts`) or whether an entry
   point needs auth, call `annotate` instead of editing marker comments by
   hand. It writes in the project's own form and checks the result. Make a
   change it reports as unsupported, conflict or failed by hand.
@@ -232,7 +233,9 @@ progress.
   `get_blast_radius` with `diff` (or `files`). It lists the entry points
   the change touches and the security tests they lack. Add a test that makes
   the guard refuse a caller where `plan` asks for one, and run it with
-  tracing, so `security.untested_denial` sees the refusal.
+  tracing, so `security.untested_denial` sees the refusal. When an entry
+  point has unchecked input, its `review` lists the calls that pass that
+  input on: read those first when they change.
 
 ## Commands
 

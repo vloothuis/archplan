@@ -530,9 +530,10 @@ mark as noise go into `.archplan/vocabulary.json`.
 Some facts are decisions, not something an exporter can find: the trust zone
 a component is in, the components through which others must reach it (its
 gateways), the components that wrap it at wiring (`gated_by`), which
-functions are guards (they authenticate, authorize
-or validate), which functions are sinks (they write or read data that needs
-a permission check first), and which entry points need an authenticated
+functions are guards (they authenticate or authorize), which functions are
+sinks (they write or read data that needs a permission check first), how
+outside input is checked (see [Input checks](#input-checks)), and which
+entry points need an authenticated
 caller (`auth=required`) or also a check of what that caller may do, such as
 read the record the request names (`auth=authz`). These
 declarations live in the repository, next to the code. After every export,
@@ -556,6 +557,33 @@ the reader as checked for an entry component that depends on `visibility`,
 directly or through other components. Unlike `gateway`, it does not ask
 other components to stay away, so `security.gateway_bypass` ignores it.
 
+### Input checks
+
+Four keys say how outside input travels through the code:
+
+- `validates` marks a function that checks or parses input, such as a form
+  schema or a changeset. `validates=html` marks one that makes input safe for
+  one kind only, such as an escaper.
+- `interprets=<kind>` marks a function that runs or resolves its input as
+  `sql`, `shell`, `path`, `html`, `url`, `code` or `deserialize`. Unchecked
+  input can change what such a function does.
+- `source` marks a function that brings in outside input other than a
+  request, such as a webhook body or a queue message.
+- `trusts` marks a function that assumes its caller checked the input.
+
+```go
+//archplan:interprets=sql
+func (s *Store) RawQuery(q string) (Rows, error) { ... }
+```
+
+`security.unchecked_input` follows each trace from its entry point, or from
+a source, and reports a function declared `interprets` or `trusts` that the
+input reaches before any validator. A trace shows calls, not values, so
+the finding says where to look. It is not proof that the input is unsafe.
+Its evidence lists the calls the function runs under, which pass the
+unchecked input on to it. Read those first. `archplan blast` shows the same
+list per entry point.
+
 A project can read and write them in its own form instead, such as its
 language's annotations or database column comments, with an annotator
 plugin in `.archplan/annotators/`. Each key has one owner.
@@ -573,6 +601,7 @@ The security detectors read the declarations:
 | `security.unguarded_sink` | a trace that calls a write sink before any authorization guard (`guard` or `guard=authz`), strong; or a read sink with no such guard anywhere in the trace, medium. Calls inside a guard are its own. A `guard=authn` guard does not count. Needs sequences. |
 | `security.untested_denial` | an entry point declared `auth=required` or `auth=authz` whose traced requests pass the guard it needs, but none shows the guard or the entry point refusing a caller (a call `outcome` such as `raise`, `error`, `halt` or `status:403`, or a test title such as "rejects another user"). Names the guard to make fail and the sinks the request reaches. Medium; weak when the traces record no outcomes. Needs sequences. |
 | `security.risk_hotspot` | a component in the top quarter by commits that lies on the traced path of entry points that reach sinks. Its weight follows the riskiest of those entry points (see Blast radius). Needs sequences and the cached `archplan hotspots`. |
+| `security.unchecked_input` | a trace that passes outside input to a function declared `interprets=<kind>` before any function declared `validates` (or `validates=<kind>`), or to a function declared `trusts` before any validator. Input starts unchecked at the entry point of each step of a test, and at a call of a function declared `source`. Its weight follows the kind: `shell` and `code` most. Evidence lists the calls that pass the input on to that function. Medium or strong. Needs sequences. |
 | `security.untraced` | a declared guard or entry point that no trace calls, in a component the traces do visit: a guard wired nowhere, or a route nothing reaches. Weak. Needs sequences. |
 | `security.open_entry` | an entry point declared `auth=none` without a reason |
 | `security.zone_dependency` | a dependency from a more trusted zone to a less trusted one, or one that skips a declared zone |
@@ -589,14 +618,17 @@ default.
 its requests pass, its guards, the sinks it reads or writes and the zones it
 crosses. Each entry point gets a risk score. A write sink adds the most,
 then a read sink, then `auth=authz`. Gaps add more: no guard on its traced
-requests, or no test that shows a refusal. The output ends with the
-security tests to add, by risk.
+requests, no test that shows a refusal, or input that reaches a function
+declared `interprets` or `trusts` unchecked. The output ends with the
+security tests to add, by risk. For an entry point with unchecked input, it
+also lists the calls that pass that input on, to review first.
 
 `archplan blast --diff develop` (or `archplan blast FILE ...`) lists the
 entry points that the change touches, so you can review those paths and run
 their tests first. A file touches an entry point when it declares the entry
 point, a guard or a sink on its path, or when it is in a component that the
-entry point's requests pass. The agent gets the same from `get_blast_radius`.
+entry point's requests pass. A changed file that passes an entry point's
+unchecked input on is named first. The agent gets the same from `get_blast_radius`.
 
 With the cached `archplan hotspots`, `security.risk_hotspot` marks the
 components that change often (the top quarter by commits, at least 5) and

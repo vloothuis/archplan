@@ -90,7 +90,12 @@ TOOLS = [
                     "(component.gated_by: a list of component ids), a function "
                     "that authenticates (guard authn), authorizes (guard authz) or both (guard true) "
                     "(function.guard), a function that writes or reads data that needs an authorization "
-                    "check first (function.sink: write or read), or whether an entry point "
+                    "check first (function.sink: write or read), a function that checks or parses outside "
+                    "input (function.validates: true, or the one kind it makes safe), one that runs or resolves "
+                    "its input as sql, shell, path, html, url, code or deserialize (function.interprets), one "
+                    "that brings in outside input other than a request, such as a webhook body "
+                    "(function.source: true), one that assumes its caller checked the input "
+                    "(function.trusts: true), or whether an entry point "
                     "needs an authenticated caller (entrypoint.auth: required), also a check of what that caller may "
                     "do (authz), or neither (none, with a reason). "
                     "The project's annotator writes them in its own form (marker comments by default) in a "
@@ -106,10 +111,12 @@ TOOLS = [
                  "id": {"type": "string", "description": "a component id, or a function's id from the model's "
                                                          "signatures or types, or <file>:<name>"}},
                  "required": ["kind", "id"]},
-             "key": {"type": "string", "enum": ["zone", "gateway", "gated_by", "guard", "sink", "auth"]},
+             "key": {"type": "string", "enum": ["zone", "gateway", "gated_by", "guard", "sink", "validates",
+                                                "interprets", "source", "trusts", "auth"]},
              "value": {"description": "zone: an id such as internal; gateway and gated_by: a list of component ids; "
-                                      "guard: true, authn or authz; "
-                                      "sink: write or read; auth: required, authz or none"},
+                                      "guard: true, authn or authz; sink: write or read; validates: true or a "
+                                      "kind; interprets: sql, shell, path, html, url, code or deserialize; "
+                                      "source and trusts: true; auth: required, authz or none"},
              "reason": {"type": "string"}},
              "required": ["op", "target", "key"]}},
          "apply": {"type": "boolean", "default": False}},
@@ -126,7 +133,9 @@ TOOLS = [
     {"name": "get_blast_radius",
      "description": "What each traced entry point reaches: the components its requests pass, its guards, the sinks "
                     "it reads or writes, its zones, its gaps (no guard on its traced requests, no test that shows "
-                    "a refusal) and a risk score. With files or diff (a git ref such as develop), the entry points "
+                    "a refusal, input that reaches a function declared interprets or trusts unchecked) and a risk "
+                    "score; unchecked lists those functions, review the calls that pass the input on to them, to "
+                    "read first. With files or diff (a git ref such as develop), the entry points "
                     "the change touches, by risk: review those paths first. plan lists the security tests to add, "
                     "by risk; hotspots the components that change often on paths to sinks. Needs traced sequences.",
      "inputSchema": {"type": "object", "properties": {
