@@ -540,7 +540,7 @@ Notes in the target model become open questions in the plan.
 | policy | `.go-arch-lint.yml`, depguard | `boundary` deps and exports | import-linter contracts | dependency-cruiser `forbidden` rules |
 | types | `go/types` | structs, `@type`, behaviours as interfaces | classes, dataclasses, `Protocol` and ABCs as interfaces | classes, interfaces, type aliases, enums, exported functions; React components as functions, Vue and Svelte files as modules |
 | implements | structural (`types.Implements`) | `@behaviour` | base classes, Protocol conformance | `extends` and `implements` |
-| sequences | seqtrace, OpenTelemetry | `:telemetry`, OpenTelemetry | OpenTelemetry, `sys.setprofile` | OpenTelemetry |
+| sequences | seqtrace, OpenTelemetry | `archplan trace-elixir`, OpenTelemetry | `archplan trace-python`, OpenTelemetry | OpenTelemetry |
 | routes | `net/http` `ServeMux` `Handle` and `HandleFunc` | | | |
 
 The `lite` exporter (`archplan export-lite`) covers Java, Kotlin, Scala, C#,

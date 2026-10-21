@@ -201,6 +201,7 @@ In a message, `@[Label](anchor)` mentions a model item, for example
 | `archplan hook` | hook: report threads that wait on the agent |
 | `archplan export-python` | the built-in Python exporter |
 | `archplan export-elixir`, `archplan trace-elixir` | the Elixir exporter and test tracer |
+| `archplan trace-python [-C DIR] [--python PY] [pytest\|unittest\|django] [ARGS...]` | run Python tests and record call sequences |
 | `archplan export-ts [-C DIR]` | the TypeScript and JavaScript exporter (needs `node`) |
 | `archplan export-lite [DIR] [--language L]` | the regex-based exporter for Java, Kotlin, C#, Ruby, PHP, Rust, Swift and Scala |
 | `archplan exporters [--json]` | the exporters that match this repository, whether they are installed, and install hints |
@@ -650,7 +651,8 @@ An exporter writes an [archmodel/1](src/archplan/format/archmodel.md) file.
   `ServeMux`.
 - **Python** (`pyproject.toml`, `setup.py`): `archplan export-python`, built in.
   It reads import-linter `forbidden` contracts as rules, and Django model
-  fields as type fields.
+  fields as type fields. `archplan trace-python` runs the tests and records
+  call sequences. See [Python tracing](#python-tracing).
 - **Elixir** (`mix.exs`, in the root or a subdirectory):
   `archplan export-elixir`, which needs `mix`. `archplan trace-elixir` runs
   tests and records call sequences. See [`exporters/elixir`](exporters/elixir).
@@ -675,6 +677,71 @@ them to find concepts the code has no type for.
   `require` and Zeitwerk constants, Rust `mod` and `use`) and lists types
   with simple fields. It misses calls and anything a compiler would infer;
   see [its limits](src/archplan/format/archmodel.md).
+
+### Python tracing
+
+`archplan trace-python` runs a Python project's tests with a tracer and
+writes one trace file per test to `.archplan/sequences`. `archplan export`
+turns them into sequences.
+
+```sh
+archplan trace-python                        # all tests, with the runner it picks
+archplan trace-python pytest tests/api -k order
+archplan trace-python unittest discover -s tests
+archplan trace-python -C src django openzaak.components.zaken --keepdb
+```
+
+It runs the tests with the project's own python: the active virtual
+environment, then `.venv` or `venv`, then `python3`. Use `--python` to name
+another one. Without a runner, it picks one as follows:
+
+- pytest, when that python has it. For a Django project (one with
+  `manage.py`), pytest-django must be installed too.
+- `manage.py test`, for a Django project without pytest-django.
+- unittest, otherwise.
+
+pytest also runs unittest classes, and Django's test runner is built on
+unittest, so the tracer records tests in all three. Arguments after the
+runner go to it.
+
+What it records:
+
+- Calls of functions in the project's own files. It skips virtual
+  environments, test files, migrations, lambdas and dunder methods other than
+  `__call__`. Calls within one module are not kept.
+- Only while a test function runs, not its fixtures or `setUp`. Calls in other
+  threads, such as those of a live server, count for the running test.
+- Module and qualified name only. Argument and return values are never
+  recorded. A call that may have refused gets the kind of its outcome:
+  `raise` (Python 3.12 and later), `false` or `status:4xx`.
+- A call reached through a web framework's request handling gets the actor
+  `Client`. A call from the test itself gets `Test`. When a test makes
+  requests, only the requests are kept, not the test's own calls such as
+  factories that create records. Set `ARCHPLAN_TRACE_TEST=1` to keep both.
+- The trace's entry is the view that the framework dispatches to. This can be
+  a Django view, a DRF viewset action such as `ZaakViewSet.create`, a Ninja,
+  Flask or FastAPI endpoint, or an `http.server` handler. It is named even
+  when DRF supplies the handler or refuses the request first. Without a
+  view, the entry is the first request. A test that makes no requests has no
+  entry, so the security detectors do not take its first call for an entry
+  point.
+
+The export keeps only calls that cross a component boundary. It cuts
+sequences at 400 messages and 12 levels, and merges repeated calls into a
+loop.
+
+On Python 3.12 and later the tracer uses `sys.monitoring`. It turns off
+events for code outside the project, so library code runs at full speed.
+archplan's own tests took about 1.6 times as long with tracing. Older
+versions use `sys.setprofile`, which sees every call.
+
+Limits:
+
+- Django's `--parallel` mode and pytest-xdist workers started with `spawn` do
+  not load the tracer. Run those tests in one process.
+- A request a test sends to a server in another process is not traced.
+- Before Python 3.11, the tracer finds a method's class from `self` or `cls`.
+  A static method gets its bare name.
 
 ### Excluding paths
 

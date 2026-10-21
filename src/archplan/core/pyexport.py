@@ -21,6 +21,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+from . import pytrace
 from .safeio import GIT_SAFE, read_file
 from .safeio import files as safe_files
 
@@ -381,7 +382,7 @@ def export(root: Path, packages: list[str] | None = None, granularity: str = "au
         r["from"], r["to"] = comp_for(r["from"]), comp_for(r["to"])
     signatures, literals, enums = values_of(mods, comp_of_mod)
     ref, dirty = git_ref(root)
-    sequences = read_sequences(root)
+    sequences = {**pytrace.sequences(root, comp_for), **read_sequences(root)}
     capabilities = ["components", "types", "fields", "deps", "files", "signatures", "literals"]
     if sequences:
         capabilities.append("calls")

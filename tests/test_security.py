@@ -508,7 +508,8 @@ class SecurityTest(unittest.TestCase):
         self.assertIn("archplan trace-elixir", hint({"languages": ["elixir"]}))
         self.assertIn("seqtrace", hint({"languages": ["go"]}))
         self.assertNotIn("trace-elixir", hint({"languages": ["go"]}))
-        for source in ({"languages": ["python"]}, {}, None):
+        self.assertIn("archplan trace-python", hint({"languages": ["python"]}))
+        for source in ({"languages": ["typescript"]}, {}, None):
             h = hint(source)
             self.assertIn("exporter-plugins.md", h)
             self.assertNotIn("elixir", h)

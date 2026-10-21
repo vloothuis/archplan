@@ -37,6 +37,9 @@ Run `archplan status`. If it says there is no project:
    Elixir and Go exporters, which run code from the repository), ask the
    user to read the command and run `archplan trust` in a terminal. Never
    try to approve it yourself.
+   Sequences come from the tests: `archplan trace-python` (pytest, unittest
+   or Django) or `archplan trace-elixir` records them, and the next export
+   reads them. Both run the project's tests, so ask the user first.
 3. Ask whether `.archplan/` should be committed. Committing it shares the
    target, plan and threads with the team; `server.json` and logs stay
    ignored.
