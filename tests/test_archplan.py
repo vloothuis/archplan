@@ -2627,13 +2627,16 @@ class NewDetectorsTest(TempProject):
         t = lambda c, n, *fs: (f"{c}.{n}", {"name": n, "component": c, "kind": "struct",
                                              "file": f"internal/{c}/{n.lower()}.go", "fields": list(fs)})
         types = dict([t("store", "Relation", f("RecordID", "int64"), f("TargetID"), f("ParentTargetID")),
+                      t("store", "Copy", f("SourceID"), f("TargetID")),  # a role pair, not comments' Target
                       t("filter", "Record", f("ID"), f("Type")), t("audit", "Record", f("Op")),
                       t("comments", "Target", f("ID"), f("Type"))])
         self.p.model_path.write_text(json.dumps({"format": "archmodel/1", "components": comps, "types": types,
                                                  "dependencies": []}))
         fs = {f["evidence"]["owner"]: f for f in self.found("concepts.raw_ids")}
         self.assertEqual(set(fs), {None, "comments"})
-        self.assertEqual(fs[None]["title"], "store holds raw ids whose concept is unclear: RecordID.")
+        self.assertEqual(fs[None]["title"], "store holds raw ids whose concept is unclear: RecordID, TargetID.")
+        self.assertEqual([(x["type"], x["field"]) for x in fs[None]["evidence"]["fields"]],
+                         [("store.Copy", "TargetID"), ("store.Relation", "RecordID")])
         self.assertEqual((fs[None]["evidence"]["concepts"], fs[None]["components"]), ([], ["store"]))
         self.assertEqual([x["field"] for x in fs["comments"]["evidence"]["fields"]], ["TargetID"])  # not ParentTargetID
         self.assertEqual(fs["comments"]["title"], "store holds raw ids of Target from comments: TargetID.")

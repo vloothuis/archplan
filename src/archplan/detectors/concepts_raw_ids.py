@@ -19,6 +19,9 @@ CONCEPT_KINDS = ("class", "struct", "record", "interface")
 NUMBER_ID = {"id", "integer", "int", "int32", "int64", "uint", "uint32", "uint64", "long", "bigint", "number",
              "positiveinteger", "biginteger", "positivebiginteger", "autofield", "bigautofield", "pos_integer",
              "non_neg_integer"}
+# Both ends of a relation: a type with source_id and target_id names roles, not concepts.
+ROLE_PAIRS = (("source", "target"), ("from", "to"), ("src", "dst"), ("parent", "child"), ("old", "new"),
+              ("left", "right"), ("origin", "destination"))
 
 
 def owners(ctx) -> dict:
@@ -60,6 +63,8 @@ def run(ctx, params) -> list:
             continue
         fields = [f for f in t.get("fields") or [] if f.get("name")]
         typed = {key(f["name"]) for f in fields if f.get("ref")}
+        ids = {key(f["name"])[:-3] for f in fields if key(f["name"]).endswith("_id")}
+        roles = {r for a, b in ROLE_PAIRS if a in ids and b in ids for r in (a, b)}
         for f in fields:
             w = words(f["name"])
             if len(w) < 2 or w[-1] != "id" or not is_primitive_id(f):
@@ -72,8 +77,9 @@ def run(ctx, params) -> list:
             who, named, idf = own[stem]
             if c in named or len(who) != 1:  # its own concept, or one that several components share
                 continue
-            # Unclear: other components define a type of that name too, or one id is a number and the other text.
-            if named != who or idf and None not in (id_class(f), id_class(idf)) and id_class(f) != id_class(idf):
+            # Unclear: other components define a type of that name too, the field is one end of a role pair
+            # such as SourceID and TargetID, or one id is a number and the other text.
+            if named != who or stem in roles or idf and None not in (id_class(f), id_class(idf)) and id_class(f) != id_class(idf):
                 pairs[(c, None)].append((tid, f["name"], None))
                 continue
             pairs[(c, next(iter(who)))].append((tid, f["name"], stem))
