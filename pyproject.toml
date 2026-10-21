@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "archplan"
-version = "26.10.18"
+version = "26.10.19"
 description = "Plan architecture changes with a human in an editor and an agent over MCP"
 readme = "README.md"
 requires-python = ">=3.9"
