@@ -2775,6 +2775,103 @@ class NewDetectorsTest(TempProject):
                                                          "file": "lib/orders/x.ex", "line": 1})
         self.assertEqual(f["strength"], "medium")
 
+    def test_scattered_decision(self):
+        m = concept_model()
+        lit = lambda v, c, line, ctx="compare": {"value": v, "component": c, "file": f"lib/{c}/x.ex", "line": line,
+                                                 "context": ctx, "field": "status"}
+        m["literals"] += [lit("paid", "orders", 10), lit("shipped", "orders", 10),
+                          lit("shipped", "billing", 20), lit("paid", "billing", 20),
+                          lit("paid", "shipping", 30, "case"), lit("shipped", "shipping", 32, "case"),
+                          lit("paid", "orders", 40),                                 # a test on fewer values
+                          lit("paid", "billing", 50), lit("refunded", "billing", 50)]  # a test on other values
+        self.p.model_path.write_text(json.dumps(m))
+        (f,) = [f for f in self.found("concepts.string_enum") if f["evidence"]["kind"] == "decision"]
+        self.assertEqual(f["evidence"]["values"], ["paid", "shipped"])
+        self.assertEqual(f["components"], ["billing", "orders", "shipping"])
+        self.assertEqual(f["evidence"]["sites"], ["lib/billing/x.ex:20", "lib/orders/x.ex:10", "lib/shipping/x.ex:30"])
+        self.assertIn("The same test, status in 'paid', 'shipped', is written in 3 components", f["title"])
+
+    def test_missing_operation(self):
+        m = concept_model()
+        sig = lambda i, c, *ps, returns="integer": {"id": i, "component": c, "file": f"lib/{c}/x.ex", "line": 5,
+                                                     "params": [{"name": n, "type": t} for n, t in ps],
+                                                     "returns": returns}
+        m["signatures"] += [sig("billing.order_total/1", "billing", ("order", "Order")),
+                            sig("shipping.calc_total/2", "shipping", ("o", "%Order{}"), ("rate", "integer")),
+                            sig("orders.total/1", "orders", ("order", "Order")),
+                            sig("billing.to_json/1", "billing", ("order", "Order")),     # a conversion
+                            sig("shipping.to_json/1", "shipping", ("order", "Order")),
+                            sig("billing.label/1", "billing", ("order", "Order")),       # one component only
+                            sig("shipping.order_total/1", "shipping", ("order", "Order"), returns="string"),
+                            sig("billing.price/1", "billing", ("order", "Order")),       # implements Pricer
+                            sig("shipping.price/1", "shipping", ("order", "Order")),
+                            sig("billing.weight/1", "billing", ("order", None), returns=None),  # by parameter name
+                            sig("shipping.order_weight/1", "shipping", ("order", None), returns=None),
+                            sig("billing.size/1", "billing", ("entity", None), returns=None),  # a generic name
+                            sig("shipping.size/1", "shipping", ("entity", None), returns=None),
+                            sig("billing.order_count/1", "billing", ("x", "order")),     # not the type Order
+                            sig("shipping.order_count/1", "shipping", ("x", "order"))]
+        m["types"]["orders.Pricer"] = {"name": "Pricer", "component": "orders", "kind": "interface",
+                                       "methods": [{"name": "price"}]}
+        m["types"]["core.Entity"] = {"name": "Entity", "component": "core", "kind": "struct"}
+        self.p.model_path.write_text(json.dumps(m))
+        fs = {f["evidence"]["operation"]: f for f in self.found("concepts.missing_operation")}
+        self.assertEqual(set(fs), {"total", "weight"})
+        self.assertIn("types from parameter names", {b["factor"] for b in fs["weight"]["weight_basis"]})
+        self.assertLess(fs["weight"]["weight"], fs["total"]["weight"])
+        f = fs["total"]
+        self.assertEqual((f["evidence"]["owner"], f["evidence"]["operation"]), ("orders", "total"))
+        self.assertEqual([x["id"] for x in f["evidence"]["functions"]],
+                         ["billing.order_total/1", "shipping.calc_total/2"])
+        self.assertEqual(f["evidence"]["existing"], ["orders.total/1"])
+        self.assertIn("Call orders.total/1 in orders", f["evidence"]["moves"][0])
+        self.assertEqual(f["components"], ["orders", "billing", "shipping"])
+
+    def test_repeated_orchestration(self):
+        m = concept_model()
+        msg = lambda frm, to, label, depth: {"from": frm, "to": to, "label": label, "depth": depth}
+        common = [msg("orders", "core.Repo", "get(id)", 1), msg("core.Repo", "core.Cache", "fetch(k)", 2),
+                  msg("orders", "billing", "check(order)", 1), msg("orders", "core.Repo", "save(order)", 1)]
+        m["sequences"] = {
+            f"s{i}": {"entry": f"orders.{name}", "messages": [msg("Caller", "orders", f"{name}(conn)", 0), *common,
+                                                              msg("orders", "shipping", f"{name}_extra()", 1)]}
+            for i, name in enumerate(["create", "update", "cancel"])}
+        m["sequences"]["s3"] = {"entry": "orders.show", "messages": [
+            msg("Caller", "orders", "show(conn)", 0), *common[:3]]}
+        m["sequences"]["s4"] = {"entry": "orders.create", "messages": [  # another scenario of the same entry point
+            msg("Caller", "orders", "create(conn)", 0), *common]}
+        self.p.model_path.write_text(json.dumps(m))
+        (f,) = self.found("structure.repeated_orchestration")
+        self.assertEqual([(s["participant"], s["function"]) for s in f["evidence"]["steps"]],
+                         [("core.Repo", "get"), ("billing", "check"), ("core.Repo", "save")])
+        self.assertEqual(f["evidence"]["entries"], ["orders.cancel", "orders.create", "orders.update"])
+        self.assertEqual(f["title"], "3 entry points make the same 3 calls: Repo.get → billing.check → Repo.save.")
+        self.assertEqual(f["focus"][0]["view"], "sequences")
+        self.assertEqual(f["components"], ["orders", "core", "billing"])
+
+    def test_synonyms_glossary(self):
+        from archplan.detectors.types_synonyms import synonym_findings
+        fs = [{"name": n} for n in ("first_name", "last_name", "email", "phone", "street")]
+        m = {"components": {"sales": {}, "billing": {}},
+             "types": {"sales.Customer": {"name": "Customer", "component": "sales", "fields": fs},
+                       "billing.Client": {"name": "Client", "component": "billing", "fields": fs + [{"name": "vat"}]}}}
+        plain = synonym_findings(m)[0]
+        concept = lambda name, owner, *terms: {"name": name, "owner": owner, "terms": list(terms) or [name.lower()],
+                                               "source": "glossary"}
+        separate = synonym_findings(m, vocabulary={"concepts": {"customer": concept("Customer", "sales"),
+                                                                "client": concept("Client", "billing")}})[0]
+        self.assertEqual(separate["evidence"]["glossary"], "separate")
+        self.assertIn("separate concepts: Client (billing), Customer (sales)", separate["detail"])
+        self.assertLess(separate["weight"], plain["weight"])
+        one = synonym_findings(m, vocabulary={"concepts": {"customer": concept("Customer", "sales", "customer",
+                                                                                  "client")}})[0]
+        self.assertEqual(one["evidence"]["glossary"], "one")
+        self.assertEqual(one["evidence"]["moves"], ["Keep Customer in sales and let the others use it."])
+        self.assertGreater(one["weight"], plain["weight"])
+        suggested = {"concepts": {"customer": {**concept("Customer", "sales", "customer", "client"),
+                                               "source": "suggested"}}}
+        self.assertNotIn("glossary", synonym_findings(m, vocabulary=suggested)[0]["evidence"])
+
     def test_hotspots_cache_owners(self):
         commits = [("1", "a@x", "2026-01-02", ["lib/core/repo.ex", "lib/orders/order.ex"]),
                    ("2", "b@x", "2026-01-01", ["lib/core/repo.ex"])]
@@ -2819,6 +2916,8 @@ class NewDetectorsTest(TempProject):
 
     def test_modularity_violation(self):
         m, commits = self.modularity_history()
+        m["literals"] += [{"value": v, "component": c, "file": f"lib/{c}/{n}.ex", "line": 4, "context": "compare"}
+                          for c, n in (("billing", "invoice"), ("shipping", "parcel")) for v in ("express", "ok")]
         self.p.model_path.write_text(json.dumps(m))
         self.p.path("hotspots.json").write_text(json.dumps({"key": {}, "result": {
             "head": "abc", "since_days": 365, "pairs": [], **hotspots.analyse(commits, m)}}))
@@ -2833,6 +2932,10 @@ class NewDetectorsTest(TempProject):
         self.assertEqual(f["focus"][0]["files"], f["files"])
         factors = {b["factor"]: b["effect"] for b in f["weight_basis"]}
         self.assertGreater(factors["bug fixes together"], 0)
+        self.assertEqual(f["evidence"]["shared"], {"strings": ["express"], "fields": ["city", "street", "zip_code"]})
+        self.assertIn("Both use the strings 'express' and the fields city, street, zip_code.", f["detail"])
+        self.assertIn("Give the values 'express' one home", f["evidence"]["moves"][0])
+        self.assertIn("Give the fields city, street, zip_code one type", f["evidence"]["moves"][1])
         s = fs[("billing", "orders")]
         self.assertEqual(s["title"], "schema.ex in 2 components change together, but do not refer to each other.")
         self.assertNotIn("bug fixes together", {b["factor"] for b in s["weight_basis"]})

@@ -29,6 +29,10 @@ The weight grows with the commits the files share, how often they change
 together (degree), the bug-fix commits on the cluster's files (the churn
 the hidden link has cost, as DV8 ranks it) and the number of components.
 
+When the files share string literals or field names that few other files
+use, the finding names them: they are likely the knowledge the files share,
+such as the values of a status or the fields of an address.
+
 How it differs from history.coupling: that detector works per component
 pair and only reports pairs without a component dependency. This one works
 per file. It also finds files whose components do depend on each other, as
@@ -40,10 +44,12 @@ from __future__ import annotations
 
 import math
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from ..core.hotspots import Mapper
-from .common import EXAMPLES, Weight, finding, focus, namer, plural
+from .common import COMMON_FIELDS, EXAMPLES, Weight, finding, focus, namer, plural
+from .concepts_string_enum import COMMON, WORDISH
+from .fields import key
 
 ID = "history.modularity_violation"
 NAME = "Modularity violations"
@@ -54,7 +60,7 @@ NEEDS = {"git", "files", "cochange"}
 # without end on the commit subjects.
 FIX_WORDS = ["fix", "fixes", "fixed", "fixing", "bug", "bugs", "bugfix", "bugfixes", "hotfix", "hotfixes",
              "regression", "crash", "crashes", "crashed", "broken", ":bug:", ":ambulance:", ":adhesive_bandage:"]
-PARAMS = {"together": 3, "degree": 0.5, "within_component": False, "fix_words": FIX_WORDS}
+PARAMS = {"together": 3, "degree": 0.5, "within_component": False, "fix_words": FIX_WORDS, "rare_files": 0.1}
 WORD = re.compile(r":[a-z_]+:|[a-z0-9]+")
 BARRELS = {"__init__.py", "index.ts", "index.tsx", "index.js", "index.jsx", "index.mjs", "mod.rs", "lib.rs"}
 
@@ -88,6 +94,32 @@ def relations(model: dict):
     return lambda a, b: one_way(a, b) or one_way(b, a)
 
 
+def knowledge(model: dict, share: float):
+    """shared(a, b): {"strings", "fields"} that file a and file b both use, from
+    the literals section and the types' fields. A value in more than share of
+    the files (at least 5) is an idiom, not knowledge, and is left out."""
+    def rare(by_file: dict) -> dict:
+        n = Counter(v for vs in by_file.values() for v in vs)
+        cap = max(5, share * len(model.get("files") or {}))
+        return {f: {v for v in vs if n[v] <= cap} for f, vs in by_file.items()}
+    strings, fields = defaultdict(set), defaultdict(set)
+    for x in model.get("literals") or []:
+        v = x.get("value") if isinstance(x, dict) else None
+        if isinstance(v, str) and WORDISH.fullmatch(v) and v.lower() not in COMMON and x.get("file"):
+            strings[x["file"]].add(v)
+    for t in (model.get("types") or {}).values():
+        if isinstance(t, dict) and t.get("file"):
+            fields[t["file"]].update(k for k in (key(f.get("name") or "") for f in t.get("fields") or []
+                                                 if isinstance(f, dict)) if k and k not in COMMON_FIELDS)
+    strings, fields = rare(strings), rare(fields)
+    return lambda a, b: {"strings": sorted(strings.get(a, set()) & strings.get(b, set())),
+                         "fields": sorted(fields.get(a, set()) & fields.get(b, set()))}
+
+
+def quoted(xs: list, n: int = 4) -> str:
+    return ", ".join(f"'{x}'" for x in xs[:n]) + (", …" if len(xs) > n else "")
+
+
 def base(f: str) -> str:
     return f.rsplit("/", 1)[-1]
 
@@ -116,6 +148,7 @@ def modularity_findings(res: dict, model: dict, params: dict | None = None) -> l
     mapper = Mapper(comps)
     comp_of = lambda f: (files.get(f) or {}).get("component") or mapper(f)
     related = relations(model)
+    shared_by = knowledge(model, params["rare_files"])
     subjects = cc.get("subjects") or {}
     fixes = {s for s, subj in subjects.items() if isinstance(subj, str) and is_fix(subj)}
     file_shas = {f: set(v.get("shas") or []) for f, v in (cc.get("files") or {}).items() if isinstance(v, dict)}
@@ -172,13 +205,28 @@ def modularity_findings(res: dict, model: dict, params: dict | None = None) -> l
             detail += f" {plural(len(churn), 'bug-fix commit')} touched these files"
             detail += f", {len(fixed_together)} of them several at once." if fixed_together else "."
         examples = [subjects[s] for s in sorted(fixed_together) if isinstance(subjects.get(s), str)][:3]
+        known = {"strings": set(), "fields": set()}
+        for x in xs:
+            for k, v in shared_by(x["a"], x["b"]).items():
+                known[k].update(v)
+        known = {k: sorted(v)[:EXAMPLES] for k, v in known.items() if v}
+        n_known = sum(map(len, known.values()))
+        if known:
+            detail += " Both use " + " and ".join(
+                f"the strings {quoted(v)}" if k == "strings" else
+                f"the fields {', '.join(v[:4])}" + (", …" if len(v) > 4 else "") for k, v in known.items()) + "."
+        named = ([f"Give the values {quoted(known['strings'])} one home, such as an enum or constants owned by one "
+                  "component, and let the other files refer to it."] if known.get("strings") else []) + \
+                ([f"Give the fields {', '.join(known['fields'][:4])} one type owned by one component, and use it "
+                  "in both places."] if known.get("fields") else [])
         w = (Weight(20, "modularity violation")
              .repetition(len(shared), "commits together", per=4, cap=12, single=0)
              .add("degree", round(degree, 2), min(10, 25 * (degree - params["degree"])))
              .add("bug fixes together", len(fixed_together), min(10, 4 * len(fixed_together)))
              .add("bug-fix churn", len(churn), min(6, 1.5 * math.log2(1 + len(churn))))
              .spread(len(cs), "components", per=4, cap=8, free=2)
-             .spread(len(xs), "file pairs", per=1.5, cap=4))
+             .spread(len(xs), "file pairs", per=1.5, cap=4)
+             .add("shared knowledge", n_known, min(6, 2 * n_known)))
         out.append(finding(
             ID, ("name", same) if same else ("components", *cs), title, detail, "medium",
             f"{len(shared)} commits together in the last {days} days, no file reference",
@@ -186,8 +234,9 @@ def modularity_findings(res: dict, model: dict, params: dict | None = None) -> l
             {"pairs": [{"a": x["a"], "b": x["b"], "together": x["together"], "degree": x["degree"],
                         "fixes": x["fixes"]} for x in xs[:EXAMPLES]],
              "commits": len(shared), "bug_fixes": len(churn), "bug_fixes_together": len(fixed_together),
-             "fixes_together": examples, "head": (res.get("head") or "")[:10], "since_days": days,
-             "moves": ([f"Give the structure that each {same} repeats one shared definition, such as a base "
+             "fixes_together": examples, **({"shared": known} if known else {}),
+             "head": (res.get("head") or "")[:10], "since_days": days,
+             "moves": named + ([f"Give the structure that each {same} repeats one shared definition, such as a base "
                         f"class, a helper or a registry, and let each component use it."] if same else []) + [
                        "Find what these files both know: a rule, a format, a list of names or a setting. "
                        "Give it one home and let both files refer to it.",
