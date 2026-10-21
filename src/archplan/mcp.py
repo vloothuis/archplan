@@ -85,7 +85,9 @@ TOOLS = [
          "required": ["ops"]}},
     {"name": "annotate",
      "description": "Change declarations in the code: a component's trust zone (component.zone), the components "
-                    "through which others must reach it (component.gateway: a list of component ids), a function "
+                    "through which others must reach it (component.gateway: a list of component ids), the "
+                    "components that wrap it at wiring, so that its consumers get it through them "
+                    "(component.gated_by: a list of component ids), a function "
                     "that authenticates (guard authn), authorizes (guard authz) or both (guard true) "
                     "(function.guard), a function that writes or reads data that needs an authorization "
                     "check first (function.sink: write or read), or whether an entry point "
@@ -104,8 +106,8 @@ TOOLS = [
                  "id": {"type": "string", "description": "a component id, or a function's id from the model's "
                                                          "signatures or types, or <file>:<name>"}},
                  "required": ["kind", "id"]},
-             "key": {"type": "string", "enum": ["zone", "gateway", "guard", "sink", "auth"]},
-             "value": {"description": "zone: an id such as internal; gateway: a list of component ids; "
+             "key": {"type": "string", "enum": ["zone", "gateway", "gated_by", "guard", "sink", "auth"]},
+             "value": {"description": "zone: an id such as internal; gateway and gated_by: a list of component ids; "
                                       "guard: true, authn or authz; "
                                       "sink: write or read; auth: required, authz or none"},
              "reason": {"type": "string"}},

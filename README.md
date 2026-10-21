@@ -147,7 +147,7 @@ Everything is stored in `.archplan/` in the repository:
 
 | File | What it holds |
 |---|---|
-| `config.json` | export command, model path, paths to exclude, components and layers, port, auto suggestion mode |
+| `config.json` | export command, model path, paths to exclude, components and layers, table owners, port, auto suggestion mode |
 | `model.archmodel.json` | the as-is model, written by the exporter |
 | `target.archmodel.json` | the target model |
 | `base.archmodel.json` | the as-is model the target was last edited against, for rebasing |
@@ -407,9 +407,27 @@ Django models, Ecto schemas and `priv/repo/migrations`, `db/schema.rb`,
 `pg_dump --schema-only` output).
 
 Each table gets an owner component: the component of its ORM type, or else
-the component whose code writes it most. archplan also records which
-components use each table through the ORM, which ones write it, and raw SQL
-reads and writes.
+the component whose code writes it most. A table that still has no owner
+goes to the component whose files hold its `CREATE TABLE` statement. That
+statement can be a string literal in the code or a line in a `.sql` file,
+such as a migration. A file belongs to the component that owns its path. When
+two components create the table in as many files, neither gets it. Test
+files and the `schema.sql` or `structure.sql` dump do not count. archplan
+also records which components use each table through the ORM, which ones
+write it, and raw SQL reads and writes.
+
+To name owners yourself, add `schema.owners` to `.archplan/config.json`. A
+key is a table name or a glob on table names. The config wins over every
+other way to find an owner:
+
+```json
+"schema": {"owners": {"entities": "store", "comment*": "sqlitecomments"}}
+```
+
+An exact name wins over a glob. Among globs, the first one in the file wins.
+`archplan schema` warns about a component that is not in the model and a
+key that matches no table. The config applies when archplan builds the
+section, so run `archplan schema --refresh` or a new export after a change.
 
 `archplan schema` shows the tables per owner and the foreign keys across
 components. `archplan schema tables` lists the columns. The editor reads the
@@ -500,7 +518,8 @@ mark as noise go into `.archplan/vocabulary.json`.
 
 Some facts are decisions, not something an exporter can find: the trust zone
 a component is in, the components through which others must reach it (its
-gateways), which functions are guards (they authenticate, authorize
+gateways), the components that wrap it at wiring (`gated_by`), which
+functions are guards (they authenticate, authorize
 or validate), which functions are sinks (they write or read data that needs
 a permission check first), and which entry points need an authenticated
 caller (`auth=required`) or also a check of what that caller may do, such as
@@ -508,13 +527,23 @@ read the record the request names (`auth=authz`). These
 declarations live in the repository, next to the code. After every export,
 archplan reads them into the model's `declarations` section.
 
-By default they are marker comments above a declaration, and `zone:` and
-`gateway:` lines in the front matter of a component's `GLOSSARY.md`:
+By default they are marker comments above a declaration, and `zone:`,
+`gateway:` and `gated_by:` lines in the front matter of a component's
+`GLOSSARY.md`:
 
 ```python
 # archplan: auth=none reason="load balancer health check"
 def health(request): ...
 ```
+
+`gated_by: [visibility]` says that consumers get the component through
+`visibility` at wiring. Use it for a base reader that has no checks of its
+own, when the program's wiring wraps it in a decorator that checks access.
+The decorator depends on the reader, not the other way round, so no static
+path passes a check. `security.unguarded_path` then treats a path through
+the reader as checked for an entry component that depends on `visibility`,
+directly or through other components. Unlike `gateway`, it does not ask
+other components to stay away, so `security.gateway_bypass` ignores it.
 
 A project can read and write them in its own form instead, such as its
 language's annotations or database column comments, with an annotator
@@ -529,7 +558,7 @@ The security detectors read the declarations:
 | Kind | Finds |
 |---|---|
 | `security.unguarded_entry` | a traced entry point whose request passes no guard: strong when it is declared `auth=required`, or `auth=authz` and the request passes no authorization guard; weak when it has no auth declaration. A test that makes several requests has each judged on its own. Needs sequences. |
-| `security.unchecked_entry` | an entry point declared `auth=authz` whose code, with the functions of its file that it calls and the file's plugs and filters, names no authorization guard. Static, so it covers entry points no test runs; a traced request that passes the guard clears it. Medium. |
+| `security.unchecked_entry` | an entry point declared `auth=authz` whose code, with the functions of its file that it calls and the file's plugs and filters, names no authorization guard. With signatures, it also reads the functions it calls in other files of its package (its component, same folder). A call on a value, such as `ops.run()`, resolves by the receiver type, so a common name does not pull in an unrelated function. It reads at most `max_functions` functions (30). Static, so it covers entry points no test runs; a traced request that passes the guard clears it. Medium. |
 | `security.unguarded_sink` | a trace that calls a write sink before any authorization guard (`guard` or `guard=authz`), strong; or a read sink with no such guard anywhere in the trace, medium. Calls inside a guard are its own. A `guard=authn` guard does not count. Needs sequences. |
 | `security.untested_denial` | an entry point declared `auth=required` or `auth=authz` whose traced requests pass the guard it needs, but none shows the guard or the entry point refusing a caller (a call `outcome` such as `raise`, `error`, `halt` or `status:403`, or a test title such as "rejects another user"). Names the guard to make fail and the sinks the request reaches. Medium; weak when the traces record no outcomes. Needs sequences. |
 | `security.risk_hotspot` | a component in the top quarter by commits that lies on the traced path of entry points that reach sinks. Its weight follows the riskiest of those entry points (see Blast radius). Needs sequences and the cached `archplan hotspots`. |
@@ -537,7 +566,7 @@ The security detectors read the declarations:
 | `security.open_entry` | an entry point declared `auth=none` without a reason |
 | `security.zone_dependency` | a dependency from a more trusted zone to a less trusted one, or one that skips a declared zone |
 | `security.gateway_bypass` | a dependency on a component that declares gateways (`gateway: [a, b]`) from a component that is none of them and does not implement its interfaces. Weak; strong when a trace shows the call. |
-| `security.unguarded_path` | a dependency path from an entry point's component, through other components, to a `restricted` zone component, on which no component is a guard's, depends on one or is a declared gateway of the target. Static, so it covers code no trace runs. Weak. |
+| `security.unguarded_path` | a dependency path from an entry point's component, through other components, to a `restricted` zone component, on which no component is a guard's, depends on one or is a declared gateway of the target. A component declared `gated_by: [X]` also counts when the entry component depends on X, directly or through other components. Static, so it covers code no trace runs. Weak. |
 
 Zones are ordered by the `order` setting of `security.zone_dependency`,
 from the least trusted: `internet`, `dmz`, `internal`, `restricted` by

@@ -228,7 +228,8 @@
         "access": {"type": "array", "items": {"type": "object", "required": ["component", "table", "mode"],
           "properties": {"component": {"type": "string"}, "table": {"type": "string"},
             "mode": {"enum": ["read", "write", "orm"]}, "weight": {"type": "integer"},
-            "evidence": {"type": "array", "items": {"type": "string"}}}}}
+            "evidence": {"type": "array", "items": {"type": "string"}}}}},
+        "warnings": {"type": "array", "items": {"type": "string"}}
       }
     },
     "vocabulary": {
@@ -299,8 +300,8 @@
               "id": { "type": "string" }
             }
           },
-          "key": { "enum": ["zone", "guard", "auth"] },
-          "value": { "type": ["string", "boolean"] },
+          "key": { "enum": ["zone", "gateway", "gated_by", "guard", "sink", "auth"] },
+          "value": { "type": ["string", "boolean", "array"], "items": { "type": "string" } },
           "reason": { "type": "string" },
           "at": {
             "type": "object",

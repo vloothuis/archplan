@@ -424,10 +424,15 @@ components read or write it.
   such as `IN ('a', 'b')`, Django `choices`, `Ecto.Enum` or Rails `enum`.
 - `maps` gives each table an owner `component`. `type` is the ORM type that
   maps the table, when the model has it. `via` says how the owner was found:
-  `type` (the ORM type's component), `file` (the component of the file that
-  declares the table), `writes` (the component whose code writes it most) or
-  `join table` (the owner of the table that declares the many-to-many
-  relation). A table without an owner has no entry.
+  `config` (named in `.archplan/config.json` `schema.owners`; this wins
+  over the rest), `type` (the ORM type's component), `file` (the component
+  of the file that declares the table), `writes` (the component whose code
+  writes it most), `join table` (the owner of the table that declares the
+  many-to-many relation) or `create` (the component whose files hold the
+  table's `CREATE TABLE` statement, in a string literal or a `.sql` file).
+  A table without an owner has no entry.
+- `warnings` lists problems with `schema.owners` in the config, such as a
+  component that is not in the model. It is there only when there are some.
 - `access` lists who uses a table. `mode` is `orm` (a file refers to the
   table's ORM type), `write` (that file also creates, updates or deletes
   rows of the type) or `read` and `write` from raw SQL (`FROM`, `JOIN`,
@@ -509,8 +514,10 @@ not write this section.
 ]
 ```
 
-- `target.kind` and `key` form the key: `component.zone`, `function.guard`
-  or `entrypoint.auth`.
+- `target.kind` and `key` form the key: `component.zone`,
+  `component.gateway`, `component.gated_by`, `function.guard`,
+  `function.sink` or `entrypoint.auth`. A gateway or `gated_by` value is a
+  list of component ids.
 - A function or entry point id is the model's id from `signatures` or
   `types`, or `<file>:<name>` when the model has none.
 - `at` is where the target is declared. `file` and `line` are where the

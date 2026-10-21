@@ -226,6 +226,22 @@ class AnnotatorTest(unittest.TestCase):
         self.assertEqual(res["results"][0]["status"], "applied", res)
         self.assertEqual(glossary.read_text(), SAMPLE["shop/accounts/GLOSSARY.md"])
 
+    def test_gated_by(self):
+        self.assertIsNotNone(annotators.check_change({"op": "set", "target": {"kind": "component", "id": "x"},
+                                                      "key": "gated_by", "value": "shop.ops"}))
+        res = self.changes({"op": "set", "target": {"kind": "component", "id": "shop.accounts"}, "key": "gated_by",
+                            "value": ["shop.ops"]}, apply=True)
+        self.assertEqual(res["results"][0]["status"], "applied", res)
+        glossary = self.root / "shop/accounts/GLOSSARY.md"
+        self.assertIn("\ngated_by: [shop.ops]\n---\n", glossary.read_text())
+        d = self.declared()
+        self.assertEqual(d[("component", "shop.accounts", "gated_by")]["value"], ["shop.ops"])
+        self.assertNotIn(("component", "shop.accounts", "gateway"), d)
+        res = self.changes({"op": "remove", "target": {"kind": "component", "id": "shop.accounts"},
+                            "key": "gated_by"}, apply=True)
+        self.assertEqual(res["results"][0]["status"], "applied", res)
+        self.assertEqual(glossary.read_text(), SAMPLE["shop/accounts/GLOSSARY.md"])
+
     def plugin(self, read_out, write_out=None, keys=("function.guard",), touch=None):
         script = self.root / "tools" / "ann.py"
         write(self.root, {"tools/ann.py": f"""\

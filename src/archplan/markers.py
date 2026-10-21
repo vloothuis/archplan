@@ -10,7 +10,8 @@ attributes and other comments allowed in between:
 `guard` (or `guard=authn`, `guard=authz`) declares function.guard, `sink=write`
 or `sink=read` function.sink, `auth=required|authz|none` entrypoint.auth. A
 component's zone is the `zone:` line in the front matter of the GLOSSARY.md
-in its folder, and its gateways the `gateway:` line (`gateway: [a, b]`).
+in its folder, its gateways the `gateway:` line (`gateway: [a, b]`), and the
+components that wrap it at wiring the `gated_by:` line (`gated_by: [a]`).
 See format/annotator-plugins.md.
 
 read() returns declarations in the plugin output shape; write() changes
@@ -232,7 +233,7 @@ def scan(text: str, prefix: str, python: bool = False) -> list:
     return out
 
 
-# ---------- GLOSSARY.md zones and gateways ----------
+# ---------- GLOSSARY.md zones, gateways and gated_by ----------
 
 def glossary_path(base: Path, comp: dict) -> str | None:
     """The GLOSSARY.md next to a component's code, relative to base."""
@@ -258,7 +259,9 @@ def front_bounds(lines: list) -> tuple | None:
     return None
 
 
-FRONT = {"component.zone": "zone", "component.gateway": "gateway"}  # key -> front matter word
+FRONT = {"component.zone": "zone", "component.gateway": "gateway",
+         "component.gated_by": "gated_by"}  # key -> front matter word
+LISTS = ("component.gateway", "component.gated_by")  # keys whose value is a list of component ids
 
 
 def front_line(word: str):
@@ -280,7 +283,7 @@ def front_of(text: str, word: str) -> tuple | None:
 
 
 def front_text(key: str, value) -> str:
-    return "[" + ", ".join(value) + "]" if key == "component.gateway" else str(value)
+    return "[" + ", ".join(value) + "]" if key in LISTS else str(value)
 
 
 # ---------- read ----------
@@ -308,7 +311,7 @@ def read(root: Path, model: dict, keys, exclude=None) -> tuple:
             for k in front:
                 v = front_of(text, FRONT[k])
                 if v:
-                    value = _flow(v[0]) if k == "component.gateway" else _scalar(v[0])
+                    value = _flow(v[0]) if k in LISTS else _scalar(v[0])
                     decls.append({"target": {"kind": "component", "id": cid}, "key": FRONT[k], "value": value,
                                   "file": rel, "line": v[1]})
     if keys & {"function.guard", "function.sink", "entrypoint.auth"}:

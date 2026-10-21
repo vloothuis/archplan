@@ -21,6 +21,7 @@ A key names a kind of target and a property of it.
 |---|---|---|---|
 | `component.zone` | a component id | a zone id: lower case letters, digits, `_` and `-` | the trust zone the component is in, such as `internet` or `internal` |
 | `component.gateway` | a component id | a list of 1 to 20 component ids | the components through which others must reach this one, such as the repository in front of a store |
+| `component.gated_by` | a component id | a list of 1 to 20 component ids | the components that wrap this one at wiring, so its consumers get it through them, such as a visibility decorator around a base reader |
 | `function.guard` | a function or type | `true`, `authn` or `authz` | the function or type checks who the caller is (`authn`), what the caller may do (`authz`), or both, or validates input (`true`) |
 | `function.sink` | a function or type | `write` or `read` | the function changes (`write`) or returns (`read`) data that only some callers may change or see |
 | `entrypoint.auth` | a function that handles outside input | `required`, `authz` or `none` | whether the entry point needs an authenticated caller (`required`), also a check of what that caller may do, such as read the record the request names (`authz`), or neither (`none`) |
@@ -209,23 +210,28 @@ the next read shows whether it worked.
 
 The built-in annotator owns every key no project annotator owns.
 
-### Component zones and gateways
+### Component zones, gateways and gated_by
 
-A component's zone and gateways are in the front matter of the `GLOSSARY.md`
-in its folder, the same file the glossaries use:
+A component's zone, gateways and `gated_by` are in the front matter of the
+`GLOSSARY.md` in its folder, the same file the glossaries use:
 
 ```markdown
 ---
 zone: restricted
 gateway: [billing.repo, billing.admin]
+gated_by: [billing.visibility]
 owns:
   Invoice: [bill]
 ---
 ```
 
-The writer adds, changes or removes the `zone:` and `gateway:` lines. It
-creates the file when there is none, and deletes a file that held nothing
-but those lines.
+A gateway is the way in that others must use. `gated_by` names the
+components that the wiring wraps around this one, so a static dependency
+on it is fine. Only `security.unguarded_path` reads `gated_by`.
+
+The writer adds, changes or removes the `zone:`, `gateway:` and `gated_by:`
+lines. It creates the file when there is none, and deletes a file that held
+nothing but those lines.
 
 ### Marker comments
 
