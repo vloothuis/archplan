@@ -145,7 +145,9 @@ def changed(ctx, ref: str = "HEAD") -> list:
 
 def report(ctx, files: list | None = None, limit: int = 20) -> dict:
     es = entries(ctx)
-    out = {"entries": len(es), "traced": bool(ctx.model.get("sequences"))}
+    src = ctx.model.get("source") if isinstance(ctx.model.get("source"), dict) else {}
+    out = {"entries": len(es), "traced": bool(ctx.model.get("sequences")),
+           "languages": [x for x in src.get("languages") or [] if isinstance(x, str)]}
     if files is not None:
         hit_ = touched(ctx, es, files)
         out.update(files=files[:50], touched=hit_[:limit], plan=plan(hit_)[:limit])
@@ -154,10 +156,21 @@ def report(ctx, files: list | None = None, limit: int = 20) -> dict:
     return out
 
 
+def untraced(languages: list) -> str:
+    """Why there is nothing to report, and how a model in these languages gets sequences."""
+    if "elixir" in languages:
+        return "The model has no sequences: trace the tests first (see `archplan trace-elixir`)."
+    if "go" in languages:
+        return ("The model has no sequences: record the tests with seqtrace and pass its steps.json "
+                "to archplan-go with `-steps`.")
+    return ("The model has no sequences. The sequences section of the exporter format "
+            "(format/exporter-plugins.md) says how an exporter adds them.")
+
+
 def text(rep: dict) -> str:
     lines = []
     if not rep["traced"]:
-        return "The model has no sequences: trace the tests first (see `archplan trace-elixir`)."
+        return untraced(rep.get("languages") or [])
     if "touched" in rep:
         lines.append(f"{len(rep['files'])} changed files touch {len(rep['touched'])} of {rep['entries']} "
                      "traced entry points (risk, entry, why):")

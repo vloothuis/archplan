@@ -285,9 +285,12 @@ def analyse(profile: dict, model: dict, root: Path | None = None, cap: int = MAX
     n = len(out_units)
     in_layer = {c for layer in profile.get("layers") or [] for c in layer.get("components") or []}
     warnings = []
-    if not model.get("files"):
+    if not model.get("files") and emits_files(model):
         warnings.append("The model has no file-level references (files section); call rules cannot be checked. "
                         "Re-export with a current exporter.")
+    elif not model.get("files"):
+        warnings.append("The model has no file-level references: its exporter does not emit a files section, "
+                        "so profile rules cannot be checked.")
     return {"units": out_units,
             "roles": [{"id": r["id"], "present": sum(1 for u in out_units if r["id"] in u["roles"]), "of": n}
                       for r in roles],
@@ -297,6 +300,18 @@ def analyse(profile: dict, model: dict, root: Path | None = None, cap: int = MAX
                                             if c not in in_layer
                                             and (model["components"][c] or {}).get("kind") != "external")},
             "edges": bool(model.get("files")), "warnings": warnings}
+
+
+# The shipped exporters that write a files section, by source.generator.
+FILE_EXPORTERS = {"archplan-go", "archplan exporters/elixir", "archplan export-ts", "archplan export-python",
+                  "archplan export-lite"}
+
+
+def emits_files(model: dict) -> bool:
+    """Whether the model's exporter, or one of a merged model's exporters, writes a files section."""
+    src = model.get("source") if isinstance(model.get("source"), dict) else {}
+    gen = src.get("generator") if isinstance(src.get("generator"), str) else ""
+    return any(g.strip() in FILE_EXPORTERS for g in gen.split(" + "))
 
 
 def as_list(x) -> list:

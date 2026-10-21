@@ -501,6 +501,17 @@ class SecurityTest(unittest.TestCase):
             {**msg("web", "internal/auth.Verifier", "(*Verifier).VerifySubject(ctx, raw)", 1), "outcome": "error"}]}
         self.assertEqual({e["entry"]: e for e in blast.entries(ctx)}["internal/web/orders.go:getOrder"]["gaps"], [])
 
+    def test_blast_untraced_hint_follows_language(self):
+        def hint(source):
+            return blast.text(blast.report(Ctx(dict(model(), sequences={}, source=source)), []))
+        self.assertIn("archplan trace-elixir", hint({"languages": ["elixir"]}))
+        self.assertIn("seqtrace", hint({"languages": ["go"]}))
+        self.assertNotIn("trace-elixir", hint({"languages": ["go"]}))
+        for source in ({"languages": ["python"]}, {}, None):
+            h = hint(source)
+            self.assertIn("exporter-plugins.md", h)
+            self.assertNotIn("elixir", h)
+
     def test_risk_hotspot(self):
         m = model()
         m["declarations"].append(
