@@ -49,13 +49,14 @@ from collections import Counter, defaultdict
 
 from ..core.hotspots import Mapper
 from ..core.vocab import is_test
-from .common import EXAMPLES, Weight, focus, plural
+from .common import EXAMPLES, Weight, evidence_file, focus, plural
 
 ID = "boundaries.misplaced_file"
 NAME = "Files in the wrong component"
 GROUP = "boundaries"
 NEEDS = {"files"}
-PARAMS = {"min_links": 3.0, "ratio": 2.0, "min_share": 0.6, "incoming": 0.5, "hub": 4, "min_degree": 0.5, "terms": True, "max_findings": 20}
+PARAMS = {"min_links": 3.0, "ratio": 2.0, "min_share": 0.6, "incoming": 0.5, "hub": 4, "min_degree": 0.5,
+          "terms": True, "max_findings": 20}
 BARRELS = {"__init__.py", "index.ts", "index.tsx", "index.js", "index.jsx", "index.mjs", "mod.rs", "lib.rs",
            "package-info.java"}
 ENTRIES = {"__main__.py", "main.go", "main.rs", "main.py", "manage.py", "setup.py", "conftest.py"}
@@ -65,44 +66,64 @@ def base(f: str) -> str:
     return f.rsplit("/", 1)[-1]
 
 
+def dicts(x) -> dict:
+    """A model section keyed by id, with only the dict values (the model is repository data)."""
+    return {k: v for k, v in x.items() if isinstance(k, str) and isinstance(v, dict)} if isinstance(x, dict) else {}
+
+
+def strs(xs) -> list:
+    return [x for x in xs if isinstance(x, str) and x] if isinstance(xs, list) else []
+
+
 class FileGraph:
     """The links between the model's source files, and each file's component.
 
     links[f] = {g: {"out": 0|1, "in": 0|1, "cochange": degree}}: f refers to
     g, g refers to f, and how much they change together; comp has the files
-    that take part (internal, no tests, no package entries)."""
+    that take part (internal, no tests, no package entries). refs has every
+    reference between two files of the model, also those that do not take
+    part, as (from, to)."""
 
     def __init__(self, ctx, min_degree: float | None = 0.0):
-        files = ctx.model.get("files") or {}
-        mapper = Mapper(ctx.components)
-        self.comp = {}
-        paths = {c: ((v or {}).get("path") or "").rstrip("/") for c, v in ctx.components.items()}
-        self.inside = lambda c, k: bool(paths.get(k)) and (paths.get(c) or "").startswith(paths[k] + "/")
-        for f, v in files.items():
-            c = (v or {}).get("component") or mapper(f)
-            if c in ctx.internal and not is_test(f) and base(f) not in BARRELS:
-                self.comp[f] = c
+        files = dicts(ctx.model.get("files"))
+        comps = dicts(ctx.components)
+        mapper = Mapper(comps)
+        paths = {c: str(v.get("path") or "").rstrip("/") for c, v in comps.items()}
+        self.inside = lambda c, k: bool(paths.get(k)) and paths.get(c, "").startswith(paths[k] + "/")
+        self.of = {f: v.get("component") if isinstance(v.get("component"), str) else mapper(f)
+                   for f, v in files.items()}
+        self.comp = {f: c for f, c in self.of.items()
+                     if c in ctx.internal and not is_test(f) and base(f) not in BARRELS}
         self.links = defaultdict(lambda: defaultdict(lambda: {"out": 0, "in": 0, "cochange": 0.0}))
+        self.refs = []
         for f, v in files.items():
-            for r in (v or {}).get("refs") or []:
-                g = r.get("to") if isinstance(r, dict) else None
-                self._ref(f, g)
-        tfile = {t: (v or {}).get("file") for t, v in ctx.types.items()}
-        for t, v in ctx.types.items():
-            v = v or {}
-            for x in [x.get("ref") for x in v.get("fields") or [] if isinstance(x, dict)] \
-                    + list(v.get("uses") or []) + list(v.get("implements") or []):
+            for r in v.get("refs") or [] if isinstance(v.get("refs"), list) else []:
+                self._ref(f, r.get("to") if isinstance(r, dict) else None)
+        types = dicts(ctx.types)
+        tfile = {t: v.get("file") for t, v in types.items() if isinstance(v.get("file"), str)}
+        for v in types.values():
+            fields = v.get("fields") if isinstance(v.get("fields"), list) else []
+            for x in strs([x.get("ref") for x in fields if isinstance(x, dict)]) + strs(v.get("uses")) \
+                    + strs(v.get("implements")):
                 self._ref(v.get("file"), tfile.get(x))
         if min_degree is not None:
             for x in ((ctx.hotspots or {}).get("cochange") or {}).get("pairs") or []:
-                a, b = (x.get("a"), x.get("b")) if isinstance(x, dict) else (None, None)
-                if a in self.comp and b in self.comp and isinstance(x.get("degree"), (int, float)) \
-                        and x["degree"] >= min_degree:
+                if not isinstance(x, dict) or not isinstance(x.get("degree"), (int, float)) \
+                        or x["degree"] < min_degree:
+                    continue
+                a, b = x.get("a"), x.get("b")
+                if isinstance(a, str) and isinstance(b, str) and a in self.comp and b in self.comp:
                     for p, q in ((a, b), (b, a)):
                         self.links[p][q]["cochange"] = max(self.links[p][q]["cochange"], float(x["degree"]))
+        # how many files each file uses, and how many use it
+        self.uses = Counter(f for f, gs in self.links.items() for x in gs.values() if x["out"])
+        self.users = Counter(f for f, gs in self.links.items() for x in gs.values() if x["in"])
 
     def _ref(self, a, b):
-        if a and b and a != b and a in self.comp and b in self.comp:
+        if not isinstance(a, str) or not isinstance(b, str) or a == b or a not in self.of or b not in self.of:
+            return
+        self.refs.append((a, b))
+        if a in self.comp and b in self.comp:
             self.links[a][b]["out"] = 1  # a link, however many references
             self.links[b][a]["in"] = 1
 
@@ -110,15 +131,12 @@ class FileGraph:
         """{component: the strength of f's links to its files}. With hub, a
         reference to a file with n > hub users, or from a file with n > hub
         uses, counts hub / n."""
-        if hub and not hasattr(self, "_fan"):
-            self._fan = (Counter(g for gs in self.links.values() for g, x in gs.items() if x["in"]),
-                         Counter(g for gs in self.links.values() for g, x in gs.items() if x["out"]))
-        damp = lambda n: min(1.0, hub / n) if hub and n else 1.0
+        damp = lambda n: min(1.0, hub / n) if hub > 0 and n else 1.0
         out = Counter()
         for g, link in self.links.get(f, {}).items():
-            users, uses = (self._fan[0][g], self._fan[1][g]) if hub else (0, 0)
             up = incoming if self.inside(self.comp[f], self.comp[g]) else 1.0
-            out[self.comp[g]] += up * link["out"] * damp(users) + incoming * link["in"] * damp(uses) + link["cochange"]
+            out[self.comp[g]] += (up * link["out"] * damp(self.users[g]) + incoming * link["in"] * damp(self.uses[g])
+                                  + link["cochange"])
         return out
 
 
@@ -128,7 +146,7 @@ def term_vectors(ctx, files: list) -> dict:
     try:
         from ..core.vocab import Vocab
         v = Vocab(ctx.p)
-        counts = v.file_counts(files, v.base(ctx.model))
+        counts = v.file_counts(files, v.base(ctx.model), prune=False)
     except Exception:  # the words only add weight; a finding does not need them
         return {}
     tf = {f: {w: c[0] for w, c in (e.get("w") or {}).items() if c and c[0]} for f, e in counts.items()}
@@ -143,13 +161,17 @@ def term_vectors(ctx, files: list) -> dict:
     return out
 
 
-def similarity(vec: dict, others: list) -> float:
-    """Cosine of vec and the sum of the others' vectors."""
-    total = Counter()
-    for o in others:
-        total.update(o)
-    norm = math.sqrt(sum(x * x for x in total.values()))
-    return sum(x * total.get(w, 0) for w, x in vec.items()) / norm if norm else 0.0
+def total(vecs: list) -> Counter:
+    out = Counter()
+    for v in vecs:
+        out.update(v)
+    return out
+
+
+def cosine(vec: dict, other: dict) -> float:
+    """Cosine of vec (normalised) and other."""
+    norm = math.sqrt(sum(x * x for x in other.values()))
+    return sum(x * other.get(w, 0) for w, x in vec.items()) / norm if norm else 0.0
 
 
 def run(ctx, params) -> list:
@@ -159,67 +181,85 @@ def run(ctx, params) -> list:
         if base(f) in ENTRIES:
             continue
         votes = fg.votes(f, params["incoming"], params["hub"])
-        total = sum(votes.values())
         best = max((k for k in votes if k != c), key=lambda k: (votes[k], k), default=None)
-        if best is None or votes[best] < params["min_links"] or votes[best] < params["ratio"] * votes[c] \
-                or votes[best] < params["min_share"] * total:
+        if best is None or votes[best] < max(params["min_links"], params["ratio"] * votes[c],
+                                             params["min_share"] * sum(votes.values()), 1e-9):
             continue
         found[(c, best)].append((f, votes))
     if not found:
         return []
     vecs = term_vectors(ctx, sorted(fg.comp)) if params["terms"] else {}
-    by_comp = defaultdict(list)
-    for f, c in fg.comp.items():
-        by_comp[c].append(f)
-    types_of = defaultdict(list)
-    for tid, t in ctx.types.items():
-        if (t or {}).get("file"):
-            types_of[t["file"]].append(tid)
+    sums = defaultdict(Counter)  # component -> the sum of its files' word vectors
+    if vecs:
+        by_comp = defaultdict(list)
+        for f, c in fg.comp.items():
+            if f in vecs:
+                by_comp[c].append(vecs[f])
+        sums = {c: total(vs) for c, vs in by_comp.items()}
     rows = []
     for (c, k), fs in found.items():
         files = []
         for f, votes in fs:
             row = {"file": f, "own": round(votes[c], 2), "other": round(votes[k], 2)}
             if f in vecs:
-                row["words_own"] = round(similarity(vecs[f], [vecs[g] for g in by_comp[c] if g != f and g in vecs]), 2)
-                row["words_other"] = round(similarity(vecs[f], [vecs[g] for g in by_comp[k] if g in vecs]), 2)
+                own = Counter(sums.get(c) or {})
+                own.subtract(vecs[f])
+                row["words_own"] = round(cosine(vecs[f], own), 2)
+                row["words_other"] = round(cosine(vecs[f], sums.get(k) or {}), 2)
                 if row["words_other"] < 0.5 * row["words_own"]:
                     continue
             files.append(row)
-        if not files:
-            continue
-        moved = {x["file"] for x in files}
-        # after the move, does any reference still link c and k?
-        after = lambda f: k if f in moved else fg.comp[f]
-        removes = not any(link["out"] and {after(a), after(b)} == {c, k}
-                          for a, gs in fg.links.items() for b, link in gs.items())
-        rows.append((c, k, files, removes))
+        if files:
+            rows.append((c, k, files))
     rows.sort(key=lambda r: (-len(r[2]), -sum(x["other"] for x in r[2]), r[0], r[1]))
+    rows = rows[:params["max_findings"]]
+    # the references between two components, and the files the model's dependencies name as evidence
+    between = defaultdict(list)
+    for a, b in fg.refs:
+        if fg.of[a] != fg.of[b]:
+            between[frozenset((fg.of[a], fg.of[b]))].append((a, b))
+    named = defaultdict(set)
+    for (a, b), e in ctx.graph.items():
+        named[frozenset((a, b))].update(evidence_file(x) for x in e.get("evidence") or [] if isinstance(x, str))
+    types_of = defaultdict(list)
+    for tid, t in dicts(ctx.types).items():
+        if isinstance(t.get("file"), str):
+            types_of[t["file"]].append(tid)
     out = []
-    for c, k, files, removes in rows[:params["max_findings"]]:
+    for c, k, files in rows:
         fs = [x["file"] for x in files]
+        moved = set(fs)
+        after = lambda f: k if f in moved else fg.of[f]
+        pair = frozenset((c, k))
+        # The move removes the dependency when no reference links c and k afterwards, and the model names
+        # no evidence for it outside the files section (which this detector cannot see into).
+        removes = not any({after(a), after(b)} == {c, k} for a, b in between[pair]) \
+            and all(f in fg.of for f in named[pair])
         tids = [t for f in fs for t in sorted(types_of.get(f, []))]
         worded = [x for x in files if "words_own" in x]
         closer = sum(1 for x in worded if x["words_other"] > x["words_own"])
         short = lambda f: "/".join(f.split("/")[-2:])
+        votes = lambda x: f"{x['other']:.1f} to {ctx.name(k)}, {x['own']:.1f} to {ctx.name(c)}"
         if len(fs) == 1:
-            x = files[0]
             title = (f"{short(fs[0])} in {ctx.name(c)} has most of its links to {ctx.name(k)} "
-                     f"({x['other']:g} against {x['own']:g}).")
+                     f"(weighted links: {votes(files[0])}).")
         else:
             title = f"{plural(len(fs), 'file')} in {ctx.name(c)} have most of their links to {ctx.name(k)}."
-        detail = "; ".join(f"{short(x['file'])}: {x['other']:g} to {ctx.name(k)}, {x['own']:g} to {ctx.name(c)}"
-                           + (f", words closer to {ctx.name(k)}" if x.get("words_other", 0) > x.get("words_own", 0)
-                              else "") for x in files[:3]) \
-            + (f"; and {len(files) - 3} more" if len(files) > 3 else "") + "."
+        detail = "Weighted links: " + "; ".join(
+            f"{short(x['file'])}: {votes(x)}" + (f", words closer to {ctx.name(k)}"
+                                                 if x.get("words_other", 0) > x.get("words_own", 0) else "")
+            for x in files[:3]) + (f"; and {len(files) - 3} more" if len(files) > 3 else "") + "."
         if removes:
-            detail += f" No other code links {ctx.name(c)} and {ctx.name(k)}: the move removes that dependency."
+            detail += (f" After the move, no file of {ctx.name(c)} refers to {ctx.name(k)} or the other way round: "
+                       "the move removes that dependency.")
         moves = ([f"Move {', '.join(short(f) for f in fs[:3])} to {ctx.name(k)}"
                   + (f", with {', '.join((ctx.types[t].get('name') or t) for t in tids[:4])} (move_type {k})"
                      if tids else "") + "."]
-                 + ([f"Then remove_dependency between {c} and {k}: nothing else needs it."] if removes else [])
+                 + ([f"Then check that nothing else links {c} and {k}, and remove_dependency between them."]
+                    if removes else [])
                  + ["If the file is shared on purpose, make it part of the public API of " + ctx.name(c)
                     + " and leave it."])
+        other = sum(x["other"] for x in files)
         out.append(ctx.finding(
             (c, k), title, detail, "medium",
             f"{plural(len(fs), 'file')} with more links to {ctx.name(k)} than to {ctx.name(c)}",
@@ -229,8 +269,8 @@ def run(ctx, params) -> list:
             focus=[focus("components", [c, k], edges=[(c, k)], files=fs[:EXAMPLES], label="Components"),
                    *([focus("types", tids[:EXAMPLES])] if tids else [])],
             weight=Weight(25, "misplaced file").spread(len(fs), "files", per=5, cap=12)
-            .add("links to the other component", round(sum(x["other"] for x in files), 1),
-                 min(10, 3 * math.log2(sum(x["other"] for x in files) / params["min_links"])))
+            .add("links to the other component", round(other, 1),
+                 min(10, 3 * math.log2(other / max(1.0, params["min_links"]))) if other > 0 else 0)
             .add("no links to its own component", sum(1 for x in files if not x["own"]),
                  6 if all(not x["own"] for x in files) else 0)
             .add("words", f"closer to {ctx.name(k)}", 6 if worded and closer * 2 >= len(worded) else 0)

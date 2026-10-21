@@ -346,9 +346,11 @@ class Vocab:
         """The folder the model's paths are relative to (see safeio.model_base)."""
         return model_base(self.p.root, model)
 
-    def file_counts(self, files: list, base: Path | None = None) -> dict:
+    def file_counts(self, files: list, base: Path | None = None, prune: bool = True) -> dict:
         """{path: counts} for the files, from the cache when unchanged. The
-        paths are relative to base, the project root by default."""
+        paths are relative to base, the project root by default. With prune,
+        the cache keeps only these files; without, it keeps the others too
+        (for a caller that reads a subset)."""
         base = base or self.p.root
         old = read_json(self.cache_path) or {}
         if old.get("version") != CACHE_VERSION:
@@ -376,8 +378,8 @@ class Vocab:
                 continue
             out[f] = {"e": tag, **scan_text(text, lang_of(f))}
             dirty = True
-        if dirty or set(entries) != set(out):
-            write_json(self.cache_path, {"version": CACHE_VERSION, "files": out})
+        if dirty or prune and set(entries) != set(out):
+            write_json(self.cache_path, {"version": CACHE_VERSION, "files": out if prune else {**entries, **out}})
             self._gitignore()
         return out
 

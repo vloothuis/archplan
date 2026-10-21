@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from .boundaries_misplaced import ENTRIES, FileGraph, base, similarity, term_vectors
+from .boundaries_misplaced import ENTRIES, FileGraph, base, cosine, dicts, term_vectors, total
 from .common import EXAMPLES, Weight, focus, plural
 
 ID = "boundaries.unrelated_parts"
@@ -66,33 +66,31 @@ def run(ctx, params) -> list:
             rows.append((c, big, [g[0] for g in groups if len(g) == 1]))
     if not rows:
         return []
-    vecs = term_vectors(ctx, sorted(f for _, big, _ in rows for g in big for f in g)) if params["terms"] else {}
     rows.sort(key=lambda r: (-len(r[1]), -sum(map(len, r[1])), r[0]))
+    rows = rows[:params["max_findings"]]
+    vecs = term_vectors(ctx, sorted(fg.comp)) if params["terms"] else {}
+    types_of = defaultdict(list)
+    for tid, t in dicts(ctx.types).items():
+        if isinstance(t.get("file"), str):
+            types_of[t["file"]].append(tid)
+    history = isinstance((ctx.hotspots or {}).get("cochange"), dict)
     out = []
-    for c, big, loose in rows[:params["max_findings"]]:
+    for c, big, loose in rows:
         alike = None
-        if vecs:
-            a = [vecs[f] for f in big[0] if f in vecs]
-            b = [vecs[f] for g in big[1:] for f in g if f in vecs]
-            if a and b:
-                total = defaultdict(float)
-                for v in a:
-                    for w, x in v.items():
-                        total[w] += x
-                alike = round(similarity(dict(total), b), 2)
+        a = total(vecs[f] for f in big[0] if f in vecs)
+        b = total(vecs[f] for g in big[1:] for f in g if f in vecs)
+        if a and b:
+            norm = sum(x * x for x in a.values()) ** 0.5
+            alike = round(cosine({w: x / norm for w, x in a.items()}, b), 2)
         short = lambda f: f.rsplit("/", 1)[-1]
         shown = lambda g: ", ".join(short(f) for f in g[:3]) + (f" and {len(g) - 3} more" if len(g) > 3 else "")
-        title = (f"{ctx.name(c)} holds {len(big)} groups of files that neither refer to each other nor change "
-                 f"together.")
+        title = (f"{ctx.name(c)} holds {len(big)} groups of files that neither refer to each other"
+                 + (" nor change together." if history else "."))
         detail = "; ".join(f"({shown(g)})" for g in big[:3]) + (f"; and {len(big) - 3} more groups"
                                                                  if len(big) > 3 else "") + "."
         if loose:
             detail += f" {plural(len(loose), 'file')} link to nothing in it: {', '.join(map(short, loose[:3]))}" \
                       + (", …" if len(loose) > 3 else "") + "."
-        types_of = defaultdict(list)
-        for tid, t in ctx.types.items():
-            if (t or {}).get("file"):
-                types_of[t["file"]].append(tid)
         moves = [f"Split {ctx.name(c)}: give the group of {shown(big[1])} its own component "
                  "(add_component, then move_type for its types).",
                  "If the groups share a concept the code does not show (a format, a rule), make that link explicit "

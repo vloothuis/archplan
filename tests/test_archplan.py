@@ -2808,23 +2808,23 @@ class NewDetectorsTest(TempProject):
         self.assertEqual(f["evidence"]["sites"], ["lib/billing/x.ex:20", "lib/orders/x.ex:10", "lib/shipping/x.ex:30"])
         self.assertIn("The same test, status in 'paid', 'shipped', is written in 3 components", f["title"])
         self.assertNotIn("history", f["evidence"])
-        # history: the copies changed together twice, and two bug fixes missed copies
+        # history (newest first): the copies changed together twice, and one bug fix missed a copy
         for c in ("orders", "billing", "shipping"):
             m["files"][f"lib/{c}/x.ex"] = {"component": c, "refs": []}
         self.p.model_path.write_text(json.dumps(m))
         c = lambda i, subject, *fs: (f"d{i:02d}".ljust(40, "0"), "a@x", "2026-01-01", list(fs), subject)
         commits = [c(1, "fix: refunded orders count as paid", "lib/orders/x.ex", "lib/billing/x.ex"),
                    c(2, "add shipped", "lib/orders/x.ex", "lib/billing/x.ex", "lib/shipping/x.ex"),
-                   c(3, "fix typo", "lib/shipping/x.ex")]  # a fix that misses the other two copies
+                   c(3, "fix typo", "lib/shipping/x.ex")]  # older than the other copies' first commit: no miss
         self.p.path("hotspots.json").write_text(json.dumps({"key": {}, "result": {
             "head": "abc", "since_days": 365, **hotspots.analyse(commits, m)}}))
         (g,) = [f for f in self.found("concepts.string_enum") if f["evidence"]["kind"] == "decision"]
         h = g["evidence"]["history"]
-        self.assertEqual((h["together"], h["fixes_apart"]), (2, 2))
+        self.assertEqual((h["together"], h["fixes_apart"]), (2, 1))
         self.assertEqual(h["fixes"][0], {"subject": "fix: refunded orders count as paid",
                                          "changed": ["lib/billing/x.ex", "lib/orders/x.ex"],
                                          "missed": ["lib/shipping/x.ex"]})
-        self.assertIn("2 bug fixes changed some copies and missed others, such as 'fix: refunded orders count as "
+        self.assertIn("1 bug fix changed some copies and missed others, such as 'fix: refunded orders count as "
                       "paid' in billing/x.ex, orders/x.ex, not in shipping/x.ex.", g["detail"])
         self.assertTrue(g["evidence"]["moves"][0].startswith("Check shipping/x.ex"))
         self.assertGreater(g["weight"], f["weight"])
@@ -2833,11 +2833,14 @@ class NewDetectorsTest(TempProject):
         from archplan.detectors.drift import drift
         cc = {"files": {"a.py": {"commits": 2, "shas": ["s1", "s2"]}, "b.py": {"commits": 1, "shas": ["s2"]},
                         "c.py": {"commits": 300, "shas": ["s3"]}},  # cut off: cannot show a miss
-              "subjects": {"s1": "Fix rounding", "s2": "add vat", "s3": "bugfix"}}
+              "subjects": {"s3": "bugfix", "s1": "Fix rounding", "s2": "add vat"}}  # newest first
         d = drift({"cochange": cc}, ["a.py", "b.py", "c.py", "a.py"])
         self.assertEqual((d["files"], d["together"], d["fixes_apart"]), (3, 1, 2))
-        self.assertEqual(d["fixes"], [{"subject": "Fix rounding", "changed": ["a.py"], "missed": ["b.py"]},
-                                      {"subject": "bugfix", "changed": ["c.py"], "missed": ["a.py", "b.py"]}])
+        self.assertEqual(d["fixes"], [{"subject": "bugfix", "changed": ["c.py"], "missed": ["a.py", "b.py"]},
+                                      {"subject": "Fix rounding", "changed": ["a.py"], "missed": ["b.py"]}])
+        # a fix older than a file's first commit cannot have missed it: b.py may not have existed yet
+        old = {**cc, "subjects": {"s2": "add vat", "s1": "Fix rounding"}}
+        self.assertEqual(drift({"cochange": old}, ["a.py", "b.py"])["fixes_apart"], 0)
         self.assertIsNone(drift({"cochange": cc}, ["a.py"]))
         # d.py never changed: missed only when the cache lists every changed file
         self.assertEqual(drift({"cochange": cc}, ["a.py", "d.py"])["fixes_apart"], 0)
@@ -2935,10 +2938,17 @@ class NewDetectorsTest(TempProject):
         f = fs[("orders", "billing")]
         self.assertEqual(f["files"], ["lib/orders/pricing.ex"])
         self.assertEqual(f["evidence"]["files"][0], {"file": "lib/orders/pricing.ex", "own": 0, "other": 3})
-        self.assertEqual(f["title"], "orders/pricing.ex in orders has most of its links to billing (3 against 0).")
+        self.assertEqual(f["title"], "orders/pricing.ex in orders has most of its links to billing "
+                                     "(weighted links: 3.0 to billing, 0.0 to orders).")
         self.assertFalse(f["evidence"]["removes_dependency"])  # invoice.ex still refers to order.ex
         g = fs[("shipping", "billing")]
         self.assertTrue(g["evidence"]["removes_dependency"])
+        # a reference to a file that many use counts less (hub)
+        from archplan.detectors import Context
+        from archplan.detectors.boundaries_misplaced import FileGraph
+        fg = FileGraph(Context(self.p))
+        self.assertEqual(fg.users["lib/billing/tax.ex"], 3)
+        self.assertEqual(fg.votes("lib/orders/pricing.ex", hub=2)["billing"], 2 / 3 * 3)
         self.assertIn("Move shipping/label.ex to billing, with Label (move_type billing).", g["evidence"]["moves"][0])
         self.assertGreater(g["weight"], f["weight"])
         # words: pricing.ex reads like orders, not like billing, so its links alone do not move it
@@ -2995,12 +3005,12 @@ class NewDetectorsTest(TempProject):
             "head": "abc", "since_days": 365, **hotspots.analyse(commits, m)}}))
         (f,) = self.found("history.large_active_file")
         ev = f["evidence"]
-        self.assertEqual((ev["file"], ev["lines"], ev["commits"], ev["alone"], ev["bug_fixes"]), (big, 501, 12, 3, 4))
+        self.assertEqual((ev["file"], ev["lines"], ev["commits"], ev["alone"], ev["bug_fixes"]), (big, 500, 12, 3, 4))
         self.assertEqual([(r["partners"], r["commits"], r["components"]) for r in ev["responsibilities"]],
                          [(["lib/orders/tax.ex", "lib/orders/vat.ex"], 5, ["orders"]),
                           (["lib/shipping/label.ex"], 4, ["shipping"])])
         self.assertEqual(ev["responsibilities"][1]["subjects"], ["fix label 0", "fix label 1", "fix label 2"])
-        self.assertIn("orders/order.ex (501 lines, 12 commits) changes for 2 reasons", f["title"])
+        self.assertIn("orders/order.ex (500 lines, 12 commits) changes for 2 reasons", f["title"])
         self.assertIn("into its own module in shipping", ev["moves"][1])
         (self.root / big).write_text("x\n" * 50)  # small: not a finding
         self.assertEqual(self.found("history.large_active_file"), [])

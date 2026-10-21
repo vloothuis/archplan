@@ -9,12 +9,13 @@ commits. Moving that part out, next to its partners, makes the file smaller
 where it costs the most, and leaves alone what only looks large.
 
 A candidate has at least min_lines lines and min_commits commits (cached
-hotspots, cochange.files; the newest MAX_FILE_SHAS of them). Its partners
-are the files the cache pairs it with (they change together in 3 or more
-commits and 30% or more of the commits of the one that changes least).
-Partners that change with the file in the same commits form one
-responsibility (see responsibilities). Each needs min_together commits. A file with two or more
-responsibilities is a finding. This detector never runs git."""
+hotspots, cochange.files; the analysis reads the newest MAX_FILE_SHAS of
+them). Its partners are the files it shares at least min_together of those
+commits with, in at least min_degree of the commits of the one that changes
+least. Partners that change with the file in the same commits form one
+responsibility (see responsibilities). Each needs min_together commits. A
+file with two or more responsibilities is a finding. This detector never
+runs git."""
 
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from collections import defaultdict
 
 from ..core.hotspots import Mapper
 from ..core.vocab import is_test
+from .boundaries_misplaced import dicts, strs
 from .common import EXAMPLES, Weight, focus, plural
 from .drift import fix_test
 
@@ -30,11 +32,11 @@ ID = "history.large_active_file"
 NAME = "Large files that change for several reasons"
 GROUP = "history"
 NEEDS = {"git", "files", "cochange"}
-PARAMS = {"min_lines": 400, "min_commits": 10, "min_together": 3, "max_findings": 15}
+PARAMS = {"min_lines": 400, "min_commits": 10, "min_together": 3, "min_degree": 0.3, "max_findings": 15}
 EXAMPLES_PER = 3  # commit subjects per responsibility
 
 
-def responsibilities(f: str, shas: dict, partners: set, min_together: int) -> list:
+def responsibilities(f: str, shas: dict, min_together: int, min_degree: float) -> list:
     """[{"partners", "commits"}] for file f, largest first: the groups of
     partner files that change with f, and f's commits that touch them.
 
@@ -42,10 +44,14 @@ def responsibilities(f: str, shas: dict, partners: set, min_together: int) -> li
     next partner joins the first group whose starting partner it changes
     with in at least half of its commits with f, else starts its own. A
     group grows from one seed, so a partner that changes with everything
-    cannot chain all groups into one."""
+    cannot chain all groups into one. A group that shares half or more of
+    its commits with a larger one is the same reason, and joins it."""
     mine = shas.get(f) or set()
-    shared = {g: mine & shas.get(g, set()) for g in partners if g != f}
-    shared = {g: s for g, s in shared.items() if len(s) >= min_together}
+    shared = {}
+    for g, s in shas.items():
+        both = mine & s if g != f else set()
+        if len(both) >= min_together and len(both) >= min_degree * min(len(mine), len(s)):
+            shared[g] = both
     groups = []
     for g in sorted(shared, key=lambda g: (-len(shared[g]), g)):
         home = next((x for x in groups if len(shared[g] & shared[x[0]]) >= 0.5 * len(shared[g])), None)
@@ -54,46 +60,44 @@ def responsibilities(f: str, shas: dict, partners: set, min_together: int) -> li
         else:
             home.append(g)
     out = []
-    for gs in groups:
+    for gs in sorted(groups, key=lambda gs: -len(set().union(*(shared[g] for g in gs)))):
         commits = set().union(*(shared[g] for g in gs))
-        if len(commits) >= min_together:
-            out.append({"partners": gs, "commits": commits})
+        home = next((r for r in out if len(commits & r["commits"]) >= 0.5 * len(commits)), None)
+        if home:
+            home["partners"] += gs
+            home["commits"] |= commits
+        elif len(commits) >= min_together:
+            out.append({"partners": list(gs), "commits": commits})
     return sorted(out, key=lambda r: (-len(r["commits"]), r["partners"]))
 
 
 def run(ctx, params) -> list:
     cc = ctx.hotspots.get("cochange") or {}
-    files = ctx.model.get("files") or {}
-    mapper = Mapper(ctx.components)
-    comp_of = lambda f: (files.get(f) or {}).get("component") or mapper(f)
-    entries = cc.get("files") if isinstance(cc.get("files"), dict) else {}
-    shas = {f: set(v.get("shas") or []) for f, v in entries.items()
-            if isinstance(v, dict) and f in files and not is_test(f)}
+    files = dicts(ctx.model.get("files"))
+    mapper = Mapper(dicts(ctx.components))
+    comp_of = lambda f: files[f].get("component") if isinstance(files[f].get("component"), str) else mapper(f)
+    entries = dicts(cc.get("files"))
+    shas = {f: set(strs(v.get("shas"))) for f, v in entries.items() if f in files and not is_test(f)}
     count = lambda f: max(entries[f].get("commits") if isinstance(entries[f].get("commits"), int) else 0,
                           len(shas[f]))
-    paired = defaultdict(set)
-    for x in cc.get("pairs") or []:
-        if isinstance(x, dict) and x.get("a") in shas and x.get("b") in shas:
-            paired[x["a"]].add(x["b"])
-            paired[x["b"]].add(x["a"])
     subjects = cc.get("subjects") if isinstance(cc.get("subjects"), dict) else {}
     rank = {x: i for i, x in enumerate(subjects)}  # newest first
     newest = lambda commits: [subjects[x] for x in sorted(commits, key=lambda x: (rank.get(x, len(rank)), x))
                               if isinstance(subjects.get(x), str)]
     is_fix = fix_test()
     types_of = defaultdict(list)
-    for tid, t in ctx.types.items():
-        if (t or {}).get("file"):
+    for tid, t in dicts(ctx.types).items():
+        if isinstance(t.get("file"), str):
             types_of[t["file"]].append(tid)
     rows = []
     for f in sorted(shas):
-        if count(f) < params["min_commits"] or comp_of(f) not in ctx.internal:
+        if count(f) < max(1, params["min_commits"]) or comp_of(f) not in ctx.internal:
             continue
         text = ctx.read(f)
-        lines = text.count("\n") + 1 if text else 0
-        if lines < params["min_lines"]:
+        lines = len(text.splitlines()) if text else 0
+        if lines < max(1, params["min_lines"]):
             continue
-        rs = responsibilities(f, shas, paired[f], params["min_together"])
+        rs = responsibilities(f, shas, max(1, params["min_together"]), params["min_degree"])
         if len(rs) >= 2:
             rows.append((f, lines, rs))
     rows.sort(key=lambda r: (-count(r[0]) * len(r[2]), r[0]))
@@ -114,14 +118,15 @@ def run(ctx, params) -> list:
             + (", such as '" + "', '".join(newest(r["commits"])[:2]) + "'" if newest(r["commits"]) else "") + "."
             for r in rs[:3])
         if alone:
-            detail += f" {plural(alone, 'commit')} changed it alone."
+            detail += (f" {alone} of its {'last ' if len(shas[f]) < n else ''}{plural(len(shas[f]), 'commit')} "
+                       "changed none of these partners.")
         moves = []
         for r in rs[:2]:
             other = [x for x in where(r) if x != c]
             target = f" in {ctx.name(other[0])}" if len(other) == 1 and len(where(r)) == 1 else " next to them"
             moves.append(f"Extract the part of {short(f)} that changes with "
                          f"{', '.join(short(g) for g in r['partners'][:2])} into its own module{target}.")
-        moves.append("Leave the part that changes alone: large but stable code costs little.")
+        moves.append("Leave the part that changes with none of them: large but stable code costs little.")
         out.append(ctx.finding(
             (f,), title, detail, "medium",
             f"{lines} lines, {plural(n, 'commit')}, {len(rs)} groups of partner files",
@@ -135,7 +140,7 @@ def run(ctx, params) -> list:
             focus=[focus("components", list(dict.fromkeys([c] + [x for r in rs for x in where(r)])),
                          files=[f] + [g for r in rs for g in r["partners"]][:EXAMPLES - 1], label="Components")],
             weight=Weight(25, "large active file").spread(len(rs), "responsibilities", per=8, cap=16, free=1)
-            .add("commits", n, min(12, 4 * math.log2(n / params["min_commits"])))
-            .add("lines", lines, min(8, 4 * math.log2(lines / params["min_lines"])))
+            .add("commits", n, min(12, 4 * math.log2(n / max(1, params["min_commits"]))))
+            .add("lines", lines, min(8, 4 * math.log2(lines / max(1, params["min_lines"]))))
             .add("bug fixes", fixes, min(8, 2 * math.log2(1 + fixes)))))
     return out

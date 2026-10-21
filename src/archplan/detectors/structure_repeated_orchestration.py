@@ -21,7 +21,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from .common import EXAMPLES, Weight, focus, plural
-from .drift import drift, move
+from .drift import drift, move, weigh
 from .security_common import call_file, called, participant
 
 ID = "structure.repeated_orchestration"
@@ -118,11 +118,9 @@ def run(ctx, params) -> list:
                        "Leave them if the entry points will grow apart: shared steps today are not one rule."]},
             focus=[focus("sequences", [sid for e in es for sid in seq_of[e]][:EXAMPLES]),
                    focus("components", entry_comps + comps)],
-            weight=Weight(25, "repeated orchestration").spread(len(es), "entry points", per=6, cap=15,
+            weight=weigh(Weight(25, "repeated orchestration").spread(len(es), "entry points", per=6, cap=15,
                                                                free=params["min_entries"] - 1)
             .spread(len(r), "steps", per=6, cap=12, free=params["min_steps"] - 1)
             .add("changes together", f"{together} of {pairs} pairs",
-                 15 * together / pairs - 5 if pairs and ctx.hotspots else 0)
-            .add("fixes that missed a copy", d["fixes_apart"] if d else 0,
-                 min(12, 5 * d["fixes_apart"]) if d else 0)))
+                 15 * together / pairs - 5 if pairs and ctx.hotspots else 0), d, together=False)))
     return out
