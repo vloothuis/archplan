@@ -936,6 +936,11 @@ class HostileInputTest(TempDir):
         self.assertEqual(access.write_at("python", "model = User\nx.save()\n", py, False), 0)
         self.assertIsNone(access.write_at("python", "x.save()\nmodel = User\n", py, False))
 
+    def test_go_comments(self):
+        for label, unit in (("unclosed block comments", "/* "), ("block comments", "/*x*/"),
+                            ("unclosed strings", '"/\n'), ("raw strings", "`/`"), ("line comments", "//\n")):
+            self.fast(label, access.strip_go_comments, mb(unit) + "/")
+
     def test_sql_in_go_strings(self):
         (self.root / "store").mkdir()
         (self.root / "store/entity.go").write_text(
