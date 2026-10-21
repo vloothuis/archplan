@@ -415,7 +415,12 @@ two components create the table in as many files, neither gets it. Test
 files and the `schema.sql` or `structure.sql` dump do not count. archplan
 also records which components use each table through the ORM, which ones
 write it, and raw SQL reads and writes. Raw SQL is found in Elixir, Python,
-Ruby, TypeScript, JavaScript and Go files.
+Ruby, TypeScript, JavaScript and Go files. In Go, SQL in comments does not
+count.
+
+SQLite keeps a full-text search table `x` in shadow tables such as `x_data`,
+`x_idx` and `x_config`. Each shadow table gets the owner of `x`, and counts
+as used when `x` is used.
 
 To name owners yourself, add `schema.owners` to `.archplan/config.json`. A
 key is a table name or a glob on table names. The config wins over every

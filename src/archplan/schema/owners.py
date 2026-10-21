@@ -8,8 +8,12 @@
   table, as a string literal in a source file of the model or in a .sql file,
   such as a migration. A file belongs to the component that owns its path.
   When several components create the table in as many files, none of them
-  owns it. Database dumps (schema.sql, structure.sql) and test files do not
-  count. This step only fills tables that have no owner yet."""
+  owns it. Database dumps (schema.sql, structure.sql), test files and Go
+  comments do not count. This step only fills tables that have no owner yet.
+- fts shadow: the tables SQLite keeps for a full-text virtual table x
+  (x_data, x_idx, x_config, x_content, x_docsize for FTS5; x_segments,
+  x_segdir, x_stat too for FTS3 and FTS4) belong to the owner of x, and
+  count as used when x is."""
 
 from __future__ import annotations
 
@@ -19,7 +23,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 from ..core.hotspots import Mapper
-from .access import NOT_WRITERS, Reader
+from .access import NOT_WRITERS, Reader, source_text
 
 IDENT = r"(?:`[^`\n]{1,128}`|\"[^\"\n]{1,128}\"|\[[^\]\n]{1,128}\]|[A-Za-z_]\w{0,127})"
 CREATE = re.compile(rf"(?i)\bCREATE\s+(?:(?:GLOBAL|LOCAL)\s+)?(?:(?:TEMP|TEMPORARY|UNLOGGED|VIRTUAL)\s+)?TABLE\s+"
@@ -68,6 +72,33 @@ def apply_config(maps: dict, tables: dict, cfg, components: dict) -> list:
     return warnings
 
 
+# SQLite full-text search: a virtual table x keeps its index in shadow tables
+# x_<suffix>. (always there, sometimes there) per FTS version.
+FTS_SHADOWS = ((("data", "idx", "config"), ("content", "docsize")),                 # fts5
+               (("content", "segments", "segdir"), ("docsize", "stat")))            # fts3, fts4
+
+
+def shadow_tables(tables: dict) -> dict:
+    """{shadow table: its full-text virtual table} for SQLite FTS tables."""
+    out = {}
+    for v in tables:
+        for always, sometimes in FTS_SHADOWS:
+            if all(f"{v}_{s}" in tables for s in always):
+                out.update({f"{v}_{s}": v for s in always + sometimes if f"{v}_{s}" in tables})
+    return out
+
+
+def apply_shadows(maps: dict, tables: dict) -> None:
+    """Give each FTS shadow table the owner of its virtual table, and mark it
+    used through that table. A config rule for the shadow table itself wins."""
+    for shadow, v in shadow_tables(tables).items():
+        if (maps.get(shadow) or {}).get("via") == "config":
+            continue
+        own = (maps.get(v) or {}).get("component")
+        keep = {k: x for k, x in (maps.get(shadow) or {}).items() if k == "type"}
+        maps[shadow] = {**keep, "through": v, **({"component": own, "via": "fts shadow"} if own else {})}
+
+
 def unquote(name: str) -> str:
     return ".".join(p.strip().strip('`"[]') for p in name.split("."))
 
@@ -114,7 +145,7 @@ def created(model: dict, base: Path, root: Path, pre: str, tables: dict, walk, s
         comp = (f.get("component") if isinstance(f, dict) else None) or mapper(path)
         if not comp:
             continue
-        text = rd.text(path)
+        text = source_text(rd, path)
         if "table" not in text.lower():
             continue
         for m in CREATE.finditer(text):

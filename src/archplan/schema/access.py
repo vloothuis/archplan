@@ -112,6 +112,24 @@ PRISMA = re.compile(r"\b\w+\.(\w+)\.(findMany|findUnique|findUniqueOrThrow|findF
 PRISMA_WRITES = {"create", "createMany", "update", "updateMany", "upsert", "delete", "deleteMany"}
 
 
+GO_TOKENS = re.compile(r'"(?:[^"\\\n]|\\.)*"|`[^`]*`|\'(?:[^\'\\\n]|\\.)*\'|//[^\n]*|/\*.*?\*/', re.S)
+
+
+def strip_go_comments(text: str) -> str:
+    """text with its Go comments blanked out, so SQL quoted in a comment does
+    not count. Offsets and line breaks stay, so line numbers still match."""
+    def blank(m):
+        s = m.group(0)
+        return re.sub(r"[^\n]", " ", s) if s[:2] in ("//", "/*") else s
+    return GO_TOKENS.sub(blank, text) if "/" in text else text
+
+
+def source_text(rd, path: str) -> str:
+    """The text of a source file for the SQL scans: Go without its comments."""
+    text = rd.text(path)
+    return strip_go_comments(text) if lang_of(path) == "go" else text
+
+
 def lang_of(path: str) -> str | None:
     ext = path.rsplit(".", 1)[-1] if "." in path else ""
     return {"ex": "elixir", "exs": "elixir", "py": "python", "rb": "ruby", "ts": "ts", "tsx": "ts", "js": "ts",
@@ -197,7 +215,7 @@ def access(model: dict, root: Path, tables: dict, maps: dict, prisma: bool = Fal
     for path in files:
         if "migrations" in path.split("/") or "migrate" in path.split("/") or lang_of(path) is None:
             continue
-        text = rd.text(path)
+        text = source_text(rd, path)
         comp = component_of(model, path)
         if not comp:
             continue

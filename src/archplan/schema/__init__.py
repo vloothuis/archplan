@@ -232,6 +232,7 @@ def build(root: Path, model: dict, sources: list | None = None, live: dict | Non
         if not (maps.get(table) or {}).get("component"):
             maps.setdefault(table, {}).update({"component": comp, "via": "create"})
     warnings = owners_mod.apply_config(maps, tables, owners, model.get("components") or {})
+    owners_mod.apply_shadows(maps, tables)
     # the private keys used for access mapping stay out of the model
     clean = {t: {k: v for k, v in mp.items() if k in ("type", "component", "via", "through")}
              for t, mp in sorted(maps.items()) if mp.get("component") or mp.get("type")}
