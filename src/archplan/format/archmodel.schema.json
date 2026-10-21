@@ -300,7 +300,7 @@
               "id": { "type": "string" }
             }
           },
-          "key": { "enum": ["zone", "gateway", "gated_by", "guard", "sink", "auth"] },
+          "key": { "enum": ["zone", "gateway", "gated_by", "guard", "sink", "validates", "interprets", "source", "trusts", "auth"] },
           "value": { "type": ["string", "boolean", "array"], "items": { "type": "string" } },
           "reason": { "type": "string" },
           "at": {

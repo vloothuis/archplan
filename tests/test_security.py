@@ -8,7 +8,8 @@ from archplan import blast  # noqa: E402
 from archplan.detectors import (security_gateway, security_open_entry, security_risk_hotspot,  # noqa: E402
                                 security_unguarded_entry,
                                 security_unchecked_entry, security_unguarded_path, security_unguarded_sink,
-                                security_untested_denial, security_untraced, security_zone_dependency)
+                                security_unchecked_input, security_untested_denial, security_untraced,
+                                security_zone_dependency)
 from archplan.detectors.common import graph  # noqa: E402
 from archplan.detectors.security_common import called, short  # noqa: E402
 
@@ -615,6 +616,88 @@ class SecurityTest(unittest.TestCase):
         m["declarations"].append(decl("component", "vault", "gateway", ["audit"]))
         self.assertEqual(sorted((f["evidence"]["from"], f["evidence"]["to"]) for f in run(security_gateway, m)),
                          [("export", "vault"), ("web", "vault")])
+
+    def input_model(self):
+        m = model()
+        entry = "internal/web.(*App).search"
+
+        def seq(*calls, entry=entry):
+            return {"entry": entry, "messages": [msg("Caller", "web", "(*App).search(w, r)", 0)] + [
+                msg(*c) if len(c) == 4 else msg("web", *c) for c in calls]}
+        m["sequences"] = {
+            "unchecked": seq(("orders", "Load(id)", 1), ("orders", "Query(q)", 1)),
+            "checked": seq(("auth", "Clean(form)", 1), ("orders", "Query(q)", 1)),
+            "own-calls": seq(("auth", "Clean(form)", 1), ("auth", "orders", "Query(q)", 2)),
+            "wrong-kind": seq(("auth", "Escape(s)", 1), ("orders", "Query(q)", 1), ("vault", "Render(s)", 1)),
+            "trusting": seq(("orders", "Apply(o)", 1)),
+            "second-step": {"entry": entry, "messages": [
+                msg("Caller", "web", "(*App).search(w, r)", 0), msg("web", "auth", "Clean(form)", 1),
+                msg("Caller", "web", "(*App).search(w, r)", 0), msg("web", "orders", "Query(q)", 1)]},
+            "hook": {"messages": [msg("Caller", "web", "Tick()", 0), msg("web", "orders", "Query(q)", 1),
+                                  msg("web", "auth", "ReadHook(r)", 1), msg("web", "vault", "Exec(cmd)", 1)]},
+        }
+        m["declarations"] += [
+            decl("function", "internal/auth/forms.go:Clean", "validates", True, file="internal/auth/forms.go"),
+            decl("function", "internal/auth/forms.go:Escape", "validates", "html", file="internal/auth/forms.go"),
+            decl("function", "internal/auth/hooks.go:ReadHook", "source", True, file="internal/auth/hooks.go"),
+            decl("function", "internal/orders/store.go:Query", "interprets", "sql", file="internal/orders/store.go"),
+            decl("function", "internal/orders/store.go:Apply", "trusts", True, file="internal/orders/store.go"),
+            decl("function", "internal/vault/run.go:Exec", "interprets", "shell", file="internal/vault/run.go"),
+            decl("function", "internal/vault/view.go:Render", "interprets", "html", file="internal/vault/view.go")]
+        return m
+
+    def test_unchecked_input(self):
+        fs = run(security_unchecked_input, self.input_model())
+        got = {(f["evidence"]["entry"], f["evidence"]["kind"]): f["evidence"]["sequences"] for f in fs}
+        # checked and own-calls pass a validator first; Escape covers Render, not Query; the hook
+        # sequence has no entry, so only the source's input counts.
+        self.assertEqual(got, {
+            ("internal/web.(*App).search", "sql"): ["second-step", "unchecked", "wrong-kind"],
+            ("internal/web.(*App).search", "trusts"): ["trusting"],
+            ("internal/auth/hooks.go:ReadHook", "shell"): ["hook"]})
+        f = {x["evidence"]["kind"]: x for x in fs}
+        self.assertEqual(f["sql"]["title"], "(*App).search passes input to Query, which reads it as sql, before any check.")
+        self.assertEqual([r["function"] for r in f["sql"]["evidence"]["review"]], ["web: search"])
+        self.assertEqual(f["shell"]["strength"], "strong")
+        self.assertEqual(f["trusts"]["components"], ["web", "orders"])
+        self.assertEqual(len(run(security_unchecked_input, self.input_model(), report_trusts=False)), 2)
+        self.assertEqual(run(security_unchecked_input), [])  # nothing declared
+
+    def test_unchecked_input_chain(self):
+        m = self.input_model()
+        m["sequences"] = {"nested": {"entry": "internal/web.(*App).search", "messages": [
+            msg("Caller", "web", "(*App).search(w, r)", 0), msg("web", "auth", "Lookup(id)", 1),
+            msg("web", "orders", "Load(id)", 1), msg("orders", "orders", "build(q)", 2),
+            msg("orders", "orders", "Query(q)", 3)]}}
+        f = run(security_unchecked_input, m)[0]
+        # Lookup ran before, but does not pass the input on.
+        self.assertEqual([r["function"] for r in f["evidence"]["review"]],
+                         ["web: search", "orders: Load", "orders: build"])
+        self.assertIn("through 3 functions: web: search, orders: Load, orders: build.", f["detail"])
+        self.assertEqual(f["evidence"]["entry"], "internal/web.(*App).search")
+        # A declared entry point names the request.
+        m["declarations"].append(
+            decl("entrypoint", "internal/web/search.go:search", "auth", "none", "public", file="internal/web/search.go"))
+        self.assertEqual(run(security_unchecked_input, m)[0]["evidence"]["entry"], "internal/web/search.go:search")
+
+    def test_blast_unchecked_input(self):
+        m = self.input_model()
+        m["signatures"] = [{"id": "internal/web.(*App).search", "file": "internal/web/search.go", "component": "web",
+                            "name": "search"}]
+        m["declarations"].append(
+            decl("entrypoint", "internal/web/search.go:search", "auth", "none", "public", file="internal/web/search.go"))
+        ctx = Ctx(m)
+        es = {e["entry"]: e for e in blast.entries(ctx)}
+        e = es["internal/web/search.go:search"]
+        self.assertIn("unchecked input", e["gaps"])
+        self.assertEqual(sorted(u["kind"] for u in e["unchecked"]), ["sql", "trusts"])
+        self.assertEqual(e["review"][0], {"function": "web: search", "file": "internal/web/search.go"})
+        p = {x["entry"]: x for x in blast.plan(blast.entries(ctx))}["internal/web/search.go:search"]
+        self.assertIn("holds a quote", p["tests"][-1])
+        self.assertIn("Review first, as they pass its unchecked input on: web: search",
+                      blast.text(blast.report(ctx, ["internal/web/search.go"])))
+        t = blast.touched(ctx, [e], ["internal/web/search.go"])
+        self.assertEqual(t[0]["because"], ["internal/web/search.go passes its unchecked input on"])
 
 
 if __name__ == "__main__":

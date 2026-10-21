@@ -516,7 +516,9 @@ not write this section.
 
 - `target.kind` and `key` form the key: `component.zone`,
   `component.gateway`, `component.gated_by`, `function.guard`,
-  `function.sink` or `entrypoint.auth`. A gateway or `gated_by` value is a
+  `function.sink`, `function.validates`, `function.interprets`,
+  `function.source`, `function.trusts` or `entrypoint.auth`. See
+  [annotator plugins](annotator-plugins.md#keys) for their values. A gateway or `gated_by` value is a
   list of component ids.
 - A function or entry point id is the model's id from `signatures` or
   `types`, or `<file>:<name>` when the model has none.

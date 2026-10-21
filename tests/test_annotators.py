@@ -207,6 +207,31 @@ class AnnotatorTest(unittest.TestCase):
         self.assertEqual(res["results"][0]["status"], "applied", res)
         self.assertNotIn("sink", (self.root / "shop/ops/views.py").read_text())
 
+    def test_input_checks(self):
+        text = ("# archplan: validates\ndef clean(): ...\n# archplan: validates=html\ndef escape(): ...\n"
+                "# archplan: interprets=sql source\ndef raw(): ...\n# archplan: trusts interprets=ldap\ndef run(): ...\n")
+        found = markers.scan(text, "#", python=True)
+        self.assertEqual([x[2] for x in found], [
+            {"function.validates": True}, {"function.validates": "html"},
+            {"function.interprets": "sql", "function.source": True}, {"function.trusts": True}])
+        self.assertEqual(found[3][4], ["interprets=ldap"])
+        for key, value, ok in (("validates", True, True), ("validates", "sql", True), ("validates", "authz", False),
+                               ("interprets", "shell", True), ("interprets", True, False),
+                               ("source", True, True), ("trusts", "sql", False)):
+            self.assertEqual(annotators.check_change({"op": "set", "target": {"kind": "function", "id": "x"},
+                                                      "key": key, "value": value}) is None, ok, (key, value))
+        res = self.changes(
+            {"op": "set", "target": {"kind": "function", "id": "shop.ops.views.orders"}, "key": "interprets",
+             "value": "sql"},
+            {"op": "set", "target": {"kind": "function", "id": "shop.accounts.guards.require_user"},
+             "key": "validates", "value": True}, apply=True)
+        self.assertEqual([r["status"] for r in res["results"]], ["applied", "applied"], res)
+        self.assertIn("# archplan: interprets=sql\n", (self.root / "shop/ops/views.py").read_text())
+        self.assertIn("# archplan: validates\n", (self.root / "shop/accounts/guards.py").read_text())
+        got = self.declared()
+        self.assertEqual(got[("function", "shop.ops.views.orders", "interprets")]["value"], "sql")
+        self.assertIs(got[("function", "shop.accounts.guards.require_user", "validates")]["value"], True)
+
     def test_gateways(self):
         for value, ok in ((["shop.ops"], True), (["shop/ops", "a.b"], True), ("shop.ops", False), ([], False),
                           (["a b"], False), (["a]"], False)):
