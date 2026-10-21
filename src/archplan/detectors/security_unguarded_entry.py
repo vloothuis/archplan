@@ -11,11 +11,13 @@ own entry is judged on the whole sequence. Entry points without an auth
 declaration are reported too, as weak, once the project declares any guard:
 their trace shows no guard either. `auth=none` entry points are skipped, and
 so is an entry point with any request that passes the guard it needs.
-Sequences marked `"guards": "off"` ran without guards and are left out. One
-finding per entry point, with the sequences that show it."""
+Sequences marked `"guards": "off"` ran without guards and are left out, and
+so is a request refused (`status:4xx` or `halt`) before it reached a sink.
+One finding per entry point, with the sequences that show it."""
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 
 from .common import Weight, finding, focus, plural
@@ -83,6 +85,19 @@ def runs(ctx) -> list:
     return out
 
 
+TURNED_AWAY = re.compile(r"^(?:status:4\d\d|halt)$")
+
+
+def turned_away(ctx, msgs: list) -> bool:
+    """Whether the request was refused (a 4xx status or a halt) without
+    reaching a declared sink, such as a 405 from a method check. It shows
+    nothing about the guard."""
+    if not any(TURNED_AWAY.match(str(m.get("outcome") or "")) for m in msgs):
+        return False
+    sinks = [target(ctx, d) for d in decls(ctx, "function", "sink")]
+    return not any(hit(ctx, s, m) for m in msgs for s in sinks)
+
+
 def guarded(ctx, d: dict | None, msgs: list) -> bool:
     """Whether the messages pass the guard that the entry point's auth needs."""
     need = all_guards(ctx, "authz") if d and d.get("value") == "authz" else all_guards(ctx)
@@ -95,7 +110,7 @@ def run(ctx, params) -> list:
     declared, safe = {}, set()
     seqs = ctx.model.get("sequences") or {}
     for entry, d, sid, msgs in runs(ctx):
-        if guards_off(seqs.get(sid)):
+        if guards_off(seqs.get(sid)) or turned_away(ctx, msgs):
             continue
         value = d.get("value") if d else None
         if value == "none" or (value is None and not (params["report_undeclared"] and guards)):

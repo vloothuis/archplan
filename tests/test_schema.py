@@ -906,6 +906,17 @@ class HostileInputTest(TempDir):
         self.assertEqual(access.write_at("python", "model = User\nx.save()\n", py, False), 0)
         self.assertIsNone(access.write_at("python", "x.save()\nmodel = User\n", py, False))
 
+    def test_sql_in_go_strings(self):
+        (self.root / "store").mkdir()
+        (self.root / "store/entity.go").write_text(
+            'package store\n\nconst get = `SELECT id FROM entities WHERE id = ?`\n'
+            'const put = "INSERT INTO entities (id) VALUES (?)"\n')
+        model = {"components": {"store": {"name": "store", "match": ["store/**"]}},
+                 "files": {"store/entity.go": {"component": "store"}}}
+        acc = access.access(model, self.root, {"entities": {}}, {})
+        self.assertEqual({(a["component"], a["table"], a["mode"]) for a in acc},
+                         {("store", "entities", "read"), ("store", "entities", "write")})
+
     @unittest.skipUnless(shutil.which("node"), "needs node")
     def test_ts_script_blocks(self):
         import subprocess

@@ -414,7 +414,8 @@ such as a migration. A file belongs to the component that owns its path. When
 two components create the table in as many files, neither gets it. Test
 files and the `schema.sql` or `structure.sql` dump do not count. archplan
 also records which components use each table through the ORM, which ones
-write it, and raw SQL reads and writes.
+write it, and raw SQL reads and writes. Raw SQL is found in Elixir, Python,
+Ruby, TypeScript, JavaScript and Go files.
 
 To name owners yourself, add `schema.owners` to `.archplan/config.json`. A
 key is a table name or a glob on table names. The config wins over every
@@ -557,7 +558,7 @@ The security detectors read the declarations:
 
 | Kind | Finds |
 |---|---|
-| `security.unguarded_entry` | a traced entry point whose request passes no guard: strong when it is declared `auth=required`, or `auth=authz` and the request passes no authorization guard; weak when it has no auth declaration. A test that makes several requests has each judged on its own. Needs sequences. |
+| `security.unguarded_entry` | a traced entry point whose request passes no guard: strong when it is declared `auth=required`, or `auth=authz` and the request passes no authorization guard; weak when it has no auth declaration. A test that makes several requests has each judged on its own. A request refused (`status:4xx` or `halt`) before it reaches a sink, and a sequence marked `"guards": "off"`, are left out. Needs sequences. |
 | `security.unchecked_entry` | an entry point declared `auth=authz` whose code, with the functions of its file that it calls and the file's plugs and filters, names no authorization guard. With signatures, it also reads the functions it calls in other files of its package (its component, same folder). A call on a value, such as `ops.run()`, resolves by the receiver type, so a common name does not pull in an unrelated function. It reads at most `max_functions` functions (30). Static, so it covers entry points no test runs; a traced request that passes the guard clears it. Medium. |
 | `security.unguarded_sink` | a trace that calls a write sink before any authorization guard (`guard` or `guard=authz`), strong; or a read sink with no such guard anywhere in the trace, medium. Calls inside a guard are its own. A `guard=authn` guard does not count. Needs sequences. |
 | `security.untested_denial` | an entry point declared `auth=required` or `auth=authz` whose traced requests pass the guard it needs, but none shows the guard or the entry point refusing a caller (a call `outcome` such as `raise`, `error`, `halt` or `status:403`, or a test title such as "rejects another user"). Names the guard to make fail and the sinks the request reaches. Medium; weak when the traces record no outcomes. Needs sequences. |
