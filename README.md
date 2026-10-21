@@ -289,6 +289,8 @@ follow it".
 | `boundaries.stability` | components in the zone of pain (stable and concrete) or of uselessness (abstract and unused), from Martin's metrics |
 | `boundaries.balance` | dependencies out of balance, after Khononov's balanced coupling: strong coupling (`min_strength`, default `functional`: the two change together; `intrusive`: the downstream writes the upstream's tables or reads them with SQL; `model`: it uses the upstream's concrete types or queries its tables through their ORM types) over a long distance (`far` folder steps, plus `owner_distance` for different owners) on a volatile upstream (among the `volatile_share` most changed components, with `min_commits` or more). Needs the cached `archplan hotspots`. The strength, distance and volatility of every dependency are in the result's extras |
 | `boundaries.unused_public` | files with public types in a component others depend on, which only that component uses (needs `files`) |
+| `boundaries.misplaced_file` | files whose links point to another component more than to their own (needs `files`). The links are the files a file refers to, the files that refer to it (`incoming`, default 0.5), and the files it changes together with (degree `min_degree` or more, cached hotspots). A reference to a file many files use, or from a file that uses many, counts less (`hub`); so does one to an enclosing component's files. The other component needs `min_links` votes, `ratio` times those of the file's own component and `min_share` of all. When the words of the file's identifiers are much closer to its own component, it is left out. One finding per component pair; the move is `move_type` for the file's types, and the finding says when that removes the dependency. After Jabeen et al. (arXiv 2610.19769) and PairSmell (Zhong et al., arXiv 2411.01012) |
+| `boundaries.unrelated_parts` | a component whose files fall into 2 or more groups of `min_group` files that neither refer to each other nor change together: a split candidate. Groups whose words are alike weigh less. After PairSmell's inapt collocated pairs |
 | `evolution.ownership` | components with many active authors and no clear owner, and authors spread over many components (cached hotspots) |
 
 Each finding has a weight from 0 to 100: how much it matters. A detector
@@ -302,7 +304,7 @@ Findings about duplicated knowledge (a scattered decision of
 `structure.repeated_orchestration`) also weigh the history of the copies'
 files: commits that changed several copies, and, weighing more, bug fixes
 that changed some copies and missed others. Such a fix suggests the copies
-have drifted apart (after Mondal et al., arXiv 2409.08555). The finding names
+have drifted apart (after Yokomori and Inoue, arXiv 2409.08555). The finding names
 the fix and the files it missed in `evidence.history`. The
 strength follows from the weight: strong from 65, medium from 40, else weak.
 For a vocabulary leak, a term that only shows up in comments weighs least,

@@ -8,8 +8,8 @@ the commits of each file (cochange.files). A commit that changes two or more
 of the copies' files is the cost of the duplication: each change has to be
 made in every place. A bug fix that changes some of the files and misses
 others is worse: the copies have probably drifted apart, and the files the
-fix missed may still have the bug. Mondal et al. (2024, arXiv 2409.08555)
-found that a large share of clone pairs change in this way.
+fix missed may still have the bug. Yokomori and Inoue (2024, arXiv
+2409.08555) found that a large share of clone pairs change in this way.
 
 This works per file, not per line: a commit to a file need not touch the
 copy in it. A bug fix is the most likely kind of commit to touch the logic,

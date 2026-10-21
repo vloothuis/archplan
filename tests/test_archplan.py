@@ -2909,6 +2909,72 @@ class NewDetectorsTest(TempProject):
         self.assertEqual(f["focus"][0]["view"], "sequences")
         self.assertEqual(f["components"], ["orders", "core", "billing"])
 
+    def test_misplaced_file(self):
+        m = concept_model()
+        ref = lambda *fs: [{"to": f} for f in fs]
+        bill = ["lib/billing/tax.ex", "lib/billing/rates.ex"]
+        m["files"].update({f: {"component": "billing", "refs": []} for f in bill})
+        # pricing.ex in orders uses only billing's files
+        m["files"]["lib/orders/pricing.ex"] = {"component": "orders", "refs": ref(*bill, "lib/billing/invoice.ex")}
+        # label.ex in shipping only uses billing, and nothing else links shipping and billing
+        m["files"]["lib/shipping/label.ex"] = {"component": "shipping", "refs": ref(*bill, "lib/billing/invoice.ex")}
+        m["types"]["shipping.Label"] = {"name": "Label", "component": "shipping", "file": "lib/shipping/label.ex"}
+        # util.ex in core is used by everyone: shared, not misplaced
+        for f in ("lib/orders/order.ex", "lib/billing/invoice.ex", "lib/shipping/parcel.ex"):
+            m["files"][f]["refs"] += ref("lib/core/util.ex")
+        # a nested component that uses its parent's files is layered, not misplaced
+        m["components"]["billing.pdf"] = {"name": "pdf", "path": "lib/billing/pdf", "match": ["lib/billing/pdf/**"]}
+        m["files"]["lib/billing/pdf/render.ex"] = {"component": "billing.pdf", "refs": ref(*bill, "lib/billing/invoice.ex")}
+        self.p.model_path.write_text(json.dumps(m))
+        fs = {tuple(f["components"]): f for f in self.found("boundaries.misplaced_file")}
+        self.assertEqual(set(fs), {("orders", "billing"), ("shipping", "billing")})
+        f = fs[("orders", "billing")]
+        self.assertEqual(f["files"], ["lib/orders/pricing.ex"])
+        self.assertEqual(f["evidence"]["files"][0], {"file": "lib/orders/pricing.ex", "own": 0, "other": 3})
+        self.assertEqual(f["title"], "orders/pricing.ex in orders has most of its links to billing (3 against 0).")
+        self.assertFalse(f["evidence"]["removes_dependency"])  # invoice.ex still refers to order.ex
+        g = fs[("shipping", "billing")]
+        self.assertTrue(g["evidence"]["removes_dependency"])
+        self.assertIn("Move shipping/label.ex to billing, with Label (move_type billing).", g["evidence"]["moves"][0])
+        self.assertGreater(g["weight"], f["weight"])
+        # words: pricing.ex reads like orders, not like billing, so its links alone do not move it
+        write = lambda f, text: (self.root / f).parent.mkdir(parents=True, exist_ok=True) or (self.root / f).write_text(text)
+        write("lib/orders/pricing.ex", "def order_line_quantity(order_line), do: order_line.quantity_ordered")
+        write("lib/orders/order.ex", "defmodule Order do def order_line_quantity(order_line) end")
+        for f in bill + ["lib/billing/invoice.ex"]:
+            write(f, "def vat_ledger_posting(ledger_entry), do: ledger_entry.vat")
+        fs = {tuple(f["components"]): f for f in self.found("boundaries.misplaced_file")}
+        self.assertNotIn(("orders", "billing"), fs)
+        x = fs[("shipping", "billing")]["evidence"]["files"][0]  # no words for label.ex: kept
+        self.assertNotIn("words_own", x)
+        from archplan import detectors
+        detectors.configure(self.p, "boundaries.misplaced_file", params={"terms": False})
+        self.assertIn(("orders", "billing"), {tuple(f["components"]) for f in self.found("boundaries.misplaced_file")})
+
+    def test_unrelated_parts(self):
+        m = concept_model()
+        ref = lambda *fs: [{"to": f} for f in fs]
+        # core: repo.ex with cache, clock and util is one group; mail.ex and smtp.ex another; tz.ex links to nothing
+        m["files"].update({"lib/core/mail.ex": {"component": "core", "refs": ref("lib/core/smtp.ex")},
+                           "lib/core/smtp.ex": {"component": "core", "refs": []},
+                           "lib/core/tz.ex": {"component": "core", "refs": []},
+                           "lib/core/__init__.py": {"component": "core", "refs": ref("lib/core/repo.ex",
+                                                                                     "lib/core/mail.ex")}})
+        self.p.model_path.write_text(json.dumps(m))
+        (f,) = self.found("boundaries.unrelated_parts")
+        self.assertEqual(f["components"], ["core"])
+        self.assertEqual([g["files"] for g in f["evidence"]["groups"]],
+                         [["lib/core/cache.ex", "lib/core/clock.ex", "lib/core/repo.ex", "lib/core/util.ex"],
+                          ["lib/core/mail.ex", "lib/core/smtp.ex"]])
+        self.assertEqual(f["evidence"]["loose"], ["lib/core/tz.ex"])
+        self.assertEqual(f["evidence"]["groups"][0]["types"], ["core.Cache", "core.Clock", "core.Repo", "core.Util"])
+        self.assertIn("Split core: give the group of mail.ex, smtp.ex its own component", f["evidence"]["moves"][0])
+        # changing together links the groups
+        c = lambda i: (f"u{i}".ljust(40, "0"), "a@x", "2026-01-01", ["lib/core/mail.ex", "lib/core/repo.ex"], "x")
+        self.p.path("hotspots.json").write_text(json.dumps({"key": {}, "result": {
+            "head": "abc", "since_days": 365, **hotspots.analyse([c(i) for i in range(3)], m)}}))
+        self.assertEqual(self.found("boundaries.unrelated_parts"), [])
+
     def test_synonyms_glossary(self):
         from archplan.detectors.types_synonyms import synonym_findings
         fs = [{"name": n} for n in ("first_name", "last_name", "email", "phone", "street")]
