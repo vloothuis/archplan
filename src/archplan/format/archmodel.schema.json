@@ -66,6 +66,43 @@
         }
       }
     },
+    "files": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "dependentRequired": { "moduleImports": ["module"] },
+        "properties": {
+          "component": { "type": "string" },
+          "module": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Repository-relative logical module ownership, not a component id."
+          },
+          "refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["to"],
+              "properties": {
+                "to": { "type": "string" },
+                "line": { "type": "integer" }
+              }
+            }
+          },
+          "moduleImports": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["to", "line"],
+              "properties": {
+                "to": { "type": "string", "minLength": 1 },
+                "line": { "type": "integer", "minimum": 1 }
+              }
+            }
+          }
+        }
+      }
+    },
     "policy": {
       "type": "object",
       "required": ["default"],

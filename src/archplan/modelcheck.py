@@ -101,6 +101,8 @@ def check(m, root: Path | None = None) -> dict:
             r.err(f"dependency {d.get('from')} -> {d.get('to')}: weight must be a whole number")
         for e in d.get("evidence") or []:
             paths.append((f"dependency {d.get('from')} -> {d.get('to')} evidence", str(e).rsplit(":", 1)[0]))
+    modules = {v["module"] for v in files.values()
+               if isinstance(v, dict) and isinstance(v.get("module"), str) and v["module"]}
     for f, v in files.items():
         paths.append(("files key", f))
         if not isinstance(v, dict):
@@ -113,6 +115,33 @@ def check(m, root: Path | None = None) -> dict:
             paths.append((f"files[{f}] ref", to))
             if isinstance(to, str) and to not in files:
                 r.warn(f"files[{f}]: refers to {to}, which has no entry of its own")
+        if "module" in v:
+            module = v["module"]
+            paths.append((f"files[{f}] module", module))
+            if isinstance(module, str) and module:
+                if module != "." and (module.endswith("/") or "." in module.split("/")):
+                    r.err(f"files[{f}]: module must be a canonical repository-relative identity")
+                if module != "." and not f.startswith(module + "/"):
+                    r.err(f"files[{f}]: module {module!r} does not own this file")
+        if "moduleImports" in v:
+            imports = v["moduleImports"]
+            if not isinstance(imports, list):
+                r.err(f"files[{f}]: moduleImports must be a list")
+                continue
+            if not isinstance(v.get("module"), str) or not v["module"]:
+                r.err(f"files[{f}]: moduleImports needs a module identity")
+            for i, imp in enumerate(imports):
+                where = f"files[{f}] moduleImports[{i}]"
+                if not isinstance(imp, dict):
+                    r.err(f"{where}: must be an object")
+                    continue
+                target = imp.get("to")
+                paths.append((where + " to", target))
+                if isinstance(target, str) and target not in modules:
+                    r.err(f"{where}: unknown internal module {target!r}")
+                line = imp.get("line")
+                if not isinstance(line, int) or isinstance(line, bool) or line <= 0:
+                    r.err(f"{where}: line must be a positive integer")
     for tid, t in types.items():
         if not isinstance(t, dict):
             r.err(f"type {tid}: must be an object")

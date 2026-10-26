@@ -56,7 +56,15 @@ asks a person before a command runs for the first time in a directory.
 - In the same step, archplan applies `components` and `layers` from
   `.archplan/config.json`: it moves files to the configured components and
   adds up their dependencies again. A `files` section with `refs` makes those
-  weights exact.
+  weights exact. Optional `module` ownership and `moduleImports: [{to, line}]`
+  retain logical import-only dependencies without inventing file refs.
+  Module identities and targets are repository-relative, not component IDs;
+  prefixes and grouping leave them unchanged. An import fans out to every
+  current component owning included files in its target module. File refs
+  and module imports are deduplicated by referring file per component edge.
+  Partial exclusions retain imports to remaining module files; fully removed
+  modules lose their imports. Unknown targets remain validation errors.
+  See [files](archmodel.md#files) for the contract and Swift limitations.
 - The command must not change the source files, and must not need the network
   after its install step.
 

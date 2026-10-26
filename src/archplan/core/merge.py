@@ -148,6 +148,16 @@ def merge(parts: list) -> dict:
         out["dependencies"] += [d for d in m.get("dependencies") or [] if isinstance(d, dict)]
         for f, v in (m.get("files") or {}).items():
             if f in out["files"] and isinstance(v, dict):
+                previous = out["files"][f]
+                if previous.get("module") and v.get("module") and previous["module"] != v["module"]:
+                    raise MergeError(f"file {f!r} has conflicting logical module identities")
+                if "module" in v:
+                    previous.setdefault("module", v["module"])
+                if "moduleImports" in v:
+                    imports = previous.setdefault("moduleImports", [])
+                    for imp in v["moduleImports"]:
+                        if imp not in imports:
+                            imports.append(imp)
                 have = {r.get("to") for r in out["files"][f].get("refs") or [] if isinstance(r, dict)}
                 out["files"][f].setdefault("refs", []).extend(
                     r for r in v.get("refs") or [] if isinstance(r, dict) and r.get("to") not in have)

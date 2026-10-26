@@ -142,6 +142,39 @@ repository root, like type `file` values.
 - A model without `files` still works. archplan then knows a file's role in
   a profile, but cannot check who calls whom.
 
+Exporters can also retain logical module imports separately from actual file
+references. For example, a Swift import can cause a dependency even when no
+declared type is used:
+
+```json
+"Sources/App/Main.swift": {
+  "component": "application",
+  "module": "Sources/App",
+  "moduleImports": [{ "to": "Sources/my-core", "line": 3 }],
+  "refs": []
+}
+```
+
+- `module` is optional, repository-relative logical ownership. It is not a
+  diagram component ID. Components can split or combine a module without
+  changing this identity; component prefixes do not rename it.
+- `moduleImports` is optional and requires `module`. Each entry names an
+  internal module owned by included files and the positive integer line of
+  the actual `import` keyword. External/SDK modules are omitted. The manual
+  `export-check` validator checks ownership, targets, paths and lines.
+- Module imports do not fabricate `refs` to arbitrary target files. Each
+  import contributes an edge to **every current component owning files in
+  the imported module**, including after regrouping. This conservative
+  fan-out is import evidence, not a call or runtime graph.
+- Actual refs and module imports together count each referring source file
+  once per component edge; evidence is deterministic and self-edges are
+  omitted. Included Swift module-backed test files retain their edges when
+  regrouped. Legacy test-file filtering is unchanged.
+- Partial exclusions retain imports to the remaining module files. Full
+  exclusions remove imports only when their previously included target
+  module loses all its files. Unknown targets are still validation errors,
+  not silently treated as excluded modules.
+
 ## policy
 
 Allowed and forbidden dependencies.
@@ -558,13 +591,33 @@ PHP, Ruby, Rust and Swift with regular expressions:
   - PHP: `use` and the PSR-4 map in `composer.json`.
   - Rust: `mod` and `use crate::`, `self::`, `super::` and workspace crate
     names.
-  - Swift: types of the same target, and of targets the file imports.
+  - Swift: types of the same conventional `Sources/<target>` or
+    `Tests/<target>` module, and explicitly imported modules. Test targets
+    are separate modules; they do not implicitly share types.
+    Non-word characters in target names become underscores for imports
+    (`Sources/my-core` is imported as `my_core`), and leading digits are
+    prefixed with an underscore; collisions raise an error.
+    Attributed imports (`@testable`, `@preconcurrency`, `@_exported`),
+    multiline declarations, access-qualified imports and symbol imports
+    such as `import struct Core.Buffer` are recognized. Reexports are
+    followed transitively, including cycles; symbol imports expose only
+    the named symbol. Own-module types shadow imported types; ambiguous
+    candidates remain unresolved with a warning, including field and
+    conformance links. Folder-based components and existing type IDs are
+    unchanged. Outside conventional layouts, legacy module inference
+    remains in use.
 - **Limits:**
   - It misses fully qualified names in code, reflection, configuration-based
     wiring, macros and generated code, and Ruby constants found only through
     nesting.
   - A local name that equals a type name in scope counts as a reference.
   - It has no methods and no sequences.
+  - Swift analysis is static: it never runs `Package.swift`, SwiftPM or
+    a compiler. Custom manifest target paths, conditional compilation,
+    overload resolution and compiler-accurate scope/access control are
+    not modeled. Import-only dependencies are retained through optional
+    `files.module` and `files.moduleImports` provenance, even for modules
+    containing functions but no declared types.
 
 Use it to get started. Use a compiler-based exporter where precision
 matters.
