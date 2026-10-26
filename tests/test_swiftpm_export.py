@@ -162,11 +162,21 @@ class SwiftExportTest(SwiftProject):
             })
         self.assertEqual(self.refs(result, "Sources/App/Main.swift"), [])
 
-    def test_normalization_collisions_are_explicit(self):
-        self.write({"Sources/my-core/Buffer.swift": "struct Buffer {}\n",
-                    "Sources/my_core/Reader.swift": "struct Reader {}\n"})
-        with self.assertRaisesRegex(ValueError, "Swift module name collision"):
-            export(self.root)
+    def test_normalization_collisions_are_ambiguous(self):
+        with self.assertWarnsRegex(UserWarning, "ambiguous Swift module 'my_core'"):
+            result = self.model({"Sources/my-core/Buffer.swift": "public struct Buffer {}\n",
+                                 "Sources/my_core/Reader.swift": "public struct Reader {}\n",
+                                 "Sources/App/Main.swift": "import my_core\nlet buffer: Buffer? = nil\n"})
+        self.assertEqual(self.refs(result, "Sources/App/Main.swift"), [])
+        self.assertEqual(result["files"]["Sources/App/Main.swift"]["moduleImports"], [])
+
+    def test_same_target_name_in_several_packages(self):
+        result = self.model({"PkgA/Sources/Core/A.swift": "public struct A {}\n",
+                             "PkgB/Sources/Core/B.swift": "public struct B {}\n",
+                             "PkgA/Sources/App/Main.swift": "import Core\nlet a: A? = nil\n"})
+        self.assertEqual(self.refs(result, "PkgA/Sources/App/Main.swift"), ["PkgA/Sources/Core/A.swift"])
+        self.assertEqual(result["files"]["PkgA/Sources/App/Main.swift"]["moduleImports"],
+                         [{"to": "PkgA/Sources/Core", "line": 1}])
 
     def test_leading_digit_target_names(self):
         result = self.model({"Sources/3-core/Buffer.swift": "struct Buffer {}\n",

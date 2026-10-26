@@ -333,7 +333,7 @@ class Index:
         self.ns_types = defaultdict(dict)  # namespace -> {Type: file}
         self.dir_types = defaultdict(dict)  # (lang, dir) -> {Type: file}
         self.module_types = defaultdict(lambda: defaultdict(set))  # module -> name -> candidate files
-        self.swift_modules = {}
+        self.swift_modules = defaultdict(set)  # import name -> modules
         self.swift_reexports = defaultdict(list)
         self.ruby_const = {}  # "Admin::User" -> file
         for s in srcs:
@@ -346,11 +346,7 @@ class Index:
                     self.module_types[swift_module(s.rel)][name].add(s.rel)
             if s.lang == "swift":
                 module = swift_module(s.rel)
-                name = swift_import_name(module.rsplit("/", 1)[-1])
-                other = self.swift_modules.get(name)
-                if other is not None and other != module:
-                    raise ValueError(f"Swift module name collision: {other!r} and {module!r} normalize to {name!r}")
-                self.swift_modules[name] = module
+                self.swift_modules[swift_import_name(module.rsplit("/", 1)[-1])].add(module)
                 self.module_types[module]  # include modules without type declarations
                 self.swift_reexports[module].extend(i for i in s.swift_imports if i.reexport)
             if s.lang == "ruby":
@@ -384,13 +380,33 @@ def swift_import_name(target: str) -> str:
     return "_" + name if name[:1].isdigit() else name
 
 
+def swift_package(module: str) -> str:
+    """The package root of a conventional module: PkgA/Sources/Core is in PkgA."""
+    parts = module.split("/")
+    return "/".join(parts[:-2]) if len(parts) > 1 and parts[-2] in ("Sources", "Tests") else module
+
+
+def swift_import_target(index: Index, name: str, importer: str, where: str) -> str | None:
+    """The module an import names, preferring the importer's own package.
+    Several packages can define a target of the same name; an import that
+    stays ambiguous resolves to nothing."""
+    modules = index.swift_modules.get(name) or set()
+    if len(modules) > 1:
+        modules = {m for m in modules if swift_package(m) == swift_package(importer)}
+        if len(modules) != 1:
+            warnings.warn(f"{where}: ambiguous Swift module {name!r}: "
+                          f"{', '.join(sorted(index.swift_modules[name]))}", stacklevel=3)
+            return None
+    return next(iter(modules), None)
+
+
 def swift_visible_types(source: Src, index: Index) -> dict:
     """Resolve unique candidates, preserving ambiguity through reexport cycles."""
     own_module = swift_module(source.rel)
     candidates = defaultdict(set)
     pending = []
     for imp in source.swift_imports:
-        module = index.swift_modules.get(imp.module)
+        module = swift_import_target(index, imp.module, own_module, source.rel)
         if module is not None:
             source.module_imports.append({"to": module, "line": imp.line})
             pending.append((module, imp.symbol))
@@ -404,7 +420,7 @@ def swift_visible_types(source: Src, index: Index) -> dict:
             if symbol is None or symbol == name:
                 candidates[name].update(files)
         for imp in index.swift_reexports[module]:
-            target = index.swift_modules.get(imp.module)
+            target = swift_import_target(index, imp.module, module, source.rel)
             if target is not None and (symbol is None or imp.symbol is None or symbol == imp.symbol):
                 pending.append((target, symbol or imp.symbol))
     candidates.update(index.module_types[own_module])

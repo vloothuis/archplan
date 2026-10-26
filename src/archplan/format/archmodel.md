@@ -596,7 +596,9 @@ PHP, Ruby, Rust and Swift with regular expressions:
     are separate modules; they do not implicitly share types.
     Non-word characters in target names become underscores for imports
     (`Sources/my-core` is imported as `my_core`), and leading digits are
-    prefixed with an underscore; collisions raise an error.
+    prefixed with an underscore. When several modules share an import
+    name, the one in the importing file's own package wins; otherwise the
+    import stays unresolved with a warning.
     Attributed imports (`@testable`, `@preconcurrency`, `@_exported`),
     multiline declarations, access-qualified imports and symbol imports
     such as `import struct Core.Buffer` are recognized. Reexports are
