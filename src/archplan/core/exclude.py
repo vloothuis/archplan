@@ -127,6 +127,17 @@ def filter_model(model: dict, ex: Exclude, root: Path) -> int:
         return isinstance(f, str) and ex.model_path(f, pre)
 
     n = 0
+    from .grouping import EVIDENCE, file_dependency_evidence
+    original_files = model.get("files")
+    original_files = original_files if isinstance(original_files, dict) else {}
+    modules_before = {v["module"] for v in original_files.values()
+                      if isinstance(v, dict) and isinstance(v.get("module"), str)}
+    original_evidence = list(file_dependency_evidence(original_files)) if modules_before else []
+    module_edges = {(original_files[f]["component"], b)
+                    for f, b, _ in original_evidence if original_files[f].get("module")}
+    before = {}
+    for f, b, line in original_evidence:
+        before.setdefault((original_files[f]["component"], b), {})[f] = line
     comps = model.get("components") or {}
     dropped = {c for c, v in comps.items()
                if isinstance(v, dict) and v.get("kind") != "external" and v.get("path") and gone(v["path"])}
@@ -138,9 +149,16 @@ def filter_model(model: dict, ex: Exclude, root: Path) -> int:
         for f in [f for f in files if gone(f)]:
             del files[f]
             n += 1
+        modules_after = {v["module"] for v in files.values()
+                         if isinstance(v, dict) and isinstance(v.get("module"), str)}
+        removed_modules = modules_before - modules_after
         for v in files.values():
             if isinstance(v, dict) and isinstance(v.get("refs"), list):
                 v["refs"] = [r for r in v["refs"] if not (isinstance(r, dict) and gone(r.get("to")))]
+            if isinstance(v, dict) and isinstance(v.get("moduleImports"), list):
+                v["moduleImports"] = [imp for imp in v["moduleImports"]
+                                      if not (isinstance(imp, dict) and isinstance(imp.get("to"), str)
+                                              and imp["to"] in removed_modules)]
     types = model.get("types")
     if isinstance(types, dict):
         for t in [t for t, v in types.items() if isinstance(v, dict) and (gone(v.get("file"))
@@ -171,4 +189,19 @@ def filter_model(model: dict, ex: Exclude, root: Path) -> int:
                     d = dict(d, evidence=kept, weight=max(1, int(d.get("weight") or 0) - (len(ev) - len(kept))))
             out.append(d)
         model["dependencies"] = out
+        if modules_before:
+            per = {}
+            evidence = list(file_dependency_evidence(files))
+            module_edges.update((files[f]["component"], b) for f, b, _ in evidence if files[f].get("module"))
+            for f, b, line in evidence:
+                a = files[f]["component"]
+                if (a, b) in module_edges and a in comps and b in comps:
+                    per.setdefault((a, b), {})[f] = line
+            changed_edges = {pair for pair in module_edges if before.get(pair, {}) != per.get(pair, {})}
+            kept = [d for d in out if (d.get("from"), d.get("to")) not in changed_edges]
+            rebuilt = [{"from": a, "to": b, "weight": len(srcs),
+                        "evidence": [f"{f}:{line}" if line else f
+                                     for f, line in list(srcs.items())[:EVIDENCE]]}
+                       for (a, b), srcs in sorted(per.items()) if (a, b) in changed_edges]
+            model["dependencies"] = sorted(kept + rebuilt, key=lambda d: (d["from"], d["to"]))
     return n

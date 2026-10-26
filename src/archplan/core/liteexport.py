@@ -14,11 +14,17 @@ approximate:
   and Zeitwerk naming (app/models/admin/user.rb is Admin::User). PHP uses
   `use` with the PSR-4 map in composer.json. Rust uses `mod` and
   `use crate::`, `self::`, `super::` and workspace crate names.
+  Swift uses conventional Sources/<target> and Tests/<target> modules,
+  normalized import names and transitive reexports. Ambiguous type names
+  remain unresolved and produce warnings. Module imports retain their own
+  provenance, including when no declared type is used.
 
 What it misses: references through fully qualified names in code, reflection
 and dependency injection by configuration, generated code, macros, and Ruby
 constants resolved by nesting. Names are matched textually, so a local name
 that equals a type name in the same package counts as a reference.
+Swift manifests and toolchains are never invoked; custom target paths,
+conditional compilation and compiler-accurate access control are not modeled.
 """
 
 from __future__ import annotations
@@ -29,8 +35,10 @@ import re
 import stat
 import subprocess
 import time
+import warnings
 from collections import Counter, defaultdict
 from pathlib import Path
+from typing import NamedTuple
 
 from .safeio import GIT_SAFE, line_at, read_file
 from .safeio import walk as walk_dirs
@@ -58,7 +66,11 @@ STRIP = {
                      re.S),
     "ruby": re.compile(r'#[^\n]*|^=begin.*?(?:^=end|\\?\Z)'
                        r'|"(?:\\.|[^"\\\n])*(?:"|(?=\n)|\\?\Z)', re.S | re.M),
+    "swift": re.compile(r'//[^\n]*|/\*|(?<!#)(?P<hashes>#+)(?P<quotes>"""|").*?'
+                        r'(?:(?P=quotes)(?P=hashes)|\Z)|"""(?:\\.|(?!""").)*(?:"""|\Z)'
+                        r'|"(?:\\.|[^"\\\n])*(?:"|(?=\n)|\\?\Z)', re.S),
 }
+SWIFT_COMMENT = re.compile(r"/\*|\*/")
 
 TYPE_DECL = {
     "java": re.compile(r"^[ \t]*(?:@\w+(?:\([^)\n]*\))?[ \t]+)*(?:(?:public|protected|private|abstract|static|final|sealed|"
@@ -95,8 +107,44 @@ IMPORT = {
     "scala": re.compile(r"^[ \t]*import\s+(\w+(?:\.\w+)*)(?:\.\{(?=([^}]{0,4000}))\2\}|\._|\.\*)?", re.M),
     "csharp": re.compile(r"^[ \t]*(?:global\s+)?using\s+(?:static\s+)?(?:\w+\s*=\s*)?([\w.]+)\s*;", re.M),
     "php": re.compile(r"^[ \t]*use\s+(?:function\s+|const\s+)?(?=([^;]{1,4000}))\1;", re.M),
-    "swift": re.compile(r"^[ \t]*(?:@testable\s+)?import\s+(\w+)", re.M),
 }
+SWIFT_IMPORT = re.compile(
+    r"^[ \t]*(?P<attributes>(?:@\w+(?:\([^()\n]*\))?[ \t]*)*)"
+    r"(?:(?:public|package|internal|fileprivate|private|open)[ \t]+)?"
+    r"(?P<declaration>import)\s+"
+    r"(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?"
+    r"(?P<path>\w+(?:[ \t]*\.[ \t]*\w+)*)", re.M)
+SWIFT_ATTRIBUTE_LINE = re.compile(r"(?:[ \t]*@\w+(?:\([^()\n]*\))?)+[ \t]*")
+
+
+class SwiftImport(NamedTuple):
+    module: str
+    line: int
+    symbol: str | None
+    reexport: bool
+
+
+def parse_swift_imports(source: str) -> list:
+    """Read import declarations without executing a manifest or toolchain."""
+    code = strip(source, "swift")
+    lines = code.split("\n")
+    out = []
+    for m in SWIFT_IMPORT.finditer(code):
+        parts = re.sub(r"\s+", "", m["path"]).split(".")
+        attributes = [m["attributes"]]
+        previous = line_at(code, m.start()) - 2
+        while previous >= 0:
+            line = lines[previous]
+            if line.strip() and not SWIFT_ATTRIBUTE_LINE.fullmatch(line):
+                break
+            attributes.append(line)
+            previous -= 1
+        out.append(SwiftImport(parts[0], line_at(code, m.start("declaration")),
+                               parts[1] if len(parts) > 1 else None,
+                               bool(re.search(r"@_exported\b", "\n".join(attributes)))))
+    return out
+
+
 RUBY_REQ = re.compile(r"""^[ \t]*(require|require_relative|load)\s*(?:\(\s*)?["']([^"']{1,500})["']""", re.M)
 RUST_MOD = re.compile(r"^[ \t]*(?:pub(?:\([^)\n]*\))?[ \t]+)?mod\s+(\w+)\s*;", re.M)
 RUST_USE = re.compile(r"^[ \t]*(?:pub(?:\([^)\n]*\))?[ \t]+)?use\s+(?=([^;]{1,4000}))\1;", re.M)
@@ -130,8 +178,27 @@ def strip(text: str, lang: str) -> str:
     """The text with strings and comments blanked, and lines longer than
     MAX_LINE emptied: such lines are generated or minified code, and they
     would make the per-line patterns slow on hostile input."""
-    rx = STRIP["php"] if lang == "php" else STRIP["ruby"] if lang == "ruby" else STRIP["c"]
-    out = rx.sub(blank, text)
+    if lang == "swift":
+        chunks, cursor = [], 0
+        while True:
+            match = STRIP["swift"].search(text, cursor)
+            if match is None:
+                chunks.append(text[cursor:])
+                break
+            end = match.end()
+            if match.group() == "/*":
+                depth, end = 1, len(text)
+                for token in SWIFT_COMMENT.finditer(text, match.end()):
+                    depth += 1 if token.group() == "/*" else -1
+                    if depth == 0:
+                        end = token.end()
+                        break
+            chunks.extend((text[cursor:match.start()], re.sub(r"[^\n]", " ", text[match.start():end])))
+            cursor = end
+        out = "".join(chunks)
+    else:
+        rx = STRIP["php"] if lang == "php" else STRIP["ruby"] if lang == "ruby" else STRIP["c"]
+        out = rx.sub(blank, text)
     if len(out) > MAX_LINE:
         out = "\n".join("" if len(ln) > MAX_LINE else ln for ln in out.split("\n"))
     return out
@@ -152,6 +219,8 @@ class Src:
         self.refs: dict = {}  # file -> line
         self.code = ""  # text with strings and comments blanked
         self.visible: dict = {}  # type name -> file, for names used without qualification
+        self.swift_imports: list = []
+        self.module_imports: list = []
 
 
 def walk(root: Path, tests: bool, exclude=None) -> list:
@@ -202,6 +271,9 @@ def parse(s: Src) -> None:
         for m in RUBY_CONST.finditer(code):
             s.idents.setdefault(m.group(1), line_at(code, m.start()))
     else:
+        if s.lang == "swift":
+            s.swift_imports = parse_swift_imports(raw)
+            code = SWIFT_IMPORT.sub(blank, code)
         if s.lang == "rust":
             for m in RUST_MOD.finditer(code):
                 s.imports.append(("mod:" + m.group(1), line_at(code, m.start(1))))
@@ -260,7 +332,9 @@ class Index:
         self.fqn = {}  # "a.b.Type" -> file (namespaced languages)
         self.ns_types = defaultdict(dict)  # namespace -> {Type: file}
         self.dir_types = defaultdict(dict)  # (lang, dir) -> {Type: file}
-        self.module_types = defaultdict(dict)  # Swift module -> {Type: file}
+        self.module_types = defaultdict(lambda: defaultdict(set))  # module -> name -> candidate files
+        self.swift_modules = defaultdict(set)  # import name -> modules
+        self.swift_reexports = defaultdict(list)
         self.ruby_const = {}  # "Admin::User" -> file
         for s in srcs:
             for name, *_ in s.types:
@@ -269,7 +343,12 @@ class Index:
                     self.ns_types[(s.lang_group(), s.ns)].setdefault(name, s.rel)
                 self.dir_types[(s.lang, s.dir)].setdefault(name, s.rel)
                 if s.lang == "swift":
-                    self.module_types[swift_module(s.rel)].setdefault(name, s.rel)
+                    self.module_types[swift_module(s.rel)][name].add(s.rel)
+            if s.lang == "swift":
+                module = swift_module(s.rel)
+                self.swift_modules[swift_import_name(module.rsplit("/", 1)[-1])].add(module)
+                self.module_types[module]  # include modules without type declarations
+                self.swift_reexports[module].extend(i for i in s.swift_imports if i.reexport)
             if s.lang == "ruby":
                 c = zeitwerk(s.rel)
                 if c:
@@ -290,10 +369,69 @@ Src.lang_group = lang_group
 
 def swift_module(rel: str) -> str:
     parts = rel.split("/")
-    if "Sources" in parts:
-        i = parts.index("Sources")
-        return "/".join(parts[:i + 2])
+    for i, part in enumerate(parts[:-2]):
+        if part in ("Sources", "Tests"):
+            return "/".join(parts[:i + 2])
     return parts[0] if len(parts) > 1 else "."
+
+
+def swift_import_name(target: str) -> str:
+    name = re.sub(r"\W", "_", target)
+    return "_" + name if name[:1].isdigit() else name
+
+
+def swift_package(module: str) -> str:
+    """The package root of a conventional module: PkgA/Sources/Core is in PkgA."""
+    parts = module.split("/")
+    return "/".join(parts[:-2]) if len(parts) > 1 and parts[-2] in ("Sources", "Tests") else module
+
+
+def swift_import_target(index: Index, name: str, importer: str, where: str) -> str | None:
+    """The module an import names, preferring the importer's own package.
+    Several packages can define a target of the same name; an import that
+    stays ambiguous resolves to nothing."""
+    modules = index.swift_modules.get(name) or set()
+    if len(modules) > 1:
+        modules = {m for m in modules if swift_package(m) == swift_package(importer)}
+        if len(modules) != 1:
+            warnings.warn(f"{where}: ambiguous Swift module {name!r}: "
+                          f"{', '.join(sorted(index.swift_modules[name]))}", stacklevel=3)
+            return None
+    return next(iter(modules), None)
+
+
+def swift_visible_types(source: Src, index: Index) -> dict:
+    """Resolve unique candidates, preserving ambiguity through reexport cycles."""
+    own_module = swift_module(source.rel)
+    candidates = defaultdict(set)
+    pending = []
+    for imp in source.swift_imports:
+        module = swift_import_target(index, imp.module, own_module, source.rel)
+        if module is not None:
+            source.module_imports.append({"to": module, "line": imp.line})
+            pending.append((module, imp.symbol))
+    visited = set()
+    while pending:
+        module, symbol = pending.pop()
+        if (module, symbol) in visited:
+            continue
+        visited.add((module, symbol))
+        for name, files in index.module_types[module].items():
+            if symbol is None or symbol == name:
+                candidates[name].update(files)
+        for imp in index.swift_reexports[module]:
+            target = swift_import_target(index, imp.module, module, source.rel)
+            if target is not None and (symbol is None or imp.symbol is None or symbol == imp.symbol):
+                pending.append((target, symbol or imp.symbol))
+    candidates.update(index.module_types[own_module])
+    visible = {}
+    for name, files in sorted(candidates.items()):
+        if len(files) == 1:
+            visible[name] = next(iter(files))
+        elif name in source.idents:
+            warnings.warn(f"{source.rel}: ambiguous Swift type {name!r}: {', '.join(sorted(files))}",
+                          stacklevel=2)
+    return visible
 
 
 def zeitwerk(rel: str) -> str | None:
@@ -407,11 +545,7 @@ def resolve(s: Src, idx: Index) -> None:
                 add(f, line)
                 visible[t.rsplit(".", 1)[-1]] = f
     elif s.lang == "swift":
-        for target, line in s.imports:  # another target of the same package
-            for mod, ts in idx.module_types.items():
-                if mod.rsplit("/", 1)[-1] == target and mod != swift_module(s.rel):
-                    visible.update(ts)
-        visible.update(idx.module_types.get(swift_module(s.rel), {}))
+        visible = swift_visible_types(s, idx)
     elif s.lang == "rust":
         visible.update(idx.dir_types.get(("rust", s.dir), {}))
         for target, line in s.imports:
@@ -600,22 +734,19 @@ def export(root: Path, tests: bool = False, languages: list | None = None, rel_t
                           "line": line, "fields": fields, "methods": [], "implements": implements, "uses": []}
 
     # Dependencies between components, weighted by the number of referring files.
-    edges = defaultdict(lambda: {"files": set(), "evidence": []})
+    from .grouping import EVIDENCE, file_dependency_evidence
     files = {}
     for s in srcs:
         refs = sorted(s.refs.items(), key=lambda x: (x[1], x[0]))
         files[s.rel] = {"component": comp[s.rel], "refs": [{"to": f, "line": ln} for f, ln in refs]}
-        for f, ln in refs:
-            a, b = comp[s.rel], comp[f]
-            if a == b:
-                continue
-            e = edges[(a, b)]
-            if s.rel not in e["files"]:
-                e["files"].add(s.rel)
-                if len(e["evidence"]) < 5:
-                    e["evidence"].append(f"{s.rel}:{ln}")
-    deps = [{"from": a, "to": b, "weight": len(e["files"]), "evidence": e["evidence"]}
-            for (a, b), e in sorted(edges.items())]
+        if s.lang == "swift":
+            files[s.rel].update(module=swift_module(s.rel), moduleImports=s.module_imports)
+    edges = defaultdict(dict)
+    for f, b, line in file_dependency_evidence(files):
+        edges[(comp[f], b)][f] = line
+    deps = [{"from": a, "to": b, "weight": len(srcs),
+             "evidence": [f"{f}:{line}" if line else f for f, line in list(srcs.items())[:EVIDENCE]]}
+            for (a, b), srcs in sorted(edges.items())]
 
     comps = {}
     by_comp = defaultdict(list)

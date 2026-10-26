@@ -135,6 +135,41 @@ def _file_of(evidence) -> str | None:
     return str(evidence).rsplit(":", 1)[0] if isinstance(evidence, str) and evidence else None
 
 
+def file_dependency_evidence(files: dict):
+    """Yield (source file, target component, first line), once per file/edge.
+
+    A logical module import reaches every component currently owning its files.
+    It is not a reference to an arbitrary file in that module.
+    """
+    modules = defaultdict(set)
+    for v in files.values():
+        if isinstance(v, dict) and v.get("module") and v.get("component"):
+            modules[v["module"]].add(v["component"])
+    for f, v in sorted(files.items()):
+        if not isinstance(v, dict) or not v.get("component"):
+            continue
+        targets = {}
+
+        def add(component, line):
+            if not component or component == v["component"]:
+                return
+            line = line if isinstance(line, int) and not isinstance(line, bool) and line > 0 else None
+            if component not in targets or (line is not None and
+                                            (targets[component] is None or line < targets[component])):
+                targets[component] = line
+
+        for ref in v.get("refs") or []:
+            target = files.get(ref.get("to")) if isinstance(ref, dict) else None
+            if isinstance(target, dict):
+                add(target.get("component"), ref.get("line"))
+        for imp in v.get("moduleImports") or []:
+            if isinstance(imp, dict):
+                for component in modules.get(imp.get("to"), ()):
+                    add(component, imp.get("line"))
+        for component, line in sorted(targets.items()):
+            yield f, component, line
+
+
 def apply(model: dict, config: dict, root: Path) -> bool:
     """Apply config "components" and "layers" to model in place. Returns
     whether the model changed. Raises GroupingError for a malformed config."""
@@ -172,6 +207,7 @@ def regroup(model: dict, specs: list, root: Path) -> bool:
     for f, v in files.items():
         if isinstance(v, dict) and v.get("component"):
             orig[f] = v["component"]
+    module_pairs = {(orig[f], b) for f, b, _ in file_dependency_evidence(files) if files[f].get("module")}
     for x in types + lists:
         if isinstance(x.get("file"), str) and x.get("component"):
             orig.setdefault(x["file"], x["component"])
@@ -247,6 +283,7 @@ def regroup(model: dict, specs: list, root: Path) -> bool:
                 e["evidence"].append(x)
 
     have_refs = any(isinstance(v, dict) and v.get("refs") for v in files.values())
+    have_imports = any(isinstance(v, dict) and v.get("moduleImports") for v in files.values())
     for d in model.get("dependencies") or []:
         if not isinstance(d, dict):
             continue
@@ -255,7 +292,7 @@ def regroup(model: dict, specs: list, root: Path) -> bool:
         if a not in affected and b not in affected:
             kept.append(d)
             continue
-        if have_refs and (b in had or b in spec_ids):
+        if (have_refs or (a, b) in module_pairs) and (b in had or b in spec_ids):
             continue  # an edge between project files: added up from the files section below
         # Split by the evidence files; the rest of the weight stays with the
         # group of the old source component.
@@ -275,16 +312,15 @@ def regroup(model: dict, specs: list, root: Path) -> bool:
         rest = max(0, weight - sum(len(v) for v in groups.values()))
         for g, ev in groups.items():
             add(g, b2, len(ev) + (rest if g == home else 0), ev)
-    if have_refs:
+    if have_refs or have_imports:
         per = defaultdict(dict)  # (from, to) -> {source file: line}
-        for f, v in sorted(files.items()):
-            if not isinstance(v, dict) or is_test(f):
+        for f, b, line in file_dependency_evidence(files):
+            v = files[f]
+            if is_test(f) and not v.get("module"):
                 continue
             a = new.get(f, v.get("component"))
-            for r in v.get("refs") or []:
-                b = new.get(r.get("to")) if isinstance(r, dict) else None
-                if a and b and a != b and (a in affected or b in affected):
-                    per[(a, b)].setdefault(f, r.get("line"))
+            if a and b and a != b and (a in affected or b in affected):
+                per[(a, b)].setdefault(f, line)
         for (a, b), srcs in sorted(per.items()):
             add(a, b, len(srcs), [f"{f}:{line}" if line else f for f, line in list(srcs.items())[:EVIDENCE]])
     model["dependencies"] = sorted(kept + list(edges.values()), key=lambda d: (str(d.get("from")), str(d.get("to"))))
