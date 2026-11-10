@@ -121,7 +121,7 @@ archplan trace-elixir -C core test --only feature
 archplan export-elixir -C core -o .archplan/model.archmodel.json
 ```
 
-`trace` runs a Mix task (default `test`) with the `ArchplanTrace` formatter and the normal CLI formatter. It writes one JSON file per passed or failed test. Without the wrapper:
+`trace` runs a Mix task (default `test`) with the `ArchplanTrace` formatter and the normal CLI formatter. It writes one JSON file per passed or failed test. With `--canary` (or `ARCHPLAN_CANARY=1`), it also notes which calls receive the canary marker that a test sends, and whether the marker reaches calls such as `Ecto.Adapters.SQL.query`, `System.shell`, `Code.eval_string` or `:erlang.binary_to_term` unchanged. A call's arguments are then sent to the tracer process, which makes tracing slower. See "Canary" in archplan's `format/archmodel.md`. Without the wrapper:
 
 ```sh
 MIX_ENV=test elixir -r /path/to/archplan_trace.ex -S mix test \

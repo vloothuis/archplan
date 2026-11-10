@@ -26,11 +26,20 @@ What it records:
 - Module and qualified name only, never argument or return values. A call that
   may have refused gets the kind of its outcome: `raise`, `false` or
   `status:4xx`. `raise` needs Python 3.12 or later.
+- With ARCHPLAN_CANARY=1, whether a value holds the canary marker (MARKER),
+  which a test sends as input; never the value itself. A call whose
+  arguments hold it gets their names (`taint`). A call of a library function
+  that runs or resolves its input (SINKS, and the C functions wrapped in
+  wrap_c_sinks), made by a recorded call or the library code under it, is
+  added to that call (`interprets`) with its kind, and with `canary: "raw"`
+  when the input held the whole marker, or "escaped" when it held only its
+  letters (CORE): escaping or quoting changed the rest.
 
 Environment: ARCHPLAN_TRACE_ROOT (default: the current directory),
 ARCHPLAN_TRACE_DIR (default: <root>/.archplan/sequences),
 ARCHPLAN_TRACE_MAX_CALLS (calls kept per test, default 50000),
-ARCHPLAN_TRACE_TEST=1 (keep a test's own calls next to its requests)."""
+ARCHPLAN_TRACE_TEST=1 (keep a test's own calls next to its requests),
+ARCHPLAN_CANARY=1 (look for the canary marker)."""
 
 from __future__ import annotations
 
@@ -47,6 +56,13 @@ MAX_CALLS = int(os.environ.get("ARCHPLAN_TRACE_MAX_CALLS") or 50000)
 KEEP_TEST = os.environ.get("ARCHPLAN_TRACE_TEST") == "1"
 SKIP = {"site-packages", "dist-packages", "venv", "env", "node_modules", "build", "dist", "migrations"}
 TESTS = {"tests", "test", "testing"}
+
+CANARY = os.environ.get("ARCHPLAN_CANARY") == "1"
+# The canary marker. Its letters survive escaping; the quotes, brackets, ;
+# $( and ../ do not, so "raw" means nothing escaped or bound the input.
+MARKER = "apcanary'\"<i>;$(id)/../"
+CORE = "apcanary"
+MAX_LOOK = 400  # values one canary check looks at
 
 _kinds = {}  # code object -> "project", "test" or None
 _names = {}  # code object -> (module, qualified name), or None to skip
@@ -131,11 +147,36 @@ class Test:
             return
         self.calls += 1
         node = [n[0], n[1], []]
+        if CANARY:
+            names = tainted(frame)
+            if names:
+                node.append({"taint": names})
         self.live[id(frame)] = (frame, node, served)
         if parent is not None:
             parent[1][2].append(node)
             return
         self.trees.append({"actor": "Client" if served else "Test", "root": node})
+
+    def reach(self, frame, kind: str, call: str, value):
+        """Note a library call that interprets value as kind on the innermost
+        recorded call at or above frame."""
+        while frame is not None:
+            p = self.live.get(id(frame))
+            if p is not None and p[0] is frame:
+                break
+            frame = frame.f_back
+        if frame is None:
+            return
+        node = p[1]
+        info = next((x for x in node[3:] if isinstance(x, dict)), None)
+        if info is None:
+            info = {}
+            node.append(info)
+        seen = info.setdefault("interprets", [])
+        c = holds(value)
+        entry = {"kind": kind, "call": call, **({"canary": c} if c else {})}
+        if entry not in seen and len(seen) < 20:
+            seen.append(entry)
 
     def leave(self, frame, outcome):
         p = self.live.get(id(frame))
@@ -245,6 +286,155 @@ def outcome(value):
     return None
 
 
+# ---------------------------------------------------------------- canary
+
+def holds(v):
+    """"raw" when v holds the whole marker, "escaped" when it holds only its
+    letters, else None. Looks into containers and object attributes, without
+    calling properties, at most 4 levels deep and MAX_LOOK values."""
+    best, seen, todo, n = None, set(), [(v, 0)], 0
+    while todo and n < MAX_LOOK:
+        x, d = todo.pop()
+        n += 1
+        if isinstance(x, str):
+            if CORE in x:
+                if MARKER in x:
+                    return "raw"
+                best = "escaped"
+            continue
+        if isinstance(x, (bytes, bytearray)):
+            if CORE.encode() in x:
+                if MARKER.encode() in x:
+                    return "raw"
+                best = "escaped"
+            continue
+        if x is None or isinstance(x, (int, float, bool, type)) or d >= 4 or id(x) in seen:
+            continue
+        seen.add(id(x))
+        if isinstance(x, dict):
+            items = list(x.items())[:100]
+            todo += [(k, d + 1) for k, _ in items] + [(w, d + 1) for _, w in items]
+        elif isinstance(x, (list, tuple, set, frozenset)):
+            todo += [(w, d + 1) for w in list(x)[:100]]
+        elif not callable(x) and not isinstance(x, type(sys)):
+            try:
+                attrs = object.__getattribute__(x, "__dict__")
+            except (AttributeError, TypeError):
+                continue
+            if isinstance(attrs, dict):
+                todo += [(w, d + 1) for w in list(attrs.values())[:100]]
+    return best
+
+
+def tainted(frame) -> list:
+    """The names of the arguments of a call that hold the canary."""
+    code = frame.f_code
+    n = code.co_argcount + code.co_kwonlyargcount + bool(code.co_flags & 0x04) + bool(code.co_flags & 0x08)
+    loc = frame.f_locals
+    return [a for a in code.co_varnames[:n] if a in loc and holds(loc[a])]
+
+
+# Library functions written in Python that run or resolve an argument as
+# code, by module and qualified name: (kind, argument).
+SINKS = {
+    ("django.db.backends.utils", "CursorWrapper.execute"): ("sql", "sql"),
+    ("django.db.backends.utils", "CursorWrapper.executemany"): ("sql", "sql"),
+    ("django.db.backends.utils", "CursorDebugWrapper.execute"): ("sql", "sql"),
+    ("django.db.backends.utils", "CursorDebugWrapper.executemany"): ("sql", "sql"),
+    ("django.utils.safestring", "mark_safe"): ("html", "s"),
+    ("psycopg.cursor", "Cursor.execute"): ("sql", "query"),
+    ("psycopg.cursor_async", "AsyncCursor.execute"): ("sql", "query"),
+    ("sqlalchemy.engine.base", "Connection.exec_driver_sql"): ("sql", "statement"),
+    ("sqlalchemy.sql._elements_constructors", "text"): ("sql", "text"),
+    ("subprocess", "Popen.__init__"): ("shell", "args"),  # with shell=True
+    ("os", "popen"): ("shell", "cmd"),
+    ("yaml", "load"): ("deserialize", "stream"),
+    ("jinja2.environment", "Environment.from_string"): ("code", "source"),
+    ("urllib.request", "urlopen"): ("url", "url"),
+    ("requests.api", "request"): ("url", "url"),
+    ("httpx._api", "request"): ("url", "url"),
+}
+_sinks = {}  # code object -> (kind, argument, call name) or None
+
+
+def sink(frame):
+    code = frame.f_code
+    s = _sinks.get(code, 0)
+    if s == 0:
+        mod = frame.f_globals.get("__name__") or ""
+        q = getattr(code, "co_qualname", None) or qualname(frame)
+        k = SINKS.get((mod, q))
+        s = _sinks[code] = (k[0], k[1], f"{mod}.{q}") if k else None
+    return s
+
+
+def at_sink(frame):
+    """A library sink starts: note it on the call that made it."""
+    t = current
+    s = sink(frame)
+    if t is None or s is None:
+        return
+    loc = frame.f_locals
+    if s[2] == "subprocess.Popen.__init__" and not loc.get("shell"):
+        return
+    t.reach(frame.f_back, s[0], s[2], loc.get(s[1]))
+
+
+def wrap_c_sinks():
+    """Wrap the C functions that run or resolve their input, which tracing
+    cannot see the arguments of: os.system, pickle.loads, marshal.loads and
+    sqlite3's execute methods (through the connection factory)."""
+    import marshal
+    import pickle
+
+    def wrap(obj, name, kind, call):
+        f = getattr(obj, name)
+
+        def wrapper(value, *args, **kwargs):
+            t = current
+            if t is not None:
+                t.reach(sys._getframe(1), kind, call, value)
+            return f(value, *args, **kwargs)
+        wrapper.archplan = True
+        if not getattr(f, "archplan", False):
+            setattr(obj, name, wrapper)
+
+    wrap(os, "system", "shell", "os.system")
+    wrap(pickle, "loads", "deserialize", "pickle.loads")
+    wrap(marshal, "loads", "deserialize", "marshal.loads")
+
+    def noted(base, name):
+        f = getattr(base, name)
+
+        def method(self, sql, *args, **kwargs):
+            t = current
+            if t is not None:
+                t.reach(sys._getframe(1), "sql", f"sqlite3.{base.__name__}.{name}", sql)
+            return f(self, sql, *args, **kwargs)
+        return method
+
+    try:
+        import sqlite3
+    except ImportError:  # a Python built without it
+        return
+    names = ("execute", "executemany", "executescript")
+    Cursor = type("Cursor", (sqlite3.Cursor,), {n: noted(sqlite3.Cursor, n) for n in names})
+
+    def cursor(self, factory=Cursor):
+        return sqlite3.Connection.cursor(self, factory)
+    Connection = type("Connection", (sqlite3.Connection,),
+                      {"cursor": cursor, **{n: noted(sqlite3.Connection, n) for n in names}})
+    connect = sqlite3.connect
+    if getattr(connect, "archplan", False):
+        return
+
+    def traced_connect(*args, **kwargs):
+        kwargs.setdefault("factory", Connection)
+        return connect(*args, **kwargs)
+    traced_connect.archplan = True
+    sqlite3.connect = traced_connect
+
+
 def slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:120] or "test"
 
@@ -275,6 +465,8 @@ def stop(state: str | None):
 # --------------------------------------------------------------- tracing
 
 def install():
+    if CANARY:
+        wrap_c_sinks()
     if getattr(sys, "monitoring", None):
         install_monitoring()
     else:
@@ -295,6 +487,14 @@ def install_monitoring():
 
     def on_start(code, _offset):
         if kind(code) != "project":
+            if CANARY and current is not None:
+                f = sys._getframe(1)
+                if sink(f) is not None:
+                    at_sink(f)
+                    return None
+                return DISABLE
+            if CANARY and _sinks.get(code, 0) is not None:
+                return None  # not known yet as a sink or not: decide while a test runs
             return DISABLE
         t = current
         if t is not None:
@@ -321,7 +521,11 @@ def install_monitoring():
 
 def profile(frame, event, arg):
     t = current
-    if t is None or kind(frame.f_code) != "project":
+    if t is None:
+        return
+    if kind(frame.f_code) != "project":
+        if CANARY and event == "call":
+            at_sink(frame)
         return
     if event == "call":
         t.enter(frame)

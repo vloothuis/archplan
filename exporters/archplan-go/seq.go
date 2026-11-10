@@ -28,18 +28,32 @@ type Diagram struct {
 // marks a refusing return (error, false, status:<4xx>). A call to another
 // process has Via "http" and a Route; its Children can hold the server's
 // call tree. Span is the id that correlates a client call with the server
-// trace it caused.
+// trace it caused. Taint and Interprets are the canary notes (see
+// "Canary" in archplan's format/archmodel.md): the arguments that held the
+// canary marker, and the library calls that ran or resolved input.
 type Step struct {
-	From     string     `json:"from,omitempty"`
-	To       string     `json:"to,omitempty"`
-	Fn       string     `json:"fn,omitempty"`
-	Via      string     `json:"via,omitempty"` // set for a call on another goroutine, or "http"
-	Outcome  string     `json:"outcome,omitempty"`
-	Route    *HTTPRoute `json:"route,omitempty"`
-	Span     string     `json:"span,omitempty"`
-	Args     []string   `json:"args,omitempty"`
-	Repeat   int        `json:"repeat,omitempty"`
-	Children []Step     `json:"children,omitempty"`
+	From       string     `json:"from,omitempty"`
+	To         string     `json:"to,omitempty"`
+	Fn         string     `json:"fn,omitempty"`
+	Via        string     `json:"via,omitempty"` // set for a call on another goroutine, or "http"
+	Outcome    string     `json:"outcome,omitempty"`
+	Route      *HTTPRoute `json:"route,omitempty"`
+	Span       string     `json:"span,omitempty"`
+	Args       []string   `json:"args,omitempty"`
+	Taint      []string   `json:"taint,omitempty"`
+	Interprets []Interp   `json:"interprets,omitempty"`
+	Repeat     int        `json:"repeat,omitempty"`
+	Children   []Step     `json:"children,omitempty"`
+}
+
+// Interp is a library call that runs or resolves its input as Kind (sql,
+// shell, path, html, url, code or deserialize). Canary is "raw" when the
+// input held the whole canary marker, "escaped" when it held only its
+// letters, and empty when it held neither.
+type Interp struct {
+	Kind   string `json:"kind"`
+	Call   string `json:"call"`
+	Canary string `json:"canary,omitempty"`
 }
 
 // IsLoop reports whether s is a loop rather than a call.
@@ -116,6 +130,7 @@ func (b *seqBuilder) walk(s Step, depth int, frag string) {
 		ID: key + "#" + strconv.Itoa(b.count[key]), From: from, To: to,
 		Label: s.Fn + "(" + argNames(s.Args) + ")", Depth: depth, Fragment: frag,
 		Async: s.Via != "", Via: s.Via, Outcome: s.Outcome, Route: s.Route, Span: s.Span,
+		Taint: s.Taint, Interprets: s.Interprets,
 	})
 	for _, c := range s.Children {
 		b.walk(c, depth+1, frag)

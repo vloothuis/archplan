@@ -10,4 +10,6 @@ defmodule Shop.Orders do
     {:ok, _} = @notifier.notify(order)
     {:ok, Shop.Orders.Priced.price(order)}
   end
+
+  def resume(data), do: {Shop.Accounts.load_session(data), Shop.Accounts.greeting(data)}
 end

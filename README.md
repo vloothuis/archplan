@@ -201,7 +201,7 @@ In a message, `@[Label](anchor)` mentions a model item, for example
 | `archplan hook` | hook: report threads that wait on the agent |
 | `archplan export-python` | the built-in Python exporter |
 | `archplan export-elixir`, `archplan trace-elixir` | the Elixir exporter and test tracer |
-| `archplan trace-python [-C DIR] [--python PY] [pytest\|unittest\|django] [ARGS...]` | run Python tests and record call sequences |
+| `archplan trace-python [-C DIR] [--python PY] [--canary] [pytest\|unittest\|django] [ARGS...]` | run Python tests and record call sequences |
 | `archplan export-ts [-C DIR]` | the TypeScript and JavaScript exporter (needs `node`) |
 | `archplan export-lite [DIR] [--language L]` | the regex-based exporter for Java, Kotlin, C#, Ruby, PHP, Rust, Swift and Scala |
 | `archplan exporters [--json]` | the exporters that match this repository, whether they are installed, and install hints |
@@ -595,6 +595,22 @@ Its evidence lists the calls the function runs under, which pass the
 unchecked input on to it. Read those first. `archplan blast` shows the same
 list per entry point.
 
+A canary turns that into proof either way. Write tests that send the canary
+marker, `apcanary'"<i>;$(id)/../`, as input, such as a search term or a
+form field. Then trace them with `--canary`:
+
+```sh
+archplan trace-python --canary pytest tests/api
+archplan trace-elixir -C core --canary test
+```
+
+The tracer notes which calls receive the marker, and whether it reaches a
+library call that runs it, such as a SQL query or a shell command, unchanged.
+A marker that arrives unchanged is a strong finding, also for a function
+nobody declared. A bound parameter or escaping changes or removes the
+marker, and then a declared function's finding goes away. See "Canary" in
+[format/archmodel.md](src/archplan/format/archmodel.md#canary).
+
 A project can read and write them in its own form instead, such as its
 language's annotations or database column comments, with an annotator
 plugin in `.archplan/annotators/`. Each key has one owner.
@@ -612,7 +628,7 @@ The security detectors read the declarations:
 | `security.unguarded_sink` | a trace that calls a write sink before any authorization guard (`guard` or `guard=authz`), strong; or a read sink with no such guard anywhere in the trace, medium. Calls inside a guard are its own. A `guard=authn` guard does not count. Needs sequences. |
 | `security.untested_denial` | an entry point declared `auth=required` or `auth=authz` whose traced requests pass the guard it needs, but none shows the guard or the entry point refusing a caller (a call `outcome` such as `raise`, `error`, `halt` or `status:403`, or a test title such as "rejects another user"). Names the guard to make fail and the sinks the request reaches. Medium; weak when the traces record no outcomes. Needs sequences. |
 | `security.risk_hotspot` | a component in the top quarter by commits that lies on the traced path of entry points that reach sinks. Its weight follows the riskiest of those entry points (see Blast radius). Needs sequences and the cached `archplan hotspots`. |
-| `security.unchecked_input` | a trace that passes outside input to a function declared `interprets=<kind>` before any function declared `validates` (or `validates=<kind>`), or to a function declared `trusts` before any validator. Input starts unchecked at the entry point of each step of a test, and at a call of a function declared `source`. Its weight follows the kind: `shell` and `code` most. Evidence lists the calls that pass the input on to that function. Medium or strong. Needs sequences. |
+| `security.unchecked_input` | a trace that passes outside input to a function declared `interprets=<kind>` before any function declared `validates` (or `validates=<kind>`), or to a function declared `trusts` before any validator. Input starts unchecked at the entry point of each step of a test, and at a call of a function declared `source`. Its weight follows the kind: `shell` and `code` most. Evidence lists the calls that pass the input on to that function. Medium or strong. With a canary in the traces, a marker that reaches a library call unchanged is a strong finding, also without declarations. Needs sequences. |
 | `security.untraced` | a declared guard or entry point that no trace calls, in a component the traces do visit: a guard wired nowhere, or a route nothing reaches. Weak. Needs sequences. |
 | `security.open_entry` | an entry point declared `auth=none` without a reason |
 | `security.zone_dependency` | a dependency from a more trusted zone to a less trusted one, or one that skips a declared zone |
@@ -735,6 +751,14 @@ What it records:
   view, the entry is the first request. A test that makes no requests has no
   entry, so the security detectors do not take its first call for an entry
   point.
+- With `--canary`, whether arguments hold the canary marker, never the
+  values. It also notes calls of library functions that run or resolve
+  input: Django's cursor, `mark_safe`, psycopg, SQLAlchemy's `text` and
+  `exec_driver_sql`, `subprocess` with `shell=True`, `os.popen`,
+  `yaml.load`, Jinja's `from_string`, `urlopen`, requests and httpx. It wraps
+  `os.system`, `pickle.loads`, `marshal.loads` and sqlite3's `execute`
+  methods while the tests run, because tracing cannot see the arguments of
+  C functions.
 
 The export keeps only calls that cross a component boundary. It cuts
 sequences at 400 messages and 12 levels, and merges repeated calls into a

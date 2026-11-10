@@ -2,11 +2,12 @@
 # archplan exporter for Elixir/Mix projects.
 #
 #   archplan-elixir export [-C MIX_DIR] [-o FILE] [--config FILE] [--sequences DIR] [--no-sequences]
-#   archplan-elixir trace  [-C MIX_DIR] [MIX_TASK [ARGS...]]
+#   archplan-elixir trace  [-C MIX_DIR] [--canary] [MIX_TASK [ARGS...]]
 #
 # export writes an archmodel/1 file (stdout without -o).
 # trace runs a mix test task (default: test) with the ArchplanTrace formatter
 # and writes one trace file per test to <repo root>/.archplan/sequences.
+# --canary notes which calls receive the canary marker that tests send.
 # -C names the Mix project directory (default: the current directory).
 # Paths are relative to the directory you run this from.
 set -eu
@@ -14,7 +15,7 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 
 usage() {
-  sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2
+  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -69,6 +70,11 @@ case $cmd in
     ;;
   trace)
     cd "$dir"
+    if [ "${1:-}" = "--canary" ]; then
+      ARCHPLAN_CANARY=1
+      export ARCHPLAN_CANARY
+      shift
+    fi
     [ $# -ge 1 ] || set -- test
     task=$1
     shift

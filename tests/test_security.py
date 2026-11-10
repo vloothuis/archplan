@@ -681,6 +681,53 @@ class SecurityTest(unittest.TestCase):
             decl("entrypoint", "internal/web/search.go:search", "auth", "none", "public", file="internal/web/search.go"))
         self.assertEqual(run(security_unchecked_input, m)[0]["evidence"]["entry"], "internal/web/search.go:search")
 
+    def canary_model(self, query_msg, *more):
+        m = self.input_model()
+        m["sequences"] = {"run": {"entry": "internal/web.(*App).search", "messages": [
+            dict(msg("Caller", "web", "(*App).search(w, r)", 0), taint=["r"]), query_msg, *more]}}
+        return m
+
+    def test_unchecked_input_canary(self):
+        def query(**kw):
+            return dict(msg("web", "orders", "Query(q)", 1), **kw)
+
+        def sql(canary=None):
+            return {"kind": "sql", "call": "sqlite3.Cursor.execute", **({"canary": canary} if canary else {})}
+
+        base = run(security_unchecked_input, self.canary_model(query()))[0]
+        self.assertEqual(base["evidence"]["canary"], "the sequence carried the canary, but the function never got it")
+        # The marker reached the SQL text unchanged: strong.
+        f = run(security_unchecked_input, self.canary_model(query(taint=["q"], interprets=[sql("raw")])))
+        self.assertEqual(len(f), 1)  # the declared function's finding covers the library call
+        self.assertEqual(f[0]["strength"], "strong")
+        self.assertEqual(f[0]["evidence"]["reached"], ["sqlite3.Cursor.execute"])
+        self.assertGreater(f[0]["weight"], base["weight"])
+        # Bound parameters: the function got the marker, the SQL text did not.
+        self.assertEqual(run(security_unchecked_input, self.canary_model(query(taint=["q"], interprets=[sql()]))), [])
+        self.assertEqual(run(security_unchecked_input, self.canary_model(query(taint=["q"], interprets=[sql("escaped")]))), [])
+        # A library call one level down counts for the function too.
+        deeper = self.canary_model(query(taint=["q"]), dict(msg("orders", "vault", "Raw(s)", 2), interprets=[sql("raw")]))
+        self.assertEqual(run(security_unchecked_input, deeper)[0]["evidence"]["reached"], ["sqlite3.Cursor.execute"])
+        # Tainted, with no library call recorded: more weight than without a canary.
+        t = run(security_unchecked_input, self.canary_model(query(taint=["q"])))[0]
+        self.assertEqual(t["evidence"]["canary"], "the canary reached the function")
+        self.assertGreater(t["weight"], base["weight"])
+
+    def test_unchecked_input_canary_without_declarations(self):
+        m = model()
+        m["sequences"] = {"run": {"entry": "internal/web.(*App).search", "messages": [
+            dict(msg("Caller", "web", "(*App).search(w, r)", 0), taint=["r"]),
+            dict(msg("web", "orders", "Load(id)", 1),
+                 interprets=[{"kind": "shell", "call": "os.system", "canary": "raw"},
+                             {"kind": "sql", "call": "sqlite3.Cursor.execute"}])]}}
+        fs = run(security_unchecked_input, m)
+        self.assertEqual([(f["evidence"]["call"], f["evidence"]["kind"], f["strength"]) for f in fs],
+                         [("os.system", "shell", "strong")])
+        self.assertEqual(fs[0]["title"], "(*App).search passes test input unchanged to os.system, which reads it as shell.")
+        self.assertEqual([r["function"] for r in fs[0]["evidence"]["review"]], ["web: search", "orders: Load"])
+        m["sequences"]["run"]["messages"][1]["interprets"][0]["canary"] = "escaped"
+        self.assertEqual(run(security_unchecked_input, m), [])
+
     def test_blast_unchecked_input(self):
         m = self.input_model()
         m["signatures"] = [{"id": "internal/web.(*App).search", "file": "internal/web/search.go", "component": "web",

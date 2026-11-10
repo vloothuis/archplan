@@ -22,7 +22,7 @@ import re
 
 from .core.hotspots import NotGit, git
 from .detectors.security_common import call_file, component_of, decls, guards, guards_off, participant, target, zones
-from .detectors.security_unchecked_input import declared, inputs, review, walk
+from .detectors.security_unchecked_input import CLEARED, declared, inputs, marked, proof, review, walk
 from .detectors.security_unguarded_entry import guarded, hit, runs, turned_away
 from .detectors.security_untested_denial import PARAMS, shows_refusal
 
@@ -75,7 +75,10 @@ def entries(ctx) -> list:
             + [s["file"] for s, _ in sinks if s["id"] in e["sinks"]] + [call_file(ctx, m) for m in msgs]
         e["files"] = list(dict.fromkeys(e["files"] + [f for f in files if f]))
         if checks:
-            for _, t, kind, chain in walk(ctx, ins, key, msgs):
+            carried = marked(msgs)
+            for _, t, kind, chain, under in walk(ctx, ins, key, msgs):
+                if proof(under, kind, carried)[0] == CLEARED:
+                    continue  # the canary shows the input never reached it as code
                 e["unchecked"][t["id"]] = kind
                 e["calls"] += chain
     out = []

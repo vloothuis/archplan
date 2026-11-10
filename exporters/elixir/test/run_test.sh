@@ -25,14 +25,20 @@ ARCHPLAN_TRACE_DIR="$work/seq1" MIX_ENV=test elixir -r "$exporter/archplan_trace
 ARCHPLAN_TRACE_DIR="$work/seq2" ARCHPLAN_TRACE_TEST=1 MIX_ENV=test elixir -r "$exporter/archplan_trace.ex" -S \
   mix test --formatter ArchplanTrace --formatter ExUnit.CLIFormatter >/dev/null
 
+# And with the canary.
+ARCHPLAN_TRACE_DIR="$work/seq3" ARCHPLAN_TRACE_TEST=1 ARCHPLAN_CANARY=1 MIX_ENV=test \
+  elixir -r "$exporter/archplan_trace.ex" -S mix test --formatter ArchplanTrace --formatter ExUnit.CLIFormatter >/dev/null
+
 MIX_ENV=test sh "$exporter/archplan-elixir" export -o "$work/model1.json" --sequences "$work/seq1"
 MIX_ENV=test sh "$exporter/archplan-elixir" export --sequences "$work/seq2" > "$work/model2.json"
+MIX_ENV=test sh "$exporter/archplan-elixir" export --sequences "$work/seq3" > "$work/model3.json"
 
 python3 - "$work" "$schema" <<'EOF'
 import json, sys
 work, schema = sys.argv[1], sys.argv[2]
 m1 = json.load(open(f"{work}/model1.json"))
 m2 = json.load(open(f"{work}/model2.json"))
+m3 = json.load(open(f"{work}/model3.json"))
 
 def check(cond, msg):
     if not cond:
@@ -80,6 +86,13 @@ s2 = m2["sequences"]
 check("orders-place-an-order" in s2 and s2["orders-place-an-order"]["messages"][0]["from"] == "test",
       f"test-process sequence {list(s2)}")
 check(s2["orders-place-an-order"]["messages"][0]["id"] == "test>Shop.Orders:Shop.Orders.place/2#1", "message id")
+check(not any("taint" in m or "interprets" in m for s in s2.values() for m in s["messages"]), "no canary notes without it")
+r = {m["label"]: m for m in m3["sequences"]["orders-resume-a-session"]["messages"]}
+check(r["Shop.Orders.resume/1"].get("taint") == ["1"], f"tainted argument {r['Shop.Orders.resume/1']}")
+check(r["Shop.Accounts.load_session/1"].get("interprets") ==
+      [{"kind": "deserialize", "call": "erlang.binary_to_term", "canary": "raw"}], f"raw sink {r}")
+check(r["Shop.Accounts.greeting/1"].get("interprets") ==
+      [{"kind": "code", "call": "Code.eval_string", "canary": "escaped"}], f"escaped sink {r}")
 
 print("checks: ok")
 EOF
@@ -90,7 +103,7 @@ for py in python3 python3.13 python3.12 python3.11; do
     "$py" - "$work" "$schema" <<'EOF'
 import json, sys, jsonschema
 work, schema = sys.argv[1], json.load(open(sys.argv[2]))
-for f in ("model1.json", "model2.json"):
+for f in ("model1.json", "model2.json", "model3.json"):
     jsonschema.validate(json.load(open(f"{work}/{f}")), schema)
 print("schema: valid")
 EOF

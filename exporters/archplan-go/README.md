@@ -155,6 +155,8 @@ A step can have these fields besides `from`, `to`, `fn`, `args` and
 | `outcome` | The kind of a refusing return: `error`, `false`, or `status:<4xx>` on the root step of a request that was refused. Leave it out otherwise. |
 | `route` | For a step with `via: "http"`: `{"method": "GET", "path": "/api/v1/orders/{id}"}`. The path is the route pattern, not the URL. |
 | `span` | The id the client and the server both record for one request, such as the value of an `X-Seqtrace-Span` header. |
+| `taint` | The arguments that held the canary marker, by name. |
+| `interprets` | The library calls under this step that run or resolve input: `[{"kind": "sql", "call": "pgx.Conn.Query", "canary": "raw"}]`. See "Canary" in archplan's `format/archmodel.md`. |
 
 ### Client and server in one trace
 

@@ -138,3 +138,21 @@ func TestSequenceCarriesGuardsOff(t *testing.T) {
 		t.Errorf("parsed = %+v", scs)
 	}
 }
+
+func TestSequenceCarriesCanary(t *testing.T) {
+	scs, err := ParseSteps([]byte(`[{"name": "search", "diagram": {"participants": ["web", "store"],
+	  "root": {"from": "Caller", "to": "web", "fn": "search", "args": ["q=\"apcanary'\""], "taint": ["q"], "children": [
+	    {"from": "web", "to": "store", "fn": "Find", "taint": ["q"],
+	     "interprets": [{"kind": "sql", "call": "pgx.Conn.Query", "canary": "raw"}]}]}}}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := SequenceFrom(scs[0], func(string) string { return "" })
+	m := s.Messages
+	if len(m) != 2 || strings.Join(m[0].Taint, ",") != "q" || m[0].Interprets != nil {
+		t.Fatalf("messages = %+v", m)
+	}
+	if len(m[1].Interprets) != 1 || m[1].Interprets[0] != (Interp{Kind: "sql", Call: "pgx.Conn.Query", Canary: "raw"}) {
+		t.Errorf("interprets = %+v", m[1].Interprets)
+	}
+}
