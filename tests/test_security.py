@@ -705,6 +705,12 @@ class SecurityTest(unittest.TestCase):
         # Bound parameters: the function got the marker, the SQL text did not.
         self.assertEqual(run(security_unchecked_input, self.canary_model(query(taint=["q"], interprets=[sql()]))), [])
         self.assertEqual(run(security_unchecked_input, self.canary_model(query(taint=["q"], interprets=[sql("escaped")]))), [])
+        # One sequence clears the function, another never sent the canary: still reported.
+        mixed = self.canary_model(query(taint=["q"], interprets=[sql()]))
+        mixed["sequences"]["plain"] = {"entry": "internal/web.(*App).search", "messages": [
+            msg("Caller", "web", "(*App).search(w, r)", 0), query()]}
+        f = run(security_unchecked_input, mixed)
+        self.assertEqual(f[0]["evidence"]["sequences"], ["plain"])
         # A library call one level down counts for the function too.
         deeper = self.canary_model(query(taint=["q"]), dict(msg("orders", "vault", "Raw(s)", 2), interprets=[sql("raw")]))
         self.assertEqual(run(security_unchecked_input, deeper)[0]["evidence"]["reached"], ["sqlite3.Cursor.execute"])

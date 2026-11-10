@@ -203,9 +203,11 @@ def run(ctx, params) -> list:
     out = []
     checks = sorted({t["id"] for t in ins["validates"]})
     for (origin, tid, kind), runs in sorted(found.items()):
-        rank = max(r for _, _, r, _ in runs)
-        if rank == CLEARED:
-            continue
+        open_ = [r for _, _, r, _ in runs if r != CLEARED]
+        if not open_:
+            continue  # every sequence shows the input never reached it as code
+        rank = max(open_)
+        runs = [x for x in runs if x[2] != CLEARED]
         raw = list(dict.fromkeys(c for _, _, _, cs in runs for c in cs))
         t, seqs = targets[tid], [sid for sid, *_ in runs]
         trusts = kind == "trusts"
