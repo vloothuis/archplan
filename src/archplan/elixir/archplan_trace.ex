@@ -11,7 +11,16 @@
 # ARCHPLAN_TRACE_DIR (default: <repo root>/.archplan/sequences).
 # archplan_export.exs turns these files into archmodel sequences.
 #
+# With ARCHPLAN_CANARY=1 it also notes whether values hold the canary marker
+# (@marker), which a test sends as input; never the values themselves. A call
+# whose arguments hold it gets their positions (`taint`, "1" for the first).
+# A call of a library function that runs or resolves its input (sinks/0),
+# made while a recorded call runs in the same process, is added to that call
+# (`interprets`) with its kind, and with canary "raw" when the input held the
+# whole marker, or "escaped" when it held only its letters.
+#
 # Environment:
+#   ARCHPLAN_CANARY=1       look for the canary marker
 #   ARCHPLAN_TRACE_DIR      output directory
 #   ARCHPLAN_CONFIG         config file (default: .archplan/elixir.json)
 #   ARCHPLAN_TRACE_TEST=1   record all calls of the test process itself, not only
@@ -52,15 +61,22 @@ defmodule ArchplanTrace do
       :erlang.trace_pattern({m, f, :_}, ms, [:global])
     end
 
+    canary = System.get_env("ARCHPLAN_CANARY") == "1"
+    sinks = if canary, do: Enum.filter(sinks(), fn {{m, f, a}, _} -> traceable?(m, f, a) end), else: []
+
+    # A sink call only names the call that made it: no return trace.
+    for {mfa, _} <- sinks, do: :erlang.trace_pattern(mfa, [{:_, [], []}], [:global])
+
     tracer =
       spawn_link(fn ->
-        tracer_loop(new_state(tcfg, MapSet.new(mods)))
+        tracer_loop(new_state(tcfg, MapSet.new(mods), Map.new(sinks)))
       end)
 
     # Tracing stays on for the whole run. The tracer gives each call to the
     # test whose process made it, so it does not wait for ExUnit's events,
     # which formatters get without ExUnit waiting for them.
-    :erlang.trace(:all, true, [:call, :arity, {:tracer, tracer}])
+    # Without :arity, call messages carry the arguments, for the canary.
+    :erlang.trace(:all, true, [:call, {:tracer, tracer}] ++ if(canary, do: [], else: [:arity]))
     :erlang.trace(tracer, false, [:call])
 
     setup_ms = System.monotonic_time(:millisecond) - t0
@@ -122,7 +138,7 @@ defmodule ArchplanTrace do
       "entry" =>
         case {result.entry, trees} do
           {entry, _} when entry != nil -> entry
-          {_, [%{root: [m, f, a, _]} | _]} -> "#{m}.#{f}/#{a}"
+          {_, [%{root: [m, f, a | _]} | _]} -> "#{m}.#{f}/#{a}"
           _ -> nil
         end,
       "trees" =>
@@ -142,9 +158,11 @@ defmodule ArchplanTrace do
   # actor, async}. owner is a test key; :shared for a process no test
   # started, which belongs to the only running test; :done when its test has
   # finished. finished: the keys of finished tests.
-  defp new_state(tcfg, mods), do: %{tcfg: tcfg, mods: mods, tests: %{}, procs: %{}, finished: MapSet.new()}
+  defp new_state(tcfg, mods, sinks),
+    do: %{tcfg: tcfg, mods: mods, sinks: sinks, tests: %{}, procs: %{}, finished: MapSet.new()}
 
-  defp new_test, do: %{stacks: %{}, trees: [], order: 0, calls: 0, truncated: false, entry: nil}
+  # info: the canary notes per node, by its order.
+  defp new_test, do: %{stacks: %{}, trees: [], order: 0, calls: 0, truncated: false, entry: nil, info: %{}}
 
   defp tracer_loop(st) do
     receive do
@@ -195,17 +213,26 @@ defmodule ArchplanTrace do
   # A frame is {:node, mod, fun, arity, order, children} for a call into
   # another module, {:same, mod} for a call within the module on top, or
   # :skip for a call of the test process outside a request.
-  defp call(st, pid, m, f, a) do
+  defp call(st, pid, m, f, args) when is_list(args) do
+    case st.sinks[{m, f, length(args)}] do
+      nil -> call(st, pid, m, f, length(args), args)
+      {kind, i} -> note(st, pid, kind, "#{C.mod_name(m)}.#{f}", Enum.at(args, i))
+    end
+  end
+
+  defp call(st, pid, m, f, a), do: call(st, pid, m, f, a, nil)
+
+  defp call(st, pid, m, f, a, args) do
     {{owner, actor, _}, st} = proc(st, pid, m)
     owner = resolve(st, owner)
 
     case st.tests do
-      %{^owner => t} -> %{st | tests: Map.put(st.tests, owner, push(t, st.tcfg, pid, actor, m, f, a))}
+      %{^owner => t} -> %{st | tests: Map.put(st.tests, owner, push(t, st.tcfg, pid, actor, m, f, a, args))}
       _ -> st
     end
   end
 
-  defp push(t, tcfg, pid, actor, m, f, a) do
+  defp push(t, tcfg, pid, actor, m, f, a, args) do
     stack = Map.get(t.stacks, pid, [])
     full = t.calls >= tcfg["max_calls"]
 
@@ -228,6 +255,7 @@ defmodule ArchplanTrace do
           {[{:same, m} | stack], %{t | truncated: true}}
 
         true ->
+          t = taint(t, t.order, args)
           {[{:node, m, f, a, t.order, []} | stack], %{t | calls: t.calls + 1, order: t.order + 1}}
       end
 
@@ -280,7 +308,8 @@ defmodule ArchplanTrace do
   # A finished node is [module, fun, arity, children], with its outcome after
   # the children when it has one.
   defp finish_node(t, pid, {:node, m, f, a, order, kids}, rest, {actor, async}, outcome) do
-    node = [C.mod_name(m), Atom.to_string(f), a, Enum.reverse(kids)] ++ List.wrap(outcome)
+    {info, t} = Map.pop(t.info, order) |> then(fn {i, rest} -> {List.wrap(i), %{t | info: rest}} end)
+    node = [C.mod_name(m), Atom.to_string(f), a, Enum.reverse(kids)] ++ info ++ List.wrap(outcome)
 
     case add_child(rest, node) do
       {:ok, rest} ->
@@ -454,4 +483,109 @@ defmodule ArchplanTrace do
   end
 
   defp oban_worker?(m), do: function_exported?(m, :perform, 1) and function_exported?(m, :__opts__, 0)
+
+  # ---------------------------------------------------------- canary
+
+  @marker "apcanary'\"<i>;$(id)/../"
+  @core "apcanary"
+
+  # Library functions that run or resolve an argument as code: {kind, the
+  # argument's index}.
+  defp sinks do
+    sql =
+      for {m, f, as} <- [{Ecto.Adapters.SQL, :query, 2..4}, {Ecto.Adapters.SQL, :query!, 2..4},
+                         {Postgrex, :query, 3..4}, {Postgrex, :query!, 3..4}],
+          a <- as,
+          do: {{m, f, a}, {"sql", 1}}
+
+    first = fn kind, list -> for {m, f, a} <- list, do: {{m, f, a}, {kind, 0}} end
+
+    sql ++
+      first.("shell", [{System, :shell, 1}, {System, :shell, 2}, {:os, :cmd, 1}, {:os, :cmd, 2}]) ++
+      first.("code", [{Code, :eval_string, 1}, {Code, :eval_string, 2}, {Code, :eval_string, 3}]) ++
+      first.("deserialize", [{:erlang, :binary_to_term, 1}, {:erlang, :binary_to_term, 2}]) ++
+      first.("html", [{Phoenix.HTML, :raw, 1}]) ++
+      first.("path", [{File, :read, 1}, {File, :read!, 1}, {File, :write, 2}, {File, :write, 3},
+                      {File, :write!, 2}, {File, :write!, 3}]) ++
+      first.("url", [{Req, :get, 1}, {Req, :get, 2}, {Req, :post, 2}, {HTTPoison, :get, 1}, {HTTPoison, :get, 2},
+                     {HTTPoison, :get, 3}])
+  end
+
+  defp traceable?(m, f, a), do: Code.ensure_loaded?(m) and function_exported?(m, f, a)
+
+  defp taint(t, _order, nil), do: t
+
+  defp taint(t, order, args) do
+    case for({v, i} <- Enum.with_index(args, 1), holds(v), do: "#{i}") do
+      [] -> t
+      names -> %{t | info: Map.put(t.info, order, %{"taint" => names})}
+    end
+  end
+
+  # Note a sink call on the innermost recorded call of its process.
+  defp note(st, pid, kind, call, value) do
+    with {owner, _, _} <- st.procs[pid],
+         owner = resolve(st, owner),
+         %{^owner => t} <- st.tests,
+         o when o != nil <- Enum.find_value(Map.get(t.stacks, pid, []), &node_order/1) do
+      c = holds(value)
+      entry = if c, do: %{"kind" => kind, "call" => call, "canary" => c}, else: %{"kind" => kind, "call" => call}
+      info = Map.get(t.info, o, %{})
+      uses = Map.get(info, "interprets", [])
+      uses = if entry in uses or length(uses) >= 20, do: uses, else: uses ++ [entry]
+      t = %{t | info: Map.put(t.info, o, Map.put(info, "interprets", uses))}
+      %{st | tests: Map.put(st.tests, owner, t)}
+    else
+      _ -> st
+    end
+  end
+
+  defp node_order({:node, _, _, _, o, _}), do: o
+  defp node_order(_), do: nil
+
+  # "raw" when v holds the whole marker, "escaped" when only its letters,
+  # else nil. Looks into maps, lists and tuples, 4 levels deep and at most
+  # 400 values.
+  defp holds(v) do
+    look([{v, 0}], 0, nil)
+  rescue
+    _ -> nil
+  end
+
+  defp look([], _n, best), do: best
+  defp look(_todo, n, best) when n >= 400, do: best
+
+  defp look([{x, d} | rest], n, best) do
+    cond do
+      is_binary(x) ->
+        cond do
+          :binary.match(x, @marker) != :nomatch -> "raw"
+          :binary.match(x, @core) != :nomatch -> look(rest, n + 1, "escaped")
+          true -> look(rest, n + 1, best)
+        end
+
+      is_list(x) and x != [] and :io_lib.printable_unicode_list(x) ->
+        look([{List.to_string(x), d} | rest], n + 1, best)
+
+      d >= 4 ->
+        look(rest, n + 1, best)
+
+      is_map(x) ->
+        kids = x |> Map.to_list() |> Enum.take(100) |> Enum.flat_map(fn {k, w} -> [{k, d + 1}, {w, d + 1}] end)
+        look(kids ++ rest, n + 1, best)
+
+      is_list(x) ->
+        look(Enum.map(take(x, 100), &{&1, d + 1}) ++ rest, n + 1, best)
+
+      is_tuple(x) ->
+        look(Enum.map(Enum.take(Tuple.to_list(x), 100), &{&1, d + 1}) ++ rest, n + 1, best)
+
+      true ->
+        look(rest, n + 1, best)
+    end
+  end
+
+  # The first n elements of a list that may be improper.
+  defp take([h | t], n) when n > 0, do: [h | take(t, n - 1)]
+  defp take(_, _), do: []
 end

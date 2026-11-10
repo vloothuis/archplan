@@ -209,6 +209,19 @@
                 "async": { "type": "boolean" },
                 "via": { "type": "string" },
                 "outcome": { "type": "string" },
+                "taint": { "type": "array", "items": { "type": "string" } },
+                "interprets": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["kind", "call"],
+                    "properties": {
+                      "kind": { "type": "string" },
+                      "call": { "type": "string" },
+                      "canary": { "enum": ["raw", "escaped"] }
+                    }
+                  }
+                },
                 "route": {
                   "type": "object",
                   "required": ["path"],

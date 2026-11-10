@@ -265,6 +265,7 @@ Ordered calls for one scenario, usually from traces.
   return. It is the kind of the return value, never the value.
 - `route` and `span` mark a call to another process over HTTP. See
   [Calls between processes](#calls-between-processes).
+- `taint` and `interprets` are canary notes. See [Canary](#canary).
 - Labels must not contain argument values. Traces can carry secrets.
 
 A sequence can have `"guards": "off"` when it ran with its guards switched
@@ -275,6 +276,48 @@ detectors that judge guards (`security.unguarded_entry`,
 blast radius does not call its entry point unguarded because of it. When
 archplan joins a server sequence with `"guards": "off"` under a client's
 call, the client's sequence gets `"guards": "off"` too.
+
+### Canary
+
+A trace shows calls, not values. The canary adds one fact about values:
+whether test input reached a call. A test sends the canary marker as input:
+
+```text
+apcanary'"<i>;$(id)/../
+```
+
+The tracer looks for the marker in the arguments of each call it records,
+and in the input of library calls that run or resolve input, such as a SQL
+query, a shell command or a template's raw HTML. It never records the
+values themselves.
+
+```json
+{ "id": "web>store:Find#1", "from": "web", "to": "store", "label": "Find(q)", "depth": 1,
+  "taint": ["q"],
+  "interprets": [{ "kind": "sql", "call": "sqlite3.Connection.execute", "canary": "raw" },
+                 { "kind": "sql", "call": "sqlite3.Cursor.execute" }] }
+```
+
+- `taint` names the arguments of the call that held the marker. Tracers
+  that know no names use positions, starting at `"1"`.
+- `interprets` lists the library calls made by this call, or by the calls
+  under it that are no message of their own. `kind` is one of `sql`,
+  `shell`, `path`, `html`, `url`, `code` or `deserialize`; `call` names the
+  library function. `canary` is `"raw"` when the input held the whole
+  marker, and `"escaped"` when it held only its letters (`apcanary`):
+  escaping or quoting changed the quotes, brackets, `;`, `$(` or `../`.
+  Without `canary`, the input held no part of the marker, as with a bound
+  query parameter.
+
+`security.unchecked_input` uses these notes. A marker that reaches a library
+call unchanged is a strong finding, also without declarations. A function
+declared `interprets` that receives the marker, while the library calls
+under it never get it unchanged, is no finding.
+
+The shipped tracers write these notes with a flag: `archplan trace-python
+--canary` and `archplan trace-elixir --canary`. A tracer of another language
+can write them too, such as seqtrace for Go (`taint` and `interprets` on a
+step) or one that writes `.archplan/sequences.json`.
 
 ### Calls between processes
 

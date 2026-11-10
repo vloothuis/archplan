@@ -158,6 +158,9 @@ type Message struct {
 	Route *HTTPRoute `json:"route,omitempty"`
 	// Span correlates a client call with the server trace it caused.
 	Span string `json:"span,omitempty"`
+	// Taint and Interprets are the canary notes; see Step.
+	Taint      []string `json:"taint,omitempty"`
+	Interprets []Interp `json:"interprets,omitempty"`
 }
 
 // HTTPRoute is the method and path pattern of an HTTP request.

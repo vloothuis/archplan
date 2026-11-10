@@ -1072,6 +1072,7 @@ defmodule ArchplanElixir.Export do
     trees =
       Enum.flat_map(data["trees"], fn t ->
         nodes(t["root"], t["actor"], comp_of, 0, tcfg["max_depth"])
+        |> elem(0)
         |> Enum.map(&mark_async(&1, t["async"]))
       end)
       |> collapse()
@@ -1113,23 +1114,41 @@ defmodule ArchplanElixir.Export do
   defp ancestors(_frags, nil), do: []
   defp ancestors(frags, id), do: [id | ancestors(frags, frags[id] && frags[id]["parent"])]
 
-  # A trace node is [module, fun, arity, children], with an outcome after the
-  # children when the call refused. Returns component-level nodes
-  # %{from, to, label, children, outcome}.
-  defp nodes([mod, fun, arity, children | outcome], from, comp_of, depth, max_depth) do
+  # A trace node is [module, fun, arity, children], followed by a canary map
+  # (%{"taint", "interprets"}) when the tracer looked for the canary, and an
+  # outcome when the call refused. Returns {component-level nodes %{from, to,
+  # label, children, outcome, taint, interprets}, the library calls of the
+  # calls that are no message}: those belong to the message of their caller.
+  defp nodes([mod, fun, arity, children | rest], from, comp_of, depth, max_depth) do
+    info = Enum.find(rest, %{}, &is_map/1)
+    uses = List.wrap(info["interprets"])
+
     case comp_of[mod] do
       to when to != nil and to != from ->
-        kids =
+        {kids, uses} =
           if depth + 1 >= max_depth,
-            do: [],
-            else: Enum.flat_map(children, &nodes(&1, to, comp_of, depth + 1, max_depth))
+            do: {[], uses ++ Enum.flat_map(children, &everything/1)},
+            else: below(children, to, comp_of, depth + 1, max_depth, uses)
 
-        [%{from: from, to: to, label: "#{mod}.#{fun}/#{arity}", children: kids, repeat: 1,
-           outcome: List.first(outcome)}]
+        {[%{from: from, to: to, label: "#{mod}.#{fun}/#{arity}", children: kids, repeat: 1,
+            outcome: Enum.find(rest, &is_binary/1), taint: info["taint"],
+            interprets: uses |> Enum.uniq() |> Enum.take(20) |> then(&if(&1 == [], do: nil, else: &1))}], []}
 
       _ ->
-        Enum.flat_map(children, &nodes(&1, from, comp_of, depth, max_depth))
+        below(children, from, comp_of, depth, max_depth, uses)
     end
+  end
+
+  defp below(children, from, comp_of, depth, max_depth, uses) do
+    Enum.reduce(children, {[], uses}, fn k, {ns, us} ->
+      {more, loose} = nodes(k, from, comp_of, depth, max_depth)
+      {ns ++ more, us ++ loose}
+    end)
+  end
+
+  # The library calls noted anywhere in a trace node.
+  defp everything([_mod, _fun, _arity, children | rest]) do
+    List.wrap(Enum.find(rest, %{}, &is_map/1)["interprets"]) ++ Enum.flat_map(children, &everything/1)
   end
 
   defp mark_async(node, nil), do: node
@@ -1161,6 +1180,8 @@ defmodule ArchplanElixir.Export do
         %{"id" => "#{key}##{count}", "from" => n.from, "to" => n.to, "label" => n.label, "depth" => depth}
         |> put("fragment", frag_here)
         |> put("outcome", n.outcome)
+        |> put("taint", n.taint)
+        |> put("interprets", n.interprets)
         |> then(fn m -> if n[:via], do: Map.merge(m, %{"async" => true, "via" => n.via}), else: m end)
 
       flatten(n.children, depth + 1, frag_here, {[msg | msgs], frags, %{st | count: Map.put(st.count, key, count)}})

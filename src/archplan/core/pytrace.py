@@ -16,7 +16,7 @@ from .safeio import read_file
 
 FORMAT = "archplan-python-trace/1"
 MAX_DEPTH, MAX_MESSAGES = 12, 400
-USAGE = """usage: archplan trace-python [-C DIR] [--python PYTHON] [pytest|unittest|django] [ARGS...]
+USAGE = """usage: archplan trace-python [-C DIR] [--python PYTHON] [--canary] [pytest|unittest|django] [ARGS...]
 
 Runs the project's tests and writes one trace file per test to
 <repo root>/.archplan/sequences. `archplan export` then turns them into
@@ -27,7 +27,11 @@ and unittest otherwise. ARGS go to the runner, such as test files or -k.
   -C DIR           the project directory to run the tests in (default: .)
   --python PYTHON  the python to run them with (default: the active virtual
                    environment, then .venv or venv in DIR, then python3)
+  --canary         note which calls receive the canary marker, which tests
+                   send as input: %s
+                   (see "Canary" in format/archmodel.md)
 """
+MARKER = "apcanary'\"<i>;$(id)/../"  # the same as archplan_pytrace.MARKER
 RUNNERS = ("pytest", "unittest", "django")
 
 
@@ -62,13 +66,16 @@ def repo_root(d: Path) -> Path:
 
 
 def main(argv: list) -> int:
-    d, python = Path("."), None
-    while argv and argv[0] in ("-C", "--python", "-h", "--help"):
+    d, python, canary = Path("."), None, False
+    while argv and argv[0] in ("-C", "--python", "--canary", "-h", "--help"):
         if argv[0] in ("-h", "--help"):
-            print(USAGE, end="")
+            print(USAGE % MARKER, end="")
             return 0
+        if argv[0] == "--canary":
+            canary, argv = True, argv[1:]
+            continue
         if len(argv) < 2:
-            print(USAGE, end="", file=sys.stderr)
+            print(USAGE % MARKER, end="", file=sys.stderr)
             return 2
         if argv[0] == "-C":
             d = Path(argv[1])
@@ -82,6 +89,8 @@ def main(argv: list) -> int:
     here = str(Path(__file__).resolve().parent.parent / "python")
     env = dict(os.environ, ARCHPLAN_TRACE_ROOT=str(root), ARCHPLAN_TRACE_DIR=str(root / ".archplan" / "sequences"),
                PYTHONPATH=os.pathsep.join([here, *filter(None, [os.environ.get("PYTHONPATH")])]))
+    if canary:
+        env["ARCHPLAN_CANARY"] = "1"
     print(f"archplan: tracing {runner} tests with {python}", file=sys.stderr)
     try:
         return subprocess.run([python, "-m", "archplan_pytrace", runner, *args], cwd=d, env=env).returncode
@@ -109,7 +118,7 @@ def sequences(root: Path, comp_for) -> dict:
 
 
 def sequence(data: dict, comp_for) -> dict:
-    trees = collapse([n for t in data["trees"] for n in nodes(t.get("root"), t.get("actor") or "Test", comp_for, 0)])
+    trees = collapse([n for t in data["trees"] for n in nodes(t.get("root"), t.get("actor") or "Test", comp_for, 0)[0]])
     msgs, frags, count = [], {}, {}
     flatten(trees, 0, None, msgs, frags, count)
     cut = len(msgs) > MAX_MESSAGES
@@ -133,19 +142,54 @@ def sequence(data: dict, comp_for) -> dict:
     return seq
 
 
-def nodes(node, frm: str, comp_for, depth: int) -> list:
-    """A trace node is [module, qualname, children], with an outcome after
-    the children when the call may have refused. Returns component-level
-    nodes {from, to, label, children, outcome, repeat}."""
+def nodes(node, frm: str, comp_for, depth: int) -> tuple:
+    """A trace node is [module, qualname, children], followed by an outcome
+    when the call may have refused and a canary dict ({taint, interprets})
+    when the tracer looked for the canary. Returns (component-level nodes
+    {from, to, label, children, outcome, repeat, taint, interprets}, the
+    library calls of the calls that are no message): these belong to the
+    message of their caller."""
     if not isinstance(node, list) or len(node) < 3:
-        return []
+        return [], []
     mod, q, kids = node[0], node[1], node[2]
+    outcome = next((x for x in node[3:] if isinstance(x, str)), None)
+    info = next((x for x in node[3:] if isinstance(x, dict)), {})
+    uses = [u for u in info.get("interprets") or [] if isinstance(u, dict)]
     to = comp_for(mod)
     if to and to != frm:
-        below = [] if depth + 1 >= MAX_DEPTH else [n for k in kids for n in nodes(k, to, comp_for, depth + 1)]
+        below = []
+        if depth + 1 >= MAX_DEPTH:
+            uses += [u for k in kids for u in everything(k)]
+        else:
+            for k in kids:
+                ns, loose = nodes(k, to, comp_for, depth + 1)
+                below += ns
+                uses += loose
         return [{"from": frm, "to": to, "label": f"{mod}.{q}()", "children": below, "repeat": 1,
-                 "outcome": node[3] if len(node) > 3 else None}]
-    return [n for k in kids for n in nodes(k, frm, comp_for, depth)]
+                 "outcome": outcome, "taint": info.get("taint") or None, "interprets": unique(uses)}], []
+    out = []
+    for k in kids:
+        ns, loose = nodes(k, frm, comp_for, depth)
+        out += ns
+        uses += loose
+    return out, uses
+
+
+def everything(node) -> list:
+    """The library calls noted anywhere in a trace node."""
+    if not isinstance(node, list) or len(node) < 3:
+        return []
+    info = next((x for x in node[3:] if isinstance(x, dict)), {})
+    return [u for u in info.get("interprets") or [] if isinstance(u, dict)] + [
+        u for k in node[2] for u in everything(k)]
+
+
+def unique(uses: list) -> list | None:
+    out = []
+    for u in uses:
+        if u not in out:
+            out.append(u)
+    return out[:20] or None
 
 
 def collapse(ns: list) -> list:
@@ -161,7 +205,7 @@ def collapse(ns: list) -> list:
 
 
 def same(a: dict, b: dict) -> bool:
-    return all(a[k] == b[k] for k in ("from", "to", "label", "outcome", "children"))
+    return all(a[k] == b[k] for k in ("from", "to", "label", "outcome", "taint", "interprets", "children"))
 
 
 def flatten(ns: list, depth: int, frag, msgs: list, frags: dict, count: dict):
@@ -177,5 +221,8 @@ def flatten(ns: list, depth: int, frag, msgs: list, frags: dict, count: dict):
             m["fragment"] = here
         if n["outcome"]:
             m["outcome"] = n["outcome"]
+        for k in ("taint", "interprets"):
+            if n[k]:
+                m[k] = n[k]
         msgs.append(m)
         flatten(n["children"], depth + 1, here, msgs, frags, count)

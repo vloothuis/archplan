@@ -194,5 +194,98 @@ class TracePythonTest(unittest.TestCase):
         self.assertIn(pytrace.pick(sys.executable, self.root), ("pytest", "django"))
 
 
+CANARY_FILES = {
+    "shop/__init__.py": "",
+    "shop/store.py": """
+import sqlite3
+
+
+def find(term):
+    con = sqlite3.connect(":memory:")
+    try:
+        return con.execute(f"select '{term}'").fetchall()
+    except sqlite3.Error:
+        return None
+
+
+def find_escaped(term):
+    con = sqlite3.connect(":memory:")
+    return con.execute("select '" + term.replace("'", "''") + "'").fetchall()
+
+
+def find_bound(term):
+    return sqlite3.connect(":memory:").cursor().execute("select ?", (term,)).fetchall()
+""",
+    "shop/web.py": """
+from shop import store
+
+
+def search(term):
+    return store.find(term), store.find_escaped(term), store.find_bound(term)
+""",
+    "tests/__init__.py": "",
+    "tests/test_search.py": """
+import unittest
+
+from shop import web
+
+MARKER = "apcanary'\\"<i>;$(id)/../"
+
+
+class SearchTest(unittest.TestCase):
+    def test_search(self):
+        web.search(MARKER)
+""",
+}
+
+
+class TraceCanaryTest(TracePythonTest):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        for name, text in CANARY_FILES.items():
+            (self.root / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / name).write_text(text.lstrip())
+        (self.root / ".archplan").mkdir()
+
+    test_unittest = test_pytest = test_picks_runner = None
+
+    def test_canary(self):
+        from archplan.detectors import security_unchecked_input
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("tracer", ROOT / "src/archplan/python/archplan_pytrace.py")
+        tracer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tracer)
+        self.assertEqual((tracer.MARKER, tracer.CORE), (pytrace.MARKER, pytrace.MARKER[:8]))
+        self.trace("--canary", "unittest", "discover", "-s", "tests", "-t", ".")
+        model = pyexport.export(self.root)
+        msgs = model["sequences"]["search-search"]["messages"]
+        got = {m["label"]: (m.get("taint"), m.get("interprets")) for m in msgs}
+        self.assertEqual(got["shop.web.search()"][0], ["term"])
+        self.assertEqual(got["shop.store.find()"], (["term"], [
+            {"kind": "sql", "call": "sqlite3.Connection.execute", "canary": "raw"}]))
+        self.assertEqual(got["shop.store.find_escaped()"][1], [
+            {"kind": "sql", "call": "sqlite3.Connection.execute", "canary": "escaped"}])
+        self.assertEqual(got["shop.store.find_bound()"][1], [{"kind": "sql", "call": "sqlite3.Cursor.execute"}])
+
+        class Ctx:
+            files = {}
+            components = model["components"]
+
+            def __init__(self):
+                self.model = model
+
+            def read(self, path):
+                return None
+        fs = security_unchecked_input.run(Ctx(), security_unchecked_input.PARAMS)
+        self.assertEqual([(f["evidence"]["call"], f["strength"]) for f in fs], [("sqlite3.Connection.execute", "strong")])
+        self.assertIn("unchanged, under find.", fs[0]["detail"])
+
+    def test_without_canary(self):
+        traces = self.trace("unittest", "discover", "-s", "tests", "-t", ".")
+        root = traces["search-search"]["trees"][0]["root"]
+        self.assertFalse(any(isinstance(x, dict) for n in [root, *root[2]] for x in n[3:]))
+
+
 if __name__ == "__main__":
     unittest.main()
