@@ -6,7 +6,7 @@ a direct push. Do not tag by hand.
 
 The workflow:
 
-1. runs the tests on Python 3.9;
+1. runs the tests on Python 3.10;
 2. computes the next version with `scripts/next-version.sh`;
 3. writes it into `pyproject.toml`, `src/archplan/__init__.py` and
    `.claude-plugin/plugin.json` with `scripts/set-version.sh`;
