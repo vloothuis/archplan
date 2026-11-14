@@ -20,7 +20,8 @@ concurrency:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    # Python 3.9, the oldest supported version, has no build for Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     if: ${{ !startsWith(github.event.head_commit.message, 'Release v') }}
     steps:
       # The branch head rather than the pushed commit: a run that waited for an
