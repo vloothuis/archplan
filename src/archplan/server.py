@@ -11,7 +11,7 @@ from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import parse_qsl, unquote
 
 from . import __version__, brief, detectors, handover, hotspots, reload
 from .architecture import Architecture, ArchitectureError
@@ -133,7 +133,8 @@ def make_handler(p: Project, store: Store):
             if self.refuse():
                 return
             path, _, query = self.path.partition("?")
-            params = dict(x.split("=", 1) for x in query.split("&") if "=" in x)
+            # Decoded: the poll key holds a "+" (the build id), which the page sends as %2B.
+            params = dict(parse_qsl(query, keep_blank_values=True))
             if path == "/api/status":
                 return self.send_json(status())
             if path == "/api/info":
@@ -199,7 +200,7 @@ def make_handler(p: Project, store: Store):
             if path == "/api/vocabulary/candidates":
                 try:
                     with vocab_lock:
-                        return self.send_json({**vocab.candidates(unquote(params.get("component", "")) or None,
+                        return self.send_json({**vocab.candidates(params.get("component") or None,
                                                                   int(params["top"]) if params.get("top") else None,
                                                                   params.get("ignored") == "1"),
                                                **changes(p, store)})
@@ -213,7 +214,7 @@ def make_handler(p: Project, store: Store):
                 return self.send_json({**brief.status(p, store), **changes(p, store)})
             if path == "/api/brief":
                 try:
-                    lst = lambda k: [x for x in unquote(params[k]).split(",") if x] if params.get(k) else None
+                    lst = lambda k: [x for x in params[k].split(",") if x] if params.get(k) else None
                     with arch_lock:
                         return self.send_json({**brief.brief(p, int(params.get("top") or 8), lst("focus"),
                                                              lst("kinds"), store), **changes(p, store)})
@@ -228,7 +229,7 @@ def make_handler(p: Project, store: Store):
                 try:
                     sg = suggestions.get(parts[2])
                     ops = params.get("ops")
-                    idx = None if ops is None else [int(x) for x in unquote(ops).split(",") if x.strip()]
+                    idx = None if ops is None else [int(x) for x in ops.split(",") if x.strip()]
                     m, done = preview(p, sg, idx)
                     return self.send_json({"target": m, "applied": done, "ops": pick(sg, idx)})
                 except NotFound as e:

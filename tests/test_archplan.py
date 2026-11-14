@@ -1008,6 +1008,26 @@ class SuggestionTest(TempProject):
 
 
 class ThreadExtrasTest(TempProject):
+    def test_long_poll_waits_for_an_encoded_key(self):
+        # The key ends with the build id, which can hold a "+"; the page sends it as %2B.
+        import urllib.parse
+        from archplan import server
+        p = project.init(self.root)
+        p.export()
+        srv, url = serve_in_thread(p)
+        try:
+            with unittest.mock.patch.object(server, "LONG_POLL", 0.5), \
+                 unittest.mock.patch.object(server.reload, "BUILD", "1.0+abc"):
+                key = call(url, "/api/threads?since=-1")[1]["key"]
+                self.assertIn("+", key)
+                t = time.monotonic()
+                st, d = call(url, "/api/threads?since=" + urllib.parse.quote(key, safe=""))
+                self.assertEqual((st, d["key"]), (200, key))
+                self.assertGreaterEqual(time.monotonic() - t, 0.4)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
     def test_snapshot_and_mentions(self):
         p = project.init(self.root)
         p.export()
