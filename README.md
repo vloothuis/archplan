@@ -14,7 +14,7 @@ model, and after it changes the code the plan shrinks by what it did.
 ### As a Claude Code plugin (recommended)
 
 The plugin includes the `archplan` command, the MCP server, a skill, a monitor
-and hooks. It needs Python 3.9 or later and nothing else.
+and hooks. It needs Python 3.10 or later and nothing else.
 
 ```bash
 claude plugin marketplace add vloothuis/archplan
