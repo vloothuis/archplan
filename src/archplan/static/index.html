@@ -732,10 +732,26 @@ async function restoreTarget() {
   render();
   if (msg) toast(msg);
 }
+// ---------- model fetch
+// The model, retried when the request fails (the server restarting drops the
+// connection) or answers 5xx. A 4xx is final.
+async function fetchModel(url, tries = 1, wait = ms => new Promise(res => setTimeout(res, ms))) {
+  for (let i = 1; ; i++) {
+    let r = null, err;
+    try { r = await fetch(url); } catch (e) { err = e; }
+    if (r?.ok) return r.json();
+    if (r) err = new Error(`${r.status} ${r.statusText}`);
+    if (i >= tries || (r && r.status < 500)) throw err;
+    await wait(500 * 2 ** (i - 1));
+  }
+}
+// ---------- end model fetch
 let saveT = null, saving = 0;
 // Publish the target model and plan for the agent (get_plan, get_item).
+// Never the built-in sample: a page that failed to load the project's model
+// still holds it, and publishing it would overwrite the project's target.
 function publish() {
-  if (!collab || !restored) return;
+  if (!collab || !restored || BASE === SAMPLE) return;
   clearTimeout(saveT);
   saveT = setTimeout(() => {
     saveT = null;
@@ -4842,11 +4858,15 @@ window.addEventListener('load', () => requestAnimationFrame(async () => {
     render(); applyHash(); return resumeAfterReload();
   }
   try {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-    loadModel(await r.json(), url);
+    loadModel(await fetchModel(url, collab ? 4 : 1), url);
     if (collab) await restoreTarget();
-  } catch (err) { alert(`${url}: ${err.message}`); render(); }
+  } catch (err) {
+    if (collab) {  // the server may be restarting: keep the sample unpublished and ask for a reload
+      render();
+      return toast(`Could not load the model (${err.message}). Reload the page to try again.`);
+    }
+    alert(`${url}: ${err.message}`); render();
+  }
   restored = true;
   publish();
   applyHash();
