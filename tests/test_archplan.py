@@ -3925,5 +3925,61 @@ class SubfolderVocabTest(TempProject):
         self.assertIn("none of the 8 source files", res["warning"])
 
 
+@unittest.skipUnless(shutil.which("node"), "needs node")
+class FailedModelLoadTest(unittest.TestCase):
+    """A page whose model request fails must not save the built-in sample over
+    the project's target: it retries the request, and publish() refuses the
+    sample."""
+
+    def run_js(self, body):
+        out = subprocess.run(["node", "-e", body], capture_output=True, text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    def fetch_model(self, responses, tries):
+        src = (ROOT / "src/archplan/static/index.html").read_text()
+        helper = src[src.index("// ---------- model fetch"):src.index("// ---------- end model fetch")]
+        return self.run_js(helper + f"""
+            const responses = {json.dumps(responses)}; let calls = 0;
+            globalThis.fetch = async () => {{
+              const r = responses[calls++];
+              if (r === 'reset') throw new Error('Failed to fetch');
+              return {{ok: r < 400, status: r, statusText: 'x', json: async () => ({{ok: true}})}};
+            }};
+            fetchModel('/api/model', {tries}, async () => {{}})
+              .then(m => console.log(JSON.stringify({{model: m, calls}})))
+              .catch(e => console.log(JSON.stringify({{error: e.message, calls}})));""")
+
+    def test_retries_a_dropped_connection(self):
+        self.assertEqual(self.fetch_model(["reset", 503, 200], 4), {"model": {"ok": True}, "calls": 3})
+
+    def test_gives_up_after_the_last_try(self):
+        self.assertEqual(self.fetch_model(["reset"] * 4, 4), {"error": "Failed to fetch", "calls": 4})
+
+    def test_a_client_error_is_final(self):
+        self.assertEqual(self.fetch_model([404, 200], 4)["calls"], 1)
+
+    def publishes(self, base_is_sample):
+        src = (ROOT / "src/archplan/static/index.html").read_text()
+        start = src.index("function publish()")
+        fn = src[start:src.index("\n}\n", start) + 3]
+        return self.run_js(f"""
+            const SAMPLE = {{}}, BASE = {'SAMPLE' if base_is_sample else '{}'};
+            const collab = {{}}, restored = true, known = {{}}, puts = [];
+            let saveT = null, saving = 0, lastPub = '';
+            const buildPlan = () => ({{}}), pubSig = () => 'sig', toArchModel = x => x, planMD = () => '', planJSON = () => ({{}});
+            const toBe = {{}}, asIs = {{}}, D = null, intent = '';
+            const api = async (m, p) => {{ puts.push(p); return {{target_rev: 1}}; }};
+            {fn}
+            publish();
+            setTimeout(() => console.log(JSON.stringify(puts)), 900);""")
+
+    def test_publish_skips_the_sample(self):
+        self.assertEqual(self.publishes(True), [])
+
+    def test_publish_saves_a_project_model(self):
+        self.assertEqual(self.publishes(False), ["/api/target", "/api/plan"])
+
+
 if __name__ == "__main__":
     unittest.main()
