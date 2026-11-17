@@ -152,6 +152,9 @@ type Message struct {
 	Fragment string `json:"fragment,omitempty"`
 	Async    bool   `json:"async,omitempty"`
 	Via      string `json:"via,omitempty"`
+	// In lists the functions inside From that lie between the message
+	// above and this call, outermost first; see Step.
+	In []string `json:"in,omitempty"`
 	// Outcome is the kind of a refusing return: error, false or status:<4xx>.
 	Outcome string `json:"outcome,omitempty"`
 	// Route is the HTTP route a call with Via "http" requests.

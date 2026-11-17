@@ -11,6 +11,14 @@ make it. A run that calls one function name throughout (call, call, call:
 a plug or middleware chain) is already a pipeline and does not count. Runs
 inside a longer reported run with the same entry points are left out.
 
+A trace can leave the calls inside one participant out, so a call made by
+a helper of the entry point looks like a call of the entry point. When the
+messages say which functions lie in between (`in`), entry points that make
+the run through one shared function count as one copy: that function is
+the home the finding asks for. Calls made by a wrapper around the entry
+point, such as a middleware, are not steps of the entry point and are left
+out. Without `in`, each entry point counts.
+
 A shape that only follows the layers (a handler that calls one service
 method) is too short to count. Copies of the same steps can still mean
 different things; the files of the entry points changing together in git
@@ -22,7 +30,7 @@ from collections import defaultdict
 
 from .common import EXAMPLES, Weight, focus, plural
 from .drift import drift, move, weigh
-from .security_common import call_file, called, participant
+from .security_common import RECV_CALL, call_file, called, participant
 
 ID = "structure.repeated_orchestration"
 NAME = "Repeated orchestration"
@@ -31,33 +39,69 @@ NEEDS = {"sequences"}
 PARAMS = {"min_steps": 3, "max_steps": 8, "min_entries": 3, "max_findings": 15}
 
 
+def chain(m: dict) -> list:
+    """The `in` list of message m: the functions between the message one level up and its call."""
+    return [x for x in m.get("in") or [] if isinstance(x, str)] if isinstance(m.get("in"), list) else []
+
+
 def steps(msgs: list) -> list:
-    """[(participant, function)] called directly inside the first message, repeats in a row once."""
+    """[((participant, function), home)] called directly inside the first message, repeats in a row
+    once. home is the functions between the entry point and the call. When the sequence starts in a
+    wrapper around the entry point (some call has the entry point in its chain), the calls the
+    wrapper makes itself are left out."""
     if not msgs:
         return []
     top = msgs[0].get("depth") or 0
-    out = []
+    entry_fn = RECV_CALL.match((msgs[0].get("label") or "").strip()).group(1).strip()
+    direct = []
     for m in msgs[1:]:
         d = m.get("depth")
         if not isinstance(d, int) or d <= top:
             break
         if d == top + 1 and m.get("to"):
-            s = (m["to"], called(m))
-            if not out or out[-1] != s:
-                out.append(s)
+            direct.append((m, chain(m)))
+    wrapped = any(entry_fn in c for _, c in direct)
+    out = []
+    for m, c in direct:
+        if wrapped and entry_fn not in c:
+            continue
+        if wrapped:
+            c = c[len(c) - c[::-1].index(entry_fn):]
+        s = (m["to"], called(m))
+        if not out or out[-1][0] != s:
+            out.append((s, frozenset(c)))
     return out
+
+
+def copies(homes) -> int:
+    """How many times a run is written: an entry point that makes it itself counts once, and the
+    entry points that share a function around the whole run count once together."""
+    n, shared = 0, []
+    for h in homes:
+        if not h:
+            n += 1
+            continue
+        for i, g in enumerate(shared):
+            if g & h:
+                shared[i] = g & h
+                break
+        else:
+            shared.append(h)
+    return n + len(shared)
 
 
 def runs(by_entry: dict, params) -> list:
     """[(run, entries)], longest and most used first, without runs inside a kept one."""
-    seen = defaultdict(set)
+    seen = defaultdict(dict)
     for e, ss in by_entry.items():
         for n in range(params["min_steps"], min(params["max_steps"], len(ss)) + 1):
             for i in range(len(ss) - n + 1):
-                r = tuple(ss[i:i + n])
+                r = tuple(x for x, _ in ss[i:i + n])
                 if len({p for p, _ in r}) >= 2 and len({fn for _, fn in r}) >= 2:
-                    seen[r].add(e)
-    cands = sorted(((r, es) for r, es in seen.items() if len(es) >= params["min_entries"]),
+                    h = frozenset.intersection(*(h for _, h in ss[i:i + n]))
+                    seen[r][e] = seen[r][e] & h if e in seen[r] else h
+    cands = sorted(((r, set(hs)) for r, hs in seen.items()
+                    if len(hs) >= params["min_entries"] and copies(hs.values()) >= params["min_entries"]),
                    key=lambda x: (-len(x[0]) * len(x[1]), -len(x[0]), x[0]))
     inside = lambda r, big: any(big[i:i + len(r)] == r for i in range(len(big) - len(r) + 1))
     kept = []

@@ -9,7 +9,7 @@ const stepsSample = `[
   {"name": "Create task as editor", "handler": "POST /api/v1/task", "diagram": {
     "participants": ["dataentry", "acl", "store/pgstore"],
     "root": {"from": "Caller", "to": "dataentry", "fn": "handleCreate", "args": ["w=*http.response", "r=*http.Request"], "children": [
-      {"from": "dataentry", "to": "acl", "fn": "ResolvePrincipal", "args": ["rawUser=\"bob@example.com\""]},
+      {"from": "dataentry", "to": "acl", "fn": "ResolvePrincipal", "in": ["bind", "resolve"], "args": ["rawUser=\"bob@example.com\""]},
       {"repeat": 2, "children": [
         {"from": "dataentry", "to": "store/pgstore", "fn": "Get", "args": ["id=\"T-1\""]},
         {"repeat": 3, "children": [
@@ -66,6 +66,9 @@ func TestSequenceFrom(t *testing.T) {
 		if strings.Contains(m.Label, "bob") || strings.Contains(m.Label, "T-") {
 			t.Errorf("message %d leaks an argument value: %s", i, m.Label)
 		}
+	}
+	if got := strings.Join(s.Messages[1].In, ","); got != "bind,resolve" || s.Messages[2].In != nil {
+		t.Errorf("in = %q and %v, want the helper chain on the first call only", got, s.Messages[2].In)
 	}
 	if f := s.Fragments["L1"]; f.Kind != "loop" || f.Label != "×2" || f.Parent != nil {
 		t.Errorf("L1 = %+v", f)
