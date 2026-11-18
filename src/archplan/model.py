@@ -97,8 +97,11 @@ def get_item(p: Project, anchor: str):
                 "note": None if hit else "Not a leak in the target model."}
     if kind == "cedge":
         f, _, t = rest.partition("->")
+        from . import provenance
         return {"dependency": next((d for d in m.get("dependencies", []) if d["from"] == f and d["to"] == t), None),
                 "allowed": allowed(m, f, t),
+                # From the code as it is: the target has the planned edges, the traces ran the current code.
+                "observed": provenance.edge(read_json(p.model_path) or m, f, t),
                 "rules": [r for r in m.get("policy", {}).get("rules", []) if r["from"] in (f, "*") and r["to"] in (t, "*")]}
     if kind == "msg":
         seq, _, mid = rest.partition(":")

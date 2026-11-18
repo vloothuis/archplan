@@ -185,6 +185,7 @@ In a message, `@[Label](anchor)` mentions a model item, for example
 | `archplan mcp` | the MCP server, on stdio |
 | `archplan watch` | one line per human comment, plan change or decided suggestion |
 | `archplan hotspots [--since DAYS] [--json]` | components that change most, and pairs that change together without a dependency |
+| `archplan provenance [--json]` | which edges between components the code shows, which the traces show and which both show, and the components no trace reaches |
 | `archplan blast [--diff REF] [FILE ...] [--json]` | what traced entry points reach, the entry points a change touches, and the security tests to add |
 | `archplan profile [infer\|show] [--json]` | propose an architecture profile, or show how the code conforms to it |
 | `archplan profile list`, `archplan profile use NAME` | the framework profiles that match, with their fit; propose one of them |
@@ -634,10 +635,36 @@ The security detectors read the declarations:
 | `security.zone_dependency` | a dependency from a more trusted zone to a less trusted one, or one that skips a declared zone |
 | `security.gateway_bypass` | a dependency on a component that declares gateways (`gateway: [a, b]`) from a component that is none of them and does not implement its interfaces. Weak; strong when a trace shows the call. |
 | `security.unguarded_path` | a dependency path from an entry point's component, through other components, to a `restricted` zone component, on which no component is a guard's, depends on one or is a declared gateway of the target. A component declared `gated_by: [X]` also counts when the entry component depends on X, directly or through other components. Static, so it covers code no trace runs. Weak. |
+| `security.guard_outlier` | a traced entry point that does not call a check which most of its siblings call. Siblings are the entry points of one file, or else of one component. A check is a declared guard, or a function whose name looks like one (`name_pattern`; switch off with `use_names`). It reports when at least `min_siblings` (4) entry points share the group and at least `share` (0.75) of them call the check. It needs no auth declarations: the siblings show the rule. Entry points declared `auth=none` are skipped. Weak. Needs sequences. |
+
+Security findings carry the weakness they stand for: `cwe`, a list of CWE
+(Common Weakness Enumeration) identifiers such as `CWE-862`, and `owasp`,
+the category in the OWASP Top 10 of 2021 and of 2025. Kinds without one
+matching weakness, such as `security.untraced`, have neither.
+`security.unguarded_entry`, `security.unguarded_sink`,
+`security.unguarded_path` and `security.guard_outlier` also record the
+path that shows the finding, step by step, as `hops` in their evidence: the
+traced calls, or the dependencies with the file and line that show each.
 
 Zones are ordered by the `order` setting of `security.zone_dependency`,
 from the least trusted: `internet`, `dmz`, `internal`, `restricted` by
 default.
+
+### Static and traced edges
+
+The dependencies come from reading the code, the sequences from running it.
+Each misses what the other sees. `archplan provenance` puts every edge
+between two components in one of three groups:
+
+- `both`: a dependency that a traced call confirms.
+- `static`: a dependency no trace shows. It is not observed, which is not
+  proof that the call never happens: no test may run that path.
+- `dynamic`: a traced call without a dependency. The static model misses
+  it, for example a call through dynamic dispatch.
+
+A traced edge lists the sequences that show it. The command also lists the
+components no trace reaches. The agent sees the same per dependency, as
+`observed` in `get_item("cedge:<from>-><to>")`.
 
 ### Blast radius
 

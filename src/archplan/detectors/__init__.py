@@ -29,7 +29,7 @@ import time
 from ..core.architecture import Architecture, ArchitectureError, analyse as profile_analysis
 from ..core.project import Project, etag, read_json, write_json
 from ..core.store import NotFound
-from . import external
+from . import external, weakness
 from .common import GROUPS, STRENGTHS, Weight, comp_name, finding, fingerprint, graph, namer, reweigh
 
 BUILTIN = ["profile_rule", "profile_pair", "structure_cycle", "structure_tangle", "structure_repeated_orchestration",
@@ -45,7 +45,7 @@ BUILTIN = ["profile_rule", "profile_pair", "structure_cycle", "structure_tangle"
            "security_unguarded_entry", "security_unguarded_sink", "security_open_entry",
            "security_zone_dependency", "security_untraced", "security_gateway", "security_unguarded_path",
            "security_unchecked_entry", "security_untested_denial", "security_unchecked_input",
-           "security_risk_hotspot"]
+           "security_risk_hotspot", "security_guard_outlier"]
 
 REASONS = {
     "components": "the model has no components",
@@ -323,6 +323,25 @@ def registry(p: Project | None = None) -> tuple:
     return out, errors
 
 
+def rule(kind: str) -> dict | None:
+    """{"name", "rationale"} of the built-in detector behind a finding kind:
+    its label and the first paragraph of its documentation, which says what
+    it reports and why."""
+    m = builtins().get(kind)
+    if m is None:
+        return None
+    doc = " ".join((m.__doc__ or "").split("\n\n")[0].split())
+    return {"name": m.NAME, "rationale": doc.partition(": ")[2] or doc}
+
+
+def resolved_when(f: dict) -> str:
+    """The condition under which a finding counts as fixed, as a check a
+    reader can run: the detector's own (RESOLVED) and the id leaving the list."""
+    own = getattr(builtins().get(f.get("kind")), "RESOLVED", None)
+    return ((own + " " if own else "") + f"Check: after the model is exported again (refresh_model), "
+            f"get_findings no longer lists {f['id']}.")
+
+
 def settings(p: Project) -> dict:
     """{id: {"enabled"?, "params"?}} from config.json, read as untrusted data."""
     d = (read_json(p.path("config.json"), {}) or {}).get("detectors")
@@ -447,7 +466,7 @@ def run(p: Project, arch: Architecture | None = None, only=None, execute: bool =
             missing.append({"kind": did, "detector": did, "reason": f"the detector failed: {e}"[:300]})
             continue
         if spec["origin"] == "built-in":
-            fs = [reweigh(f, ctx.fan_in, ctx.churn) for f in fs]
+            fs = [weakness.tag(reweigh(f, ctx.fan_in, ctx.churn)) for f in fs]
         st["seconds"] = round(time.monotonic() - t, 3)
         st["count"] = len(fs)
         found += fs
@@ -481,5 +500,5 @@ def text(res: dict) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["Context", "DetectorError", "GROUPS", "builtins", "comp_name", "configure", "registry", "run",
-           "settings", "text", "version"]
+__all__ = ["Context", "DetectorError", "GROUPS", "builtins", "comp_name", "configure", "registry", "resolved_when",
+           "rule", "run", "settings", "text", "version"]

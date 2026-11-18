@@ -21,7 +21,8 @@ import re
 from collections import defaultdict
 
 from .common import Weight, finding, focus, plural
-from .security_common import CALL, call_file, called, decls, guards_off, matches, name, participant, short, target
+from .security_common import (CALL, call_file, called, decls, guards_off, matches, name, participant, short, target,
+                              trace_hops)
 from .security_common import guards as all_guards
 
 ID = "security.unguarded_entry"
@@ -29,6 +30,8 @@ NAME = "Entry point without a guard on its traced path"
 GROUP = "security"
 NEEDS = {"declarations", "sequences"}
 PARAMS = {"report_undeclared": True}
+RESOLVED = ("A traced request of the entry point calls a declared guard (an authorization guard for auth=authz), "
+            "or the entry point is declared auth=none with a reason.")
 
 
 def entry_auth(ctx, entry: str, comp: str | None, auth: list) -> dict | None:
@@ -107,7 +110,7 @@ def guarded(ctx, d: dict | None, msgs: list) -> bool:
 def run(ctx, params) -> list:
     guards = all_guards(ctx)
     by_entry = defaultdict(list)  # entry -> [(sequence id, components on its path)]
-    declared, safe = {}, set()
+    declared, safe, shown = {}, set(), {}
     seqs = ctx.model.get("sequences") or {}
     for entry, d, sid, msgs in runs(ctx):
         if guards_off(seqs.get(sid)) or turned_away(ctx, msgs):
@@ -122,6 +125,7 @@ def run(ctx, params) -> list:
         comps = [c for c in dict.fromkeys(participant(ctx, m.get("to")) for m in msgs) if c]
         if sid not in [s for s, _ in by_entry[entry]]:
             by_entry[entry].append((sid, comps))
+            shown.setdefault(entry, trace_hops(ctx, sid, msgs))
     out = []
     for entry, seqs in sorted(by_entry.items()):
         if entry in safe:
@@ -148,7 +152,7 @@ def run(ctx, params) -> list:
             "no auth declaration, no guard in the trace",
             comps[:1], [where.split(":")[0]] if where else [],
             {"entry": entry, "auth": value, "declared_at": where, "sequences": ids[:20],
-             "guards": [g["id"] for g in need][:20],
+             "guards": [g["id"] for g in need][:20], "hops": shown[entry],
              "moves": (["Check what the caller may do on this path, such as with an authorization guard.",
                         "If a plug or middleware checks it, mark that function `archplan: guard=authz`."]
                        if authz else
