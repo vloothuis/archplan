@@ -30,12 +30,15 @@ type Diagram struct {
 // call tree. Span is the id that correlates a client call with the server
 // trace it caused. Taint and Interprets are the canary notes (see
 // "Canary" in archplan's format/archmodel.md): the arguments that held the
-// canary marker, and the library calls that ran or resolved input.
+// canary marker, and the library calls that ran or resolved input. In lists
+// the functions of From between the call drawn above and this one,
+// outermost first; it is empty when the function drawn above made the call.
 type Step struct {
 	From       string     `json:"from,omitempty"`
 	To         string     `json:"to,omitempty"`
 	Fn         string     `json:"fn,omitempty"`
 	Via        string     `json:"via,omitempty"` // set for a call on another goroutine, or "http"
+	In         []string   `json:"in,omitempty"`
 	Outcome    string     `json:"outcome,omitempty"`
 	Route      *HTTPRoute `json:"route,omitempty"`
 	Span       string     `json:"span,omitempty"`
@@ -129,7 +132,7 @@ func (b *seqBuilder) walk(s Step, depth int, frag string) {
 	b.seq.Messages = append(b.seq.Messages, Message{
 		ID: key + "#" + strconv.Itoa(b.count[key]), From: from, To: to,
 		Label: s.Fn + "(" + argNames(s.Args) + ")", Depth: depth, Fragment: frag,
-		Async: s.Via != "", Via: s.Via, Outcome: s.Outcome, Route: s.Route, Span: s.Span,
+		Async: s.Via != "", Via: s.Via, In: s.In, Outcome: s.Outcome, Route: s.Route, Span: s.Span,
 		Taint: s.Taint, Interprets: s.Interprets,
 	})
 	for _, c := range s.Children {

@@ -2936,6 +2936,42 @@ class NewDetectorsTest(TempProject):
         self.assertEqual(f["focus"][0]["view"], "sequences")
         self.assertEqual(f["components"], ["orders", "core", "billing"])
 
+    def test_repeated_orchestration_shared_helper(self):
+        """Entry points that make the run through one function are one copy."""
+        def model(chains):
+            m = concept_model()
+            msg = lambda frm, to, label, depth, via=None: {"from": frm, "to": to, "label": label, "depth": depth,
+                                                           **({"in": via} if via else {})}
+            m["sequences"] = {
+                f"s{i}": {"entry": f"orders.{name}", "messages": [
+                    msg("Caller", "orders", f"{name}(conn)", 0),
+                    msg("orders", "core.Repo", "get(id)", 1, chain(name)), msg("orders", "billing", "check(order)", 1, chain(name)),
+                    msg("orders", "core.Repo", "save(order)", 1, chain(name))]}
+                for i, (name, chain) in enumerate(chains.items())}
+            self.p.model_path.write_text(json.dumps(m))
+            return self.found("structure.repeated_orchestration")
+        helper = lambda name: ["place", "store"]
+        own = lambda name: None
+        wrapped = lambda name: ["wrap", name, "place"]
+        middleware = lambda name: ["wrap"]
+        small = lambda name: [f"{name}_step"]
+        names = ["create", "update", "cancel"]
+        for label, chains, found in [
+                ("one helper makes the run for every entry point", dict.fromkeys(names, helper), 0),
+                ("the helper below a wrapper and the entry point", dict.fromkeys(names, wrapped), 0),
+                ("a wrapper around the entry points makes the run", dict.fromkeys(names, middleware), 0),
+                ("a wrapper makes two of the three calls, the entry point one",
+                 dict.fromkeys(names, lambda name, _n=iter(range(99)): ["wrap", name] if next(_n) % 3 == 2 else ["wrap"]), 0),
+                ("the entry points make the run themselves below a wrapper",
+                 dict.fromkeys(names, lambda name: ["wrap", name]), 1),
+                ("each entry point makes the run itself", dict.fromkeys(names, own), 1),
+                ("each entry point has its own helper", dict.fromkeys(names, small), 1),
+                ("two entry points copy what the helper of two others does",
+                 {"create": helper, "update": helper, "cancel": own, "show": own}, 1),
+                ("one entry point beside the helper is not enough", {"create": helper, "update": helper, "cancel": own}, 0)]:
+            with self.subTest(label):
+                self.assertEqual(len(model(chains)), found)
+
     def test_misplaced_file(self):
         m = concept_model()
         ref = lambda *fs: [{"to": f} for f in fs]

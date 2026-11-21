@@ -260,6 +260,13 @@ Ordered calls for one scenario, usually from traces.
 - `fragment` names the innermost loop or alternative the message is in.
 - `async` marks a call on another process, goroutine, task or queue. `via`
   says how.
+- `in` lists the functions inside `from` that lie between the message one
+  level up and this call, outermost first, when a trace leaves calls inside
+  one participant out. Leave it out when the function of the message one
+  level up made the call itself. When a sequence is named after a handler
+  but starts in a wrapper around it, the list starts with the wrapper.
+  `structure.repeated_orchestration` uses it to tell a shared helper from
+  copied steps.
 - `outcome` marks a call that may have refused: `raise`, `error`, `false`,
   `halt`, or `status:<code>` for a 4xx response. Leave it out for any other
   return. It is the kind of the return value, never the value.
