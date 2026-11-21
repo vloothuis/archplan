@@ -195,6 +195,12 @@ file and line of its evidence, with level `warning`. With `--all`, the other
 new findings are results too, with level `note`. Code scanning needs a
 location, so a finding without a file points at `.archplan/config.json`.
 
+A rule has the detector's name and rationale. A security rule has its CWE
+identifiers as tags, such as `external/cwe/cwe-862`, which code scanning
+shows and filters on. A result has `cwe` and `owasp` in its properties.
+When a finding's evidence has a path whose steps name files, the result has
+it as a code flow, so code scanning shows the path step by step.
+
 ### The tighten reminder
 
 CI does not write the baseline. When a metric got better, ci prints a

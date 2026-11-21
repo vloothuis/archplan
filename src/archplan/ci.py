@@ -348,29 +348,55 @@ def plural(n: int, what: str) -> str:
     return f"{n} {what}{'' if n == 1 else 's'}"
 
 
+def code_flow(f: dict, paths) -> dict | None:
+    """A finding's evidence path as a SARIF code flow: one location per step
+    that names a file, in order. None with fewer than two such steps."""
+    locs = []
+    for h in (f.get("evidence") or {}).get("hops") or []:
+        if not isinstance(h, dict) or not isinstance(h.get("file"), str) or not h["file"]:
+            continue
+        phys = {"artifactLocation": {"uri": paths(h["file"]), "uriBaseId": "%SRCROOT%"}}
+        if isinstance(h.get("line"), int) and not isinstance(h["line"], bool) and h["line"] > 0:
+            phys["region"] = {"startLine": h["line"]}
+        text = h.get("note") or (f"calls {h['call']}" if h.get("call") else h.get("component") or "")
+        locs.append({"location": {"physicalLocation": phys, "message": {"text": str(text)[:300]}}})
+    return {"threadFlows": [{"locations": locs}]} if len(locs) >= 2 else None
+
+
 def sarif(fs: list, paths, failing: set) -> dict:
     """SARIF 2.1.0 for GitHub code scanning: a rule per finding kind, a result
     per finding at its first file and line. paths maps a model path to a path
     from the repository root. Findings without a file point at the project's
-    config.json, since code scanning needs a location."""
+    config.json, since code scanning needs a location. A security finding's
+    rule has its CWE as tags, and its result has the evidence path as a code
+    flow when the steps name files."""
+    from . import detectors
     rules, results = {}, []
     for f in fs:
         if f["kind"] not in rules:
+            r = detectors.rule(f["kind"]) or {}
+            tags = ["architecture", f["group"]] + [f"external/cwe/{c.lower()}" for c in f.get("cwe") or []]
             rules[f["kind"]] = {"id": f["kind"], "name": f["kind"],
-                                "shortDescription": {"text": f"archplan {f['kind']}"},
+                                "shortDescription": {"text": r.get("name") or f"archplan {f['kind']}"},
                                 "helpUri": "https://github.com/vloothuis/archplan#findings-and-archplan-check",
-                                "properties": {"tags": ["architecture", f["group"]]}}
+                                "properties": {"tags": tags}}
+            if r.get("rationale"):
+                rules[f["kind"]]["fullDescription"] = {"text": r["rationale"]}
         loc = {"artifactLocation": {"uri": paths(f["files"][0] if f.get("files") else None),
                                     "uriBaseId": "%SRCROOT%"}}
         ln = findings.line_of(f) if f.get("files") else None
         if ln:
             loc["region"] = {"startLine": ln}
-        results.append({"ruleId": f["kind"], "ruleIndex": list(rules).index(f["kind"]),
-                        "level": "warning" if f["id"] in failing else "note",
-                        "message": {"text": f"{f['title']} {f['basis']}."},
-                        "locations": [{"physicalLocation": loc}],
-                        "partialFingerprints": {"archplanFinding/v1": f["id"]},
-                        "properties": {k: f[k] for k in ("weight", "strength", "state", "in_diff") if k in f}})
+        res = {"ruleId": f["kind"], "ruleIndex": list(rules).index(f["kind"]),
+               "level": "warning" if f["id"] in failing else "note",
+               "message": {"text": f"{f['title']} {f['basis']}."},
+               "locations": [{"physicalLocation": loc}],
+               "partialFingerprints": {"archplanFinding/v1": f["id"]},
+               "properties": {k: f[k] for k in ("weight", "strength", "state", "in_diff", "cwe", "owasp") if k in f}}
+        flow = code_flow(f, paths)
+        if flow:
+            res["codeFlows"] = [flow]
+        results.append(res)
     return {"$schema": "https://json.schemastore.org/sarif-2.1.0.json", "version": "2.1.0",
             "runs": [{"tool": {"driver": {"name": "archplan", "version": __version__,
                                           "informationUri": "https://github.com/vloothuis/archplan",

@@ -115,6 +115,24 @@ large types, types that look like synonyms, and hidden coupling. By default
 it lists the new ones, those the human has not accepted or dismissed.
 `get_item("finding:<id>")` gives the full evidence.
 
+Before you judge or fix findings, call `get_findings` with `detail: true`
+and a small `limit`, or with `ids`. Each finding then has:
+
+- `rule`: the detector's name and why it reports this.
+- `path`: the evidence step by step, with the file and line where known.
+- `moves`: ways to fix it.
+- `resolved_when`: the condition to check after the fix. Call
+  `refresh_model`, then `get_findings` with the `ids`; an id under
+  `not_found` is no longer reported.
+
+Security findings carry `cwe` and `owasp` tags. Use them when you name the
+weakness to the human.
+
+`get_item("cedge:<from>-><to>")` says under `observed` whether a dependency
+is confirmed by a traced call (`both`), only in the code (`static`: not
+observed, which is not proof it is never called) or only in traces
+(`dynamic`: the static model misses it).
+
 - When a heuristic cannot settle a finding alone, check the code and give
   your judgment with `label_finding(id, label, note)`, for example "likely
   the same" or "intended". The human sees it as a label, not a verdict.
@@ -249,6 +267,7 @@ progress.
 | `archplan export` | re-export the as-is model from the code |
 | `archplan threads --waiting agent` | threads that wait on you, as text |
 | `archplan hotspots` | hotspots and hidden coupling from the git history |
+| `archplan provenance` | edges the code shows, edges the traces show, and components no trace reaches |
 | `archplan blast [--diff REF]` | what traced entry points reach, what a change touches, the security tests to add |
 | `archplan profile` | the architecture profile and its rule breaks |
 | `archplan profile list` | the framework profiles that match, with their fit |
