@@ -425,14 +425,16 @@ class Agent:
     def get_findings(self, group=None, state="new", limit=30, ids=None, detail=False):
         from .findings import Findings, compact
         lst = Findings(self.p).listing(self.store)
+        ids = [ids] if isinstance(ids, str) else [i for i in ids or [] if isinstance(i, str)]
         if ids:
-            fs = [f for f in lst["findings"] if f["id"] in set(ids)]
+            want = set(ids)
+            fs = [f for f in lst["findings"] if f["id"] in want]
         else:
             fs = [f for f in lst["findings"]
                   if (state == "all" or f["state"] == state) and (not group or f["group"] == group)]
         out = {"counts": lst["counts"], "missing": lst["missing"], "shown": min(len(fs), int(limit)), "of": len(fs),
                "findings": [compact(f, bool(detail)) for f in fs[:min(int(limit), 200)]]}
-        gone = sorted(set(ids or []) - {f["id"] for f in fs})
+        gone = sorted(set(ids) - {f["id"] for f in fs})
         if gone:
             out["not_found"] = gone  # no longer reported: fixed, or the id is wrong
         return out

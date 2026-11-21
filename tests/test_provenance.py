@@ -150,6 +150,17 @@ class GuardOutlierTest(unittest.TestCase):
         self.assertEqual(f["cwe"], ["CWE-862"])
         self.assertEqual(run(security_guard_outlier, m, use_names=False), [])
 
+    def test_names_are_plain_fragments(self):
+        from archplan.detectors import DetectorError, coerce
+        m = handlers(self.NAMES, self.NAMES[:4])
+        self.assertEqual(run(security_guard_outlier, m, names=["(a+)+$", ".*"]), [])
+        self.assertEqual(len(run(security_guard_outlier, m, names=["PERMIT"])), 1)
+        self.assertEqual(run(security_guard_outlier, m, names=[]), [])
+        defaults = security_guard_outlier.PARAMS
+        self.assertEqual(coerce(defaults, {"names": "permit"})["names"], defaults["names"])
+        with self.assertRaises(DetectorError):
+            coerce(defaults, {"names": "permit"}, strict=True)
+
     def test_declared_guard_and_open_entry(self):
         m = handlers(self.NAMES, self.NAMES[:4])
         m["sequences"]["export"]["messages"].insert(1, msg("web", "auth", "Screen(ctx)", 1))

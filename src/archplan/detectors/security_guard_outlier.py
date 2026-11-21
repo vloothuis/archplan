@@ -4,7 +4,8 @@ Entry points in the same file, or else the same component, are siblings.
 When most of them call the same check on their traced requests and one does
 not, that one is the outlier: the others show what the code's own rule is,
 so this needs no auth declaration. A check is a declared guard, or, when
-`use_names` is on, a function whose name looks like one (`name_pattern`).
+`use_names` is on, a function whose name contains one of the fragments in
+`names`, in any letter case.
 
 An entry point calls a check when any of its traced requests does: one
 request may take an early exit. Entry points declared `auth=none` are
@@ -15,7 +16,6 @@ skips. It is a candidate: the outlier may be public on purpose."""
 
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 
 from .common import Weight, finding, focus, plural
@@ -27,7 +27,8 @@ NAME = "Entry point that skips a check its siblings make"
 GROUP = "security"
 NEEDS = {"sequences"}
 PARAMS = {"min_siblings": 4, "share": 0.75, "use_names": True,
-          "name_pattern": r"auth|permi|allow|can_|polic|guard|verif|require|ensure|access|check"}
+          "names": ["auth", "permi", "allow", "can_", "polic", "guard", "verif", "require", "ensure", "access",
+                    "check"]}
 RESOLVED = ("A traced request of the entry point calls the check its siblings call, or the entry point is "
             "declared auth=none with a reason.")
 
@@ -36,10 +37,7 @@ def checks(ctx, params, msgs: list, own: str) -> dict:
     """{check key: label} for the checks the request's messages call. A
     declared guard's key is its id; a check by name has (component, name)."""
     declared = guards(ctx)
-    try:
-        pat = re.compile(params["name_pattern"], re.I) if params["use_names"] and params["name_pattern"] else None
-    except re.error:
-        pat = None
+    parts = [s.lower() for s in params["names"] if s] if params["use_names"] else []
     out = {}
     for m in msgs:
         fn, comp = called(m), participant(ctx, m.get("to"))
@@ -48,7 +46,7 @@ def checks(ctx, params, msgs: list, own: str) -> dict:
         g = next((g for g in declared if matches(g, fn, comp, call_file(ctx, m))), None)
         if g:
             out[g["id"]] = g["name"]
-        elif pat and pat.search(fn):
+        elif any(s in fn.lower() for s in parts):
             out[(comp, fn)] = f"{name(ctx, comp)}.{fn}" if comp else fn
     return out
 

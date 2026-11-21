@@ -22,7 +22,7 @@ SCIP and LSIF
 - Sourcegraph's documentation lists scip-typescript, scip-python and scip-go as generally available. The page is undated. ([Sourcegraph precise code navigation](https://sourcegraph.com/docs/code-search/code-navigation/precise_code_navigation))
 
 Stack graphs
-- `github/stack-graphs` was archived by its owner on 2025-09-09 and is read-only. ([Wayback snapshot of the repo](https://proxy-ga.blitzz.co/proxy/123456/web.archive.org/web/20260601045401/https:/github.com/github/stack-graphs); [ecosyste.ms](https://issues.ecosyste.ms/hosts/GitHub/repositories/github%2Fstack-graphs))
+- `github/stack-graphs` was archived by its owner on 2025-09-09 and is read-only. ([Wayback snapshot of the repo](https://web.archive.org/web/20260601045401/https://github.com/github/stack-graphs); [ecosyste.ms](https://issues.ecosyste.ms/hosts/GitHub/repositories/github%2Fstack-graphs))
 - Stack graphs resolve names file-incrementally, without a build, by path finding in a graph built from tree-sitter trees. The design is described in a 2022 paper. ([Creager and van Antwerpen, arXiv 2211.01224](https://www.arxiv.org/pdf/2211.01224))
 
 Code property graphs, CodeQL, Glean, Kythe, srcML, Datalog
