@@ -26,7 +26,7 @@ from __future__ import annotations
 from collections import deque
 
 from .common import Weight, finding, focus, plural
-from .security_common import decls, guards, name, target, zones
+from .security_common import decls, dep_hops, guards, name, target, zones
 from .security_gateway import gateways
 
 ID = "security.unguarded_path"
@@ -34,6 +34,8 @@ NAME = "Path to protected data with no guard on it"
 GROUP = "security"
 NEEDS = {"declarations", "deps"}
 PARAMS = {"entry_zones": ["internet"], "target_zones": ["restricted"], "sink_targets": False, "max_hops": 4}
+RESOLVED = ("Every dependency path from the first component to the target passes a component that is a guard's, "
+            "depends on a guard's, is a gateway of the target or is gated_by.")
 
 
 def path(succ: dict, start: str, goal: str, blocked, max_hops: int) -> list | None:
@@ -123,6 +125,7 @@ def run(ctx, params) -> list:
             "or is gated_by a component the entry component depends on.",
             "weak", f"static path: {chain}", [*es, *p], [],
             {"from": x, "to": t, "path": p, "entries": es, "guards": sorted(guard),
+             "hops": dep_hops(ctx, [es[0], *p]),
              "moves": [f"Let {name(ctx, x)} reach {name(ctx, t)} through a component that checks access.",
                        f"If {name(ctx, x)} checks access through a caller, declare that caller a gateway of "
                        f"{name(ctx, t)}.",

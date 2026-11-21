@@ -129,3 +129,49 @@ def matches(t: dict, name: str, comp: str | None, file: str | None = None) -> bo
 
 def name(ctx, cid: str | None) -> str:
     return namer(ctx.model)(cid) if cid else "?"
+
+
+HOPS = 8  # steps kept of a finding's evidence path
+
+
+def clip_hops(hops: list) -> list:
+    """At most HOPS steps: the first two and the last ones, with a note on what was left out."""
+    if len(hops) <= HOPS:
+        return hops
+    tail = hops[-(HOPS - 3):]
+    return hops[:2] + [{"note": f"{len(hops) - 2 - len(tail)} more calls"}] + tail
+
+
+def dep_hops(ctx, comps: list) -> list:
+    """A path over the component graph as steps for a reader:
+    [{"component", "to", "file"?, "line"?, "note"}], one per dependency, at
+    the first place in the code that shows it."""
+    out = []
+    for a, b in zip(comps, comps[1:]):
+        hop = {"component": a, "to": b, "note": f"{name(ctx, a)} depends on {name(ctx, b)}"}
+        ev = next((x for x in (ctx.graph.get((a, b)) or {}).get("evidence") or [] if isinstance(x, str)), None)
+        if ev:
+            m = re.match(r"(.*):(\d+)$", ev)
+            hop["file"] = m.group(1) if m else ev
+            if m:
+                hop["line"] = int(m.group(2))
+        out.append(hop)
+    return clip_hops(out)
+
+
+def trace_hops(ctx, sid: str, msgs: list, notes: dict | None = None) -> list:
+    """The calls of a traced request as steps for a reader: [{"component",
+    "call", "file"?, "sequence", "note"?}]. notes maps a message's position
+    to what it shows, such as "the sink"."""
+    out = []
+    for i, m in enumerate(msgs):
+        hop = {"component": participant(ctx, m.get("to")) or m.get("to"),
+               "call": RECV_CALL.match((m.get("label") or "").strip()).group(1).strip() or called(m),
+               "sequence": sid}
+        f = call_file(ctx, m)
+        if f:
+            hop["file"] = f
+        if (notes or {}).get(i):
+            hop["note"] = notes[i]
+        out.append(hop)
+    return clip_hops(out)

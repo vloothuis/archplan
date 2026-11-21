@@ -18,13 +18,15 @@ from __future__ import annotations
 from collections import defaultdict
 
 from .common import Weight, finding, focus, plural
-from .security_common import called, decls, guards, guards_off, matches, participant, short, target
+from .security_common import called, decls, guards, guards_off, matches, participant, short, target, trace_hops
 
 ID = "security.unguarded_sink"
 NAME = "Sink reached without an authorization guard"
 GROUP = "security"
 NEEDS = {"declarations", "sequences"}
 PARAMS = {"report_read": True}
+RESOLVED = ("Every traced request of the entry point calls a function declared guard=authz before the sink "
+            "(for a read sink: anywhere in the request).")
 
 
 def run(ctx, params) -> list:
@@ -36,13 +38,14 @@ def run(ctx, params) -> list:
     hits = defaultdict(list)  # (entry, sink id) -> [sequence id]
     sink_of = {s["id"]: s for s in sinks}
     first = {}  # sequence id -> the component of its entry
+    shown = {}  # (entry, sink id) -> the calls up to the sink, of the first sequence that shows it
     for sid, seq in sorted((ctx.model.get("sequences") or {}).items()):
         entry, msgs = (seq or {}).get("entry"), [m for m in (seq or {}).get("messages") or [] if isinstance(m, dict)]
         if not entry or not msgs or guards_off(seq):
             continue
         first[sid] = participant(ctx, msgs[0].get("to"))
         checked, seen, inside, reads = False, set(), None, []
-        for m in msgs:
+        for i, m in enumerate(msgs):
             fn, comp, depth = called(m), participant(ctx, m.get("to")), m.get("depth") or 0
             if inside is not None and depth > inside:
                 continue  # the guard's own lookups, such as reading the caller's record
@@ -57,13 +60,17 @@ def run(ctx, params) -> list:
             for s in sinks:
                 if s["id"] not in seen and matches(s, fn, comp):
                     seen.add(s["id"])
+                    hops = trace_hops(ctx, sid, msgs[:i + 1], {i: f"the sink ({s['kind']}), reached with no "
+                                                                  "authorization guard before it"})
                     if s["kind"] == "write":
                         hits[(entry, s["id"])].append(sid)
+                        shown.setdefault((entry, s["id"]), hops)
                     else:
-                        reads.append(s["id"])
+                        reads.append((s["id"], hops))
         if not checked:  # no check anywhere: the reads are unfiltered too
-            for skid in reads:
+            for skid, hops in reads:
                 hits[(entry, skid)].append(sid)
+                shown.setdefault((entry, skid), hops)
     out = []
     for (entry, skid), seqs in sorted(hits.items()):
         s = sink_of[skid]
@@ -80,7 +87,7 @@ def run(ctx, params) -> list:
             "sink=write before any guard=authz" if write else "sink=read, no guard=authz", comps,
             [s["file"]] if s.get("file") else [],
             {"entry": entry, "sink": skid, "sink_kind": s["kind"], "sequences": seqs[:20],
-             "guards": [g["id"] for g in authz][:20],
+             "guards": [g["id"] for g in authz][:20], "hops": shown[(entry, skid)],
              "moves": ["Check the caller's permission before this call, with a function declared `guard=authz`.",
                        "If a check runs where the trace does not show it, declare that function `guard=authz`."]},
             focus=[focus("sequences", seqs[:20]), focus("components", comps)],

@@ -20,6 +20,8 @@ and keeps the baseline. Built-in kinds, by group:
                                strings used as enums, boolean flag parameters
   boundaries  boundaries.*     zones of pain and uselessness, public code nobody else uses
   evolution   evolution.*      components without a clear owner (cached hotspots)
+  security    security.*       entry points, guards, sinks and trust zones; these carry CWE and
+                               OWASP tags (detectors.weakness)
 
 A finding's id is a hash of its kind and stable keys (rule and unit, the
 cycle's members, the two components), so it survives changes in counts. A
@@ -56,6 +58,7 @@ from . import detectors, ratchet
 from .architecture import Architecture
 from .detectors.common import (COMMON_FIELDS, EXAMPLES, GROUPS, STRENGTHS, comp_name, evidence_file,  # noqa: F401
                                finding, fingerprint, graph, namer, plural, strength_of)
+from .detectors import weakness
 from .detectors.cycles import (MAX_CYCLES, TANGLE, cycle_findings, feedback_edges, sccs,  # noqa: F401
                                shortest_cycle, small_cycle_findings, tangle_findings)
 from .detectors.fields import is_flag  # noqa: F401
@@ -327,17 +330,31 @@ def above(listing: dict, n: int) -> dict:
             "counts": {**listing["counts"], "new": new, "below_min_weight": listing["counts"]["new"] - new}}
 
 
-def compact(f: dict) -> dict:
-    """A finding in a few lines, for an agent."""
+def compact(f: dict, detail: bool = False) -> dict:
+    """A finding in a few lines, for an agent. With detail it also has what
+    an agent needs to judge and fix it: the rule and why it exists, the
+    evidence path step by step, the suggested moves and the condition under
+    which it counts as fixed."""
     out = {k: f[k] for k in ("id", "kind", "title", "detail", "strength", "basis", "state") if f.get(k) is not None}
     out["components"] = f["components"][:6]
     if f["files"]:
         out["files"] = f["files"][:4]
     if f.get("weight") is not None:
         out["weight"] = f["weight"]
-    for k in ("unit", "reason", "label", "thread"):
+    for k in ("unit", "reason", "label", "thread", "cwe", "owasp"):
         if f.get(k):
             out[k] = f[k]
+    if detail:
+        ev = f.get("evidence") or {}
+        r = detectors.rule(f["kind"])
+        if r:
+            out["rule"] = r
+        out.update(weakness.names(f))
+        if ev.get("hops"):
+            out["path"] = ev["hops"]
+        if ev.get("moves"):
+            out["moves"] = ev["moves"][:3]
+        out["resolved_when"] = detectors.resolved_when(f)
     return out
 
 

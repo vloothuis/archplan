@@ -12,6 +12,9 @@
   archplan hotspots [--since N]  components that change often, and ones that change together
   archplan blast [--diff REF] [FILE ...]  what traced entry points reach, what a change touches,
                                  and the security tests to add
+  archplan provenance [--limit N] [--json]
+                                 which edges between components the code shows, which the traces show,
+                                 and which components no trace reaches
   archplan profile [infer|show|list|use NAME]  the architecture profile: roles, rules and where the code breaks them
   archplan check [--format github] [--tighten]  new findings (cycles, rule breaks, ...) and the ratchet;
                                  exit 1 when there are new findings or a ratchet metric got worse
@@ -386,6 +389,13 @@ def cmd_blast(a):
             die(str(e))
     rep = blast.report(ctx, files, a.limit)
     print(json.dumps(rep, indent=2, ensure_ascii=False) if a.json else blast.text(rep))
+
+
+def cmd_provenance(a):
+    from . import provenance
+    m = read_json(project(a).model_path) or {}
+    res = provenance.analyse(m)
+    print(json.dumps(res, indent=2, ensure_ascii=False) if a.json else provenance.text(res, m, a.limit))
 
 
 def cmd_profile(a):
@@ -996,6 +1006,10 @@ def main(argv=None):
     s.add_argument("--since", type=int, default=365, metavar="DAYS", help="days of history (default: 365)")
     s.add_argument("--json", action="store_true", help="the full analysis as JSON")
     s.add_argument("--refresh", action="store_true", help="ignore the cache in .archplan/hotspots.json")
+    s = add("provenance", cmd_provenance, "which edges between components the code shows, which the traces "
+                                          "show, and which components no trace reaches")
+    s.add_argument("--limit", type=int, default=20, metavar="N", help="edges and components listed (default: 20)")
+    s.add_argument("--json", action="store_true", help="the full analysis as JSON")
     s = add("blast", cmd_blast, "what each traced entry point reaches, what a change touches, and the security "
                                 "tests to add")
     s.add_argument("files", nargs="*", help="changed files: show the entry points they touch")

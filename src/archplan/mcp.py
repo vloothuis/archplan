@@ -167,11 +167,19 @@ TOOLS = [
                     "(with the cheapest cut), upward layer dependencies, glossary leaks, large types or types with "
                     "groups of related fields, types that look like synonyms, and hidden coupling from git history. "
                     "Each has a strength (strong, medium, weak) and a basis. state=new lists those the human has not "
-                    "accepted or dismissed. Give your judgment on one with label_finding; discuss one in a thread "
-                    "on its finding:<id> anchor. get_item(finding:<id>) returns the full evidence.",
+                    "accepted or dismissed. Security findings carry CWE and OWASP tags. Give your judgment on one "
+                    "with label_finding; discuss one in a thread on its finding:<id> anchor. Before you judge or "
+                    "fix findings, ask again with detail=true and a small limit, or with ids: each then has its "
+                    "rule and rationale, the evidence path step by step (file and line where known), suggested "
+                    "moves and resolved_when, the condition to check after the fix. "
+                    "get_item(finding:<id>) returns the full evidence.",
      "inputSchema": {"type": "object", "properties": {
-         "group": {"type": "string", "enum": ["profile", "structure", "layers", "vocabulary", "types", "history"]},
+         "group": {"type": "string", "enum": ["profile", "structure", "layers", "vocabulary", "types", "history",
+                                              "concepts", "boundaries", "data", "evolution", "security"]},
          "state": {"type": "string", "enum": ["new", "accepted", "dismissed", "all"], "default": "new"},
+         "ids": {"type": "array", "items": {"type": "string"}, "description": "only these finding ids, in any state"},
+         "detail": {"type": "boolean", "default": False,
+                    "description": "add rule, path, moves and resolved_when to each finding"},
          "limit": {"type": "integer", "default": 30, "maximum": 200}}}},
     {"name": "label_finding",
      "description": "Put your judgment on a finding that a heuristic cannot settle alone, as a short label the "
@@ -414,12 +422,22 @@ class Agent:
         return {"saved": True, "status": prof["status"],
                 "summary": architecture.summary(a.state(), 3)}
 
-    def get_findings(self, group=None, state="new", limit=30):
+    def get_findings(self, group=None, state="new", limit=30, ids=None, detail=False):
         from .findings import Findings, compact
         lst = Findings(self.p).listing(self.store)
-        fs = [f for f in lst["findings"] if (state == "all" or f["state"] == state) and (not group or f["group"] == group)]
-        return {"counts": lst["counts"], "missing": lst["missing"], "shown": min(len(fs), int(limit)), "of": len(fs),
-                "findings": [compact(f) for f in fs[:min(int(limit), 200)]]}
+        ids = [ids] if isinstance(ids, str) else [i for i in ids or [] if isinstance(i, str)]
+        if ids:
+            want = set(ids)
+            fs = [f for f in lst["findings"] if f["id"] in want]
+        else:
+            fs = [f for f in lst["findings"]
+                  if (state == "all" or f["state"] == state) and (not group or f["group"] == group)]
+        out = {"counts": lst["counts"], "missing": lst["missing"], "shown": min(len(fs), int(limit)), "of": len(fs),
+               "findings": [compact(f, bool(detail)) for f in fs[:min(int(limit), 200)]]}
+        gone = sorted(set(ids) - {f["id"] for f in fs})
+        if gone:
+            out["not_found"] = gone  # no longer reported: fixed, or the id is wrong
+        return out
 
     def label_finding(self, id, label, note=""):
         from .findings import Findings, compact
