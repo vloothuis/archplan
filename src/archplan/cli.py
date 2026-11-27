@@ -315,7 +315,9 @@ def cmd_watch(a):
 def cmd_hook(a):
     """For SessionStart and UserPromptSubmit hooks. Prints (into the
     agent's context) the threads waiting on the agent that it was not told
-    about yet in this session. Silent outside archplan projects."""
+    about yet in this session. Stop and SessionEnd only record that the turn
+    or session ended, for the editor. Silent outside archplan projects."""
+    from .presence import turn
     try:
         ev = json.loads(sys.stdin.read() or "{}")
     except json.JSONDecodeError:
@@ -324,9 +326,11 @@ def cmd_hook(a):
     if not root:
         return
     p = Project(root)
+    event, sid = ev.get("hook_event_name", ""), ev.get("session_id", "")
+    if event in ("Stop", "SessionEnd"):
+        return turn(p, sid, event)
     seen_path = p.path(".hook-seen.json")
     seen = read_json(seen_path, {}) or {}
-    sid = ev.get("session_id", "")
     if seen.get("session") != sid:
         seen = {"session": sid, "threads": {}}
     hs = Handovers(p.dir)
@@ -344,6 +348,7 @@ def cmd_hook(a):
         seen["handover"] = ho
     if ev.get("hook_event_name") == "SessionStart" or new or ho_new:
         write_json(seen_path, seen)
+    turn(p, sid, event, {t["id"]: len(t["messages"]) for t in new[:10]})
     if not new and not ho_new:
         return
     url = running(p)

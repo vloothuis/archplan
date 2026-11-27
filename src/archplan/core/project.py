@@ -15,6 +15,7 @@ editor) and an agent (over MCP):
   suggestions.json       target edits the agent proposed, and the human's decisions
   handovers.json         planned refactors the human sent the agent, with batches and progress
   activity.json          the agent's latest MCP call, for the editor; not committed
+  agents/                which agents are connected, what they read, whether they work; not committed
   hotspots.json          cached analysis of the git history; not committed
   architecture.json      the architecture profile: units, roles, rules, layers
   baseline.json          findings the human accepted or dismissed, and Claude's labels on findings
@@ -51,6 +52,7 @@ suggest-state.json
 *.tmp
 .*.lock
 parts/
+agents/
 """
 
 

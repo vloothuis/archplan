@@ -677,11 +677,22 @@ def serve(find=Project.find) -> None:
     archplan. Until a project exists, look for it again on each request: after
     `archplan init` the full tools work without a restart, and the client is
     told that the tool list changed."""
+    from .presence import Presence
     try:
         agent, err = Agent(find()), ""
     except ProjectError as e:
         agent, err = None, str(e)
     late = agent is None  # the tool list can still change
+    here = [Presence(agent.p)] if agent else []  # tells the editor an agent is connected
+    try:
+        _serve(agent, err, late, find, here)
+    finally:
+        for h in here:
+            h.close()
+
+
+def _serve(agent, err, late, find, here: list) -> None:
+    from .presence import Presence, delivered
     names = {t["name"] for t in TOOLS}
     notice = UpdateNotice()
 
@@ -697,11 +708,13 @@ def serve(find=Project.find) -> None:
         except json.JSONDecodeError:
             continue
         rid, method = req.get("id"), req.get("method")
+        shown = {}
         if rid is None:
             continue  # a notification
         if agent is None and method != "initialize":
             try:
                 agent = Agent(find())
+                here.append(Presence(agent.p))
                 send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
             except ProjectError as e:
                 err = str(e)
@@ -730,16 +743,24 @@ def serve(find=Project.find) -> None:
                 args = {}
             if name not in AFTER:
                 record(p, agent.store, name, args)
+            if name == "wait_for_comments":
+                here[0].listening(True)
             try:
                 out = getattr(agent, name)(**args)
                 if name in AFTER or name in DONE:
                     record(p, agent.store, name, args, done=name in DONE)
                 result = {"content": [{"type": "text", "text": dumps(out)}]}
+                shown = delivered(name, out)
             except (KeyError, TypeError, ValueError, ProjectError) as e:
                 result = {"content": [{"type": "text", "text": f"error: {e}"}], "isError": True}
+            finally:
+                if name == "wait_for_comments":
+                    here[0].listening(False)
             if note := notice():
                 result["content"].append({"type": "text", "text": note})
         else:
             send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": f"no method {method}"}})
             continue
         send({"jsonrpc": "2.0", "id": rid, "result": result})
+        if shown:
+            here[0].saw(shown)  # only once the result went out

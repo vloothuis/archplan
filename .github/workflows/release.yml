@@ -48,7 +48,7 @@ jobs:
 
       - name: Test
         if: steps.check.outputs.skip != 'true'
-        run: PYTHONPATH=src python -m unittest tests.test_archplan tests.test_schema
+        run: PYTHONPATH=src python -m unittest tests.test_archplan tests.test_schema tests.test_presence
 
       - name: Version, commit, tag and push
         if: steps.check.outputs.skip != 'true'

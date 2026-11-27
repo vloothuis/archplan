@@ -27,10 +27,10 @@ LONG_POLL = 25.0  # seconds the editor's request for changes may wait
 STATIC = Path(str(resources.files("archplan") / "static"))
 
 
-def changes(p: Project, store: Store) -> dict:
+def changes(p: Project, store: Store, agents=None) -> dict:
     """What the editor polls for: threads, the as-is model, the target revision,
     the agent's suggestions, the handover, the architecture profile, the
-    findings baseline and the agent's last activity. key
+    findings baseline, the agent's last activity and which agents are connected. key
     changes when any does."""
     st = p.state()
     c = {"version": store.version(), "model_etag": etag(p.model_path),
@@ -40,13 +40,19 @@ def changes(p: Project, store: Store) -> dict:
          "vocabulary_etag": etag(p.path("vocabulary.json")), "suggest_etag": etag(p.path("config.json")),
          "activity_etag": etag(p.path("activity.json")), "detectors_version": detectors.version(p),
          "build": reload.BUILD}
+    if agents:
+        c["agents"] = agents()
+        c["agents_key"] = c["agents"]["key"]
     c["key"] = ".".join(str(c[k]) for k in ("version", "model_etag", "target_rev", "suggestions_version",
                                             "handover_version", "architecture_etag", "findings_etag", "vocabulary_etag",
-                                            "suggest_etag", "activity_etag", "detectors_version", "build"))
+                                            "suggest_etag", "activity_etag", "detectors_version")
+                       + (("agents_key",) if agents else ()) + ("build",))
     return c
 
 
 def make_handler(p: Project, store: Store):
+    from .presence import Summary
+    agents = Summary(p)
     export_lock = threading.Lock()
     hotspot_lock = threading.Lock()
     suggestions = Suggestions(p.dir)
@@ -143,7 +149,7 @@ def make_handler(p: Project, store: Store):
                                        "model": "/api/model" if p.model_path.exists() else None,
                                        "can_export": bool(p.export_command()),
                                        "git": hotspots.info(p.root),
-                                       "intent": st.get("intent", ""), **changes(p, store)})
+                                       "intent": st.get("intent", ""), **changes(p, store, agents)})
             if path == "/api/model":
                 return self.send_file(p.model_path)
             if path == "/api/target":
@@ -156,20 +162,20 @@ def make_handler(p: Project, store: Store):
                                        "base_current": st.get("base_etag") == etag(p.model_path)})
             if path == "/api/threads":
                 since = params.get("since", "-1")
-                if since == changes(p, store)["key"]:
+                if since == changes(p, store, agents)["key"]:
                     # A server about to restart answers at once, so it need not wait for this request.
                     draining = getattr(self.server, "draining", None) or threading.Event()
-                    wait(lambda: "restart" if draining.is_set() else changes(p, store)["key"], since, LONG_POLL)
-                return self.send_json({**store.read(), **changes(p, store)})
+                    wait(lambda: "restart" if draining.is_set() else changes(p, store, agents)["key"], since, LONG_POLL)
+                return self.send_json({**store.read(), **changes(p, store, agents)})
             if path == "/api/activity":
                 return self.send_json(read_json(p.path("activity.json"), {}) or {})
             if path == "/api/handover":
                 return self.send_json({"current": handovers.current(), "history": handovers.history(10),
-                                       **changes(p, store)})
+                                       **changes(p, store, agents)})
             if path == "/api/architecture":
                 try:
                     with arch_lock:
-                        return self.send_json({**arch.state(), **changes(p, store)})
+                        return self.send_json({**arch.state(), **changes(p, store, agents)})
                 except ArchitectureError as e:
                     return self.send_json({"error": str(e)}, HTTPStatus.NOT_FOUND)
             if path == "/api/schema":
@@ -184,7 +190,7 @@ def make_handler(p: Project, store: Store):
                 try:
                     with arch_lock:
                         lst = findings.listing(store)
-                        return self.send_json({**lst, "ratchet": findings.ratchet(lst), **changes(p, store)})
+                        return self.send_json({**lst, "ratchet": findings.ratchet(lst), **changes(p, store, agents)})
                 except ArchitectureError as e:
                     return self.send_json({"error": str(e)}, HTTPStatus.NOT_FOUND)
             if path in ("/api/detectors", "/api/metrics"):
@@ -194,16 +200,16 @@ def make_handler(p: Project, store: Store):
                 except ArchitectureError as e:
                     return self.send_json({"error": str(e)}, HTTPStatus.NOT_FOUND)
                 if path == "/api/metrics":
-                    return self.send_json({"metrics": res["extras"].get("metrics") or {}, **changes(p, store)})
+                    return self.send_json({"metrics": res["extras"].get("metrics") or {}, **changes(p, store, agents)})
                 return self.send_json({"detectors": res["detectors"], "missing": res["missing"],
-                                       "capabilities": res["capabilities"], **changes(p, store)})
+                                       "capabilities": res["capabilities"], **changes(p, store, agents)})
             if path == "/api/vocabulary/candidates":
                 try:
                     with vocab_lock:
                         return self.send_json({**vocab.candidates(params.get("component") or None,
                                                                   int(params["top"]) if params.get("top") else None,
                                                                   params.get("ignored") == "1"),
-                                               **changes(p, store)})
+                                               **changes(p, store, agents)})
                 except NotFound as e:
                     return self.send_json({"error": str(e).strip("'\"")}, HTTPStatus.NOT_FOUND)
                 except KeyError as e:
@@ -211,19 +217,19 @@ def make_handler(p: Project, store: Store):
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, HTTPStatus.BAD_REQUEST)
             if path == "/api/suggest":
-                return self.send_json({**brief.status(p, store), **changes(p, store)})
+                return self.send_json({**brief.status(p, store), **changes(p, store, agents)})
             if path == "/api/brief":
                 try:
                     lst = lambda k: [x for x in params[k].split(",") if x] if params.get(k) else None
                     with arch_lock:
                         return self.send_json({**brief.brief(p, int(params.get("top") or 8), lst("focus"),
-                                                             lst("kinds"), store), **changes(p, store)})
+                                                             lst("kinds"), store), **changes(p, store, agents)})
                 except ArchitectureError as e:
                     return self.send_json({"error": str(e)}, HTTPStatus.NOT_FOUND)
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, HTTPStatus.BAD_REQUEST)
             if path == "/api/suggestions":
-                return self.send_json({"suggestions": suggestions.newest(), **changes(p, store)})
+                return self.send_json({"suggestions": suggestions.newest(), **changes(p, store, agents)})
             parts = path.strip("/").split("/")
             if len(parts) == 4 and parts[:2] == ["api", "suggestions"] and parts[3] == "preview":
                 try:
@@ -276,42 +282,42 @@ def make_handler(p: Project, store: Store):
                     else:
                         out = {"suggestion": suggestions.decide(p, parts[2], idx, b.get("reason"))}
                     self.tick()
-                    return self.send_json({**out, **changes(p, store)})
+                    return self.send_json({**out, **changes(p, store, agents)})
                 if len(parts) == 4 and parts[:2] == ["api", "suggestions"] and parts[3] == "discuss":
                     th, created = brief.discuss(p, store, parts[2], b.get("text"))
-                    return self.send_json({"thread": th, "created": created, **changes(p, store)})
+                    return self.send_json({"thread": th, "created": created, **changes(p, store, agents)})
                 if parts == ["api", "suggest"]:
                     th = brief.request(p, store, b.get("count"), b.get("focus"), b.get("kinds"), b.get("note"))
-                    return self.send_json({"thread": th, **changes(p, store)})
+                    return self.send_json({"thread": th, **changes(p, store, agents)})
                 if len(parts) == 4 and parts[:2] == ["api", "threads"] and parts[3] == "lock":
                     return self.send_json(handover.lock(store, parts[2], b.get("title", ""), b.get("summary", "")))
                 if len(parts) == 4 and parts[:2] == ["api", "threads"] and parts[3] == "unlock":
                     return self.send_json(handover.unlock(store, handovers, parts[2]))
                 if parts == ["api", "architecture", "lock"]:
                     with arch_lock:
-                        return self.send_json({"profile": arch.lock(), **changes(p, store)})
+                        return self.send_json({"profile": arch.lock(), **changes(p, store, agents)})
                 if parts == ["api", "architecture", "infer"]:
                     with arch_lock:
                         proposal, saved = arch.infer()
-                    return self.send_json({"proposal": proposal, "saved": saved, **changes(p, store)})
+                    return self.send_json({"proposal": proposal, "saved": saved, **changes(p, store, agents)})
                 if len(parts) == 4 and parts[:2] == ["api", "findings"] and parts[3] in FINDING_ACTIONS:
                     with arch_lock:
                         if parts[3] == "discuss":
                             th, created = findings.discuss(store, parts[2], b.get("text"))
                             return self.send_json({"thread": th, "created": created,
-                                                   "finding": findings.get(parts[2], store), **changes(p, store)})
+                                                   "finding": findings.get(parts[2], store), **changes(p, store, agents)})
                         f = findings.decide(parts[2], FINDING_ACTIONS[parts[3]], b.get("reason"))
-                    return self.send_json({"finding": f, **changes(p, store)})
+                    return self.send_json({"finding": f, **changes(p, store, agents)})
                 if parts[:2] == ["api", "vocabulary"] and len(parts) == 3 and parts[2] in ("ignore", "unignore"):
                     if not isinstance(b.get("term"), str) or (b.get("component") is not None
                                                              and not isinstance(b.get("component"), str)):
                         raise ValueError("term (and component, when given) must be strings")
                     with vocab_lock:
                         d = vocab.set_ignored(b["term"], b.get("component") or None, parts[2] == "ignore")
-                    return self.send_json({**d, **changes(p, store)})
+                    return self.send_json({**d, **changes(p, store, agents)})
                 if parts == ["api", "vocabulary", "draft"]:
                     return self.send_json({"thread": draft_thread(p, store, b.get("components"), b.get("note")),
-                                           **changes(p, store)})
+                                           **changes(p, store, agents)})
                 if parts == ["api", "handover"]:
                     return self.send_json(handovers.create(store, b.get("mode", "all"), b.get("note", "")))
                 if len(parts) == 4 and parts[:2] == ["api", "handover"] and parts[3] == "approve":
@@ -326,7 +332,7 @@ def make_handler(p: Project, store: Store):
                     finally:
                         export_lock.release()
                     self.tick()
-                    return self.send_json({"ok": True, "counts": n, **changes(p, store)})
+                    return self.send_json({"ok": True, "counts": n, **changes(p, store, agents)})
             except UntrustedExport as e:
                 return self.send_json({"error": str(e)}, HTTPStatus.FORBIDDEN)
             except ArchitectureError as e:
@@ -360,17 +366,17 @@ def make_handler(p: Project, store: Store):
                     return self.send_json(handover.edit(store, parts[2], b.get("title"), b.get("summary")))
                 if parts == ["api", "architecture"]:
                     with arch_lock:
-                        return self.send_json({"profile": arch.save(b["profile"]), **changes(p, store)})
+                        return self.send_json({"profile": arch.save(b["profile"]), **changes(p, store, agents)})
                 if parts == ["api", "refactors", "order"]:
-                    return self.send_json({"refactors": handover.reorder(store, b.get("ids")), **changes(p, store)})
+                    return self.send_json({"refactors": handover.reorder(store, b.get("ids")), **changes(p, store, agents)})
                 if len(parts) == 3 and parts[:2] == ["api", "detectors"]:
                     e = detectors.configure(p, unquote(parts[2]), b.get("enabled"), b.get("params"))
-                    return self.send_json({"detector": parts[2], "config": e, **changes(p, store)})
+                    return self.send_json({"detector": parts[2], "config": e, **changes(p, store, agents)})
                 if parts == ["api", "suggest", "auto"]:
                     brief.set_auto(p, b.get("on"), b.get("count"))
                     if b.get("on"):
                         self.tick_enabled()
-                    return self.send_json({**brief.status(p, store), **changes(p, store)})
+                    return self.send_json({**brief.status(p, store), **changes(p, store, agents)})
             except NotFound as e:
                 return self.send_json({"error": str(e)}, HTTPStatus.NOT_FOUND)
             except Conflict as e:
