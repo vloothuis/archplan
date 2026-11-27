@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>archplan · demo</title>
 <script src="vendor/cytoscape.min.js"></script>
 <script src="vendor/dagre.min.js"></script>
@@ -22,12 +23,12 @@
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;color:var(--ink);background:var(--bg)}
 code,pre,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
-header{height:48px;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--line);background:var(--panel);position:relative;z-index:30}
+header{height:44px;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line);background:var(--panel);position:relative;z-index:30}
 .brand{font-weight:700;font-size:16px}
-.proj{color:var(--mute)}
-#repo{color:var(--mute);font-size:12px}
+.proj{color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;cursor:default}
+#agentPill{max-width:min(360px,30vw);display:block;text-overflow:ellipsis}#agentPill .dot{margin-right:6px;vertical-align:1px}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
-.seg button{border:0;background:none;padding:5px 10px;cursor:pointer;color:var(--mute);font:inherit}
+.seg{flex:none}.seg button{border:0;background:none;padding:5px 10px;white-space:nowrap;cursor:pointer;color:var(--mute);font:inherit}
 .seg button.on{background:var(--ink);color:var(--panel)}
 .seg button:disabled{opacity:.35;cursor:default}
 .spacer{flex:1}
@@ -48,7 +49,7 @@ button.pill{cursor:pointer}
 .pill.rem{background:var(--rembg);color:var(--rem-ink)}.pill.add{background:var(--addbg);color:var(--add-ink)}.pill.acc{background:var(--sel);color:var(--sel-ink)}
 .dot{width:7px;height:7px;border-radius:50%;display:inline-block;background:var(--edge);flex:none}.dot.live{background:var(--agent)}.dot.warn{background:var(--chg)}
 .menu-wrap{position:relative}
-.menu{position:absolute;right:0;top:calc(100% + 5px);background:var(--panel);border:1px solid var(--line);border-radius:9px;box-shadow:0 10px 30px rgba(15,23,42,.18);padding:5px;min-width:230px;z-index:40}
+.menu{position:absolute;right:0;top:calc(100% + 5px);max-height:calc(100vh - 70px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:9px;box-shadow:0 10px 30px rgba(15,23,42,.18);padding:5px;min-width:230px;z-index:40}
 .menu.left{right:auto;left:0}
 .menu[hidden]{display:none}
 .mi{display:flex;width:100%;text-align:left;border:0;background:none;padding:6px 9px;border-radius:6px;font:inherit;color:var(--ink);cursor:pointer;gap:8px;align-items:center;white-space:nowrap}
@@ -57,22 +58,26 @@ button.pill{cursor:pointer}
 .mi.on{font-weight:600}.mi.on::before{content:"✓";width:12px}.mi.off::before{content:"";width:12px}
 .sep{height:1px;background:var(--line);margin:4px 2px}
 .mh{font-size:12px;text-transform:uppercase;color:var(--mute);padding:7px 9px 3px;letter-spacing:.04em;font-weight:600}
-main{display:flex;height:calc(100% - 48px)}
+main{display:flex;height:calc(100% - 44px)}
 /* plan document and item pages */
-aside#doc{width:min(628px,46vw);flex:none;background:var(--panel);display:flex;flex-direction:column;min-height:0}
-#panel{flex:1;overflow:auto;padding:18px 22px 60px}
+aside#doc{width:clamp(320px,34vw,520px);flex:none;background:var(--panel);display:flex;flex-direction:column;min-height:0}
+#panel{flex:1;overflow:auto;padding:16px 20px 60px}
+.tabs{display:flex;gap:2px;padding:0 14px;border-bottom:1px solid var(--line);flex:none}
+.tabs button{border:0;background:none;font:inherit;color:var(--mute);padding:9px 8px 8px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;display:inline-flex;gap:6px;align-items:center}
+.tabs button:hover{color:var(--ink)}.tabs button.on{color:var(--ink);border-bottom-color:var(--acc);font-weight:600}
+.cnt{font-size:11.5px;font-weight:600;border-radius:999px;padding:0 6px;background:var(--rembg);color:var(--rem-ink)}
 #split{width:7px;margin:0 -3px;cursor:col-resize;z-index:5;flex:none;position:relative}
 #split::after{content:"";position:absolute;left:3px;top:0;bottom:0;width:1px;background:var(--line)}
 #split:hover,body.resizing #split{background:var(--acc);opacity:.35}
 body.resizing{cursor:col-resize;user-select:none}
 .crumb{font-size:13px;color:var(--mute);margin-bottom:8px}.crumb a{color:var(--acc);cursor:pointer}
-.doc-title{font-size:22px;font-weight:600;margin:0 0 6px;line-height:1.3}
+.doc-title{font-size:19px;font-weight:600;margin:0 0 6px;line-height:1.3}
 .doc-title.empty{color:var(--mute);font-weight:500}
 #i-intent{background:var(--soft);border-color:transparent;font-size:14px;line-height:1.5}
 #i-intent:focus{border-color:var(--sel-line);background:var(--panel)}
 .pills{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 4px}
-.dsec{margin-top:20px}
-h4{margin:16px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);display:flex;align-items:center;gap:6px}
+.dsec{margin-top:22px}
+h4{margin:16px 0 6px;font-size:13px;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:6px}
 .dsec>h4{margin-top:0}
 .rule-row{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;background:var(--soft);margin:4px 0}
 .rule-row.bad{background:var(--rembg);color:var(--rem-ink)}.rule-row .n{margin-left:auto;font-size:13px;white-space:nowrap}
@@ -152,7 +157,7 @@ pre.raw{white-space:pre-wrap;background:var(--bg);border:1px solid var(--line);b
 .ac-i{display:flex;gap:8px;padding:5px 8px;border-radius:5px;cursor:pointer;align-items:baseline}.ac-i.on{background:var(--sel);color:var(--sel-ink)}.ac-i .r{margin-left:auto;font-size:12px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45%}
 /* diagram */
 #stage{flex:1;position:relative;min-width:0;background:var(--panel);display:flex;flex-direction:column}
-#toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--panel);position:relative;z-index:20}
+#toolbar{display:flex;flex-wrap:nowrap;gap:6px;align-items:center;padding:6px 8px;min-width:0;border-bottom:1px solid var(--line);background:var(--panel);position:relative;z-index:20}
 #canvas{position:relative;flex:1;min-height:0}
 #cy,#seq,#roles{position:absolute;inset:0}#roles{overflow:hidden;cursor:grab}#canvas.panning #roles,#canvas.space #roles{cursor:grabbing}.rempty{padding:60px 30px;color:var(--mute);text-align:center}
 #seq{overflow:hidden;cursor:grab}#cy{cursor:grab}#canvas.panning #cy,#canvas.panning #seq,#canvas.space #cy,#canvas.space #seq{cursor:grabbing}#canvas.space #cy *,#canvas.space #seq *{cursor:grabbing!important}
@@ -166,21 +171,22 @@ pre.raw{white-space:pre-wrap;background:var(--bg);border:1px solid var(--line);b
 #gloss .lk{color:var(--rem);font-weight:600}
 #gloss table.ct{table-layout:fixed}#gloss .ct th:nth-child(1){width:17%}#gloss .ct th:nth-child(2){width:22%}#gloss .ct th:nth-child(3){width:9%}#gloss .ct th:nth-child(5){width:8%}#gloss .ct th:nth-child(6){width:7%}
 .term{display:inline-block;background:var(--soft);border-radius:4px;padding:0 5px;margin:1px 2px 1px 0;font-size:13px}
-#legend{position:absolute;left:12px;bottom:56px;background:var(--glass);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--mute);display:flex;gap:12px;flex-wrap:wrap;max-width:70%;z-index:4}
+#legend{position:absolute;left:10px;bottom:48px;background:var(--glass);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--mute);display:flex;gap:12px;flex-wrap:wrap;max-width:70%;z-index:4}
 #legend i,#ovLegend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 #ovLegend{position:absolute;right:12px;top:12px;background:var(--glass);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:12px;color:var(--mute);max-width:300px;z-index:4}
 #ovLegend[hidden]{display:none}
 #ovLegend .ramp{height:8px;border-radius:4px;margin:5px 0 2px}
-#canvasBar{position:absolute;left:12px;bottom:12px;display:flex;gap:1px;padding:3px;background:var(--glass);border:1px solid var(--line);border-radius:9px;z-index:6;align-items:center;box-shadow:0 2px 8px rgba(15,23,42,.08)}
-.tb{border:0;background:none;padding:4px 8px;border-radius:6px;cursor:pointer;font:inherit;color:var(--ink);white-space:nowrap}
+#canvasBar{position:absolute;left:10px;bottom:10px;display:flex;gap:1px;padding:2px;background:var(--glass);border:1px solid var(--line);border-radius:9px;z-index:6;align-items:center;box-shadow:0 2px 8px rgba(15,23,42,.08)}
+.tsep{width:1px;align-self:stretch;margin:3px 2px;background:var(--line)}
+.tb{border:0;background:none;padding:3px 8px;min-width:28px;border-radius:6px;cursor:pointer;font:inherit;color:var(--ink);white-space:nowrap}
 .tb:hover{background:var(--soft)}.tb:disabled{opacity:.35;cursor:default;background:none}.tb.on{background:var(--sel);color:var(--sel-ink)}
-#zoomPct{font-size:12px;color:var(--mute);min-width:36px;text-align:center}
-.focus{display:flex;align-items:center;gap:4px;font-size:13px;flex-wrap:wrap}#focusIn{width:110px}
+#zoomPct{font-size:12px;color:var(--mute);min-width:34px;display:inline-block;text-align:center}
+.focus{display:flex;align-items:center;gap:4px;font-size:13px;min-width:0;overflow:hidden;flex:1}#focusIn{width:110px;flex:none}#chips{display:flex;gap:4px;overflow:hidden}
 .chip{background:var(--sel-chip);color:var(--sel-ink);border-radius:10px;padding:1px 4px 1px 8px;white-space:nowrap}.chip button{border:0;background:none;cursor:pointer;color:var(--sel-ink)}
 .opt{display:flex;align-items:center;gap:9px;padding:5px 4px;cursor:pointer}.opt .mute{font-size:13px}
 input.tg{appearance:none;-webkit-appearance:none;width:28px;height:16px;border-radius:8px;background:var(--kbd);position:relative;cursor:pointer;flex:none;border:0;padding:0;margin:0}
 input.tg:checked{background:var(--acc)}input.tg::after{content:"";position:absolute;left:2px;top:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:left .15s}input.tg:checked::after{left:14px}
-#viewMenu{width:300px;padding:8px 10px}#viewMenu select{width:100%}
+#viewMenu{width:300px;padding:8px 10px}#ovMenu .mi{padding:5px 4px}#viewSel{display:none;flex:none}#viewMenu select{width:100%}
 #emptyMsg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:5}#emptyMsg div{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 18px;max-width:380px;font-size:14px;pointer-events:auto;text-align:center}
 #needFocus{position:absolute;inset:0;display:none;align-items:center;justify-content:center;pointer-events:none}#needFocus div{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 18px;max-width:380px;font-size:14px;color:var(--mute);pointer-events:auto}
 body.drop #stage{outline:3px dashed var(--acc);outline-offset:-6px}
@@ -241,7 +247,7 @@ ul.breaks{margin:4px 0 8px;padding-left:18px;font-size:13px;max-height:260px;ove
 .rchip{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;border:1px solid var(--line);border-radius:999px;padding:1px 8px}.rchip i{width:8px;height:8px;border-radius:2px}.rchip.miss{border-style:dashed;color:var(--mute)}.rchip.miss i{opacity:.35}
 .seg button .pill{padding:0 6px;font-size:11.5px;margin-left:3px}
 .find{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px}.find.on{border-color:var(--acc)!important;box-shadow:0 0 0 2px var(--sel)}.find.base{opacity:.72}
-.find .ft{font-weight:600;margin:4px 0 2px}.fk{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600}.fk i{width:8px;height:8px;border-radius:50%}
+.find .ft{font-weight:600;margin:4px 0 2px}.fk{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;white-space:nowrap}.fk i{width:8px;height:8px;border-radius:50%}
 .fsm{font-size:12.5px}.fev{list-style:none;margin:4px 0 0;padding:0;font-size:12.5px}.fev li{padding:1px 0}.fkv{font-size:12.5px;margin-top:4px;overflow-wrap:anywhere}
 .members li.fhl code{background:#fef3c7;box-shadow:0 0 0 2px #fde68a;border-radius:3px}
 .fshow{margin:4px 0 0;font-size:12px;color:var(--mute)}
@@ -256,21 +262,38 @@ ul.breaks{margin:4px 0 8px;padding-left:18px;font-size:13px;max-height:260px;ove
 .sgx-auto{display:flex;gap:8px;align-items:flex-start;margin:6px 0;cursor:pointer;font-size:13.5px}.sgx-busy{display:flex;gap:6px;align-items:center;font-size:13px;color:var(--agent-ink);background:var(--agent-bg);border-radius:7px;padding:5px 8px;margin:4px 0}
 .sug.ref .sug-h .pill{font-weight:400;font-size:12px;padding:0 7px}.ref-t{font-weight:600;font-size:14.5px;margin:4px 0 2px}.ref-fx{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:4px 0}.ref-fx .pill{font-size:12px;padding:0 8px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ref-in{color:var(--rem);font-size:13px;margin:2px 0 4px}
+#panel code{overflow-wrap:anywhere}
+/* plan document */
+.start ol{margin:4px 0 0;padding-left:20px;color:var(--mute)}.start li{margin:4px 0}
+.folds{margin-top:22px;border-top:1px solid var(--line)}.folds .dsec{margin:0;border-bottom:1px solid var(--line);padding:8px 0}
+.folds summary h4{color:var(--mute);font-weight:500}
+.editm{font-size:13px}
+/* responsive */
+#stage{container-type:inline-size}
+#toolbar select{flex:0 1 auto;min-width:70px}#toolbar #viewSel{flex:none}
+@container (max-width:720px){#views{display:none}#viewSel{display:block}#seqInfo{display:none!important}}
+@container (max-width:460px){#focusBox{display:none!important}}
+@media (max-width:1180px){.wide{display:none}}
+@media (max-width:860px){
+  main{flex-direction:column-reverse}
+  aside#doc{width:auto!important;height:46%;border-top:1px solid var(--line)}
+  #split{display:none}
+  #stage{flex:1;min-height:0}
+  .proj{display:none}
+  #panel{padding:12px 14px 40px}
+}
 </style>
 </head>
 <body>
 <header>
-  <div class="brand">archplan</div><span class="proj" id="proj">demo</span><span class="mono" id="repo"></span>
-  <div class="spacer"></div>
-  <div class="seg" id="leftModes" hidden title="What the left column shows"><button data-left="plan">Plan</button><button data-left="arch">Architecture</button><button data-left="find">Findings <span class="pill rem" id="findN" hidden></span></button></div>
+  <div class="brand">archplan</div><span class="proj" id="proj">demo</span>
   <div class="spacer"></div>
   <button class="pill agent" id="agentPill" hidden title="What the agent did last"></button>
   <button class="pill warn" id="sugPill" hidden title="Show the first suggestion"></button>
   <div class="menu-wrap" id="suggestWrap" hidden><button class="btn" id="suggestBtn" title="Ask the agent to propose refactors">✦ Suggest refactors ▾</button><div class="menu sgx" id="suggestMenu" hidden></div></div>
-  <button class="btn primary" id="sendBtn" hidden title="Hand the planned refactors to the agent">Send plan to the agent</button>
-  <button class="btn" id="searchBtn" title="Find a component, type, task or action">⌕ Search <span class="kbd">⌘K</span></button>
-  <div class="menu-wrap"><button class="btn" id="shareBtn">Share ▾</button><div class="menu" id="shareMenu" hidden></div></div>
-  <div class="menu-wrap"><button class="btn ico" id="moreBtn" title="More">⋯</button><div class="menu" id="moreMenu" hidden></div></div>
+  <button class="btn primary" id="sendBtn" hidden title="Hand the planned refactors to the agent">Send plan<span class="wide"> to the agent</span></button>
+  <button class="btn" id="searchBtn" title="Find a component, type, task or action (⌘K)">⌕<span class="wide"> Search</span> <span class="kbd wide">⌘K</span></button>
+  <div class="menu-wrap"><button class="btn ico" id="moreBtn" title="Share, files, theme and help">⋯</button><div class="menu" id="moreMenu" hidden></div></div>
   <input type="file" id="fileIn" accept=".json,application/json" hidden>
 </header>
 <div id="help" hidden><div class="box">
@@ -279,16 +302,16 @@ ul.breaks{margin:4px 0 8px;padding-left:18px;font-size:13px;max-height:260px;ove
   <p>Plan an architecture change, then let an agent build it. The <b>as-is</b> model comes from the code. You edit the <b>to-be</b> model. The difference becomes a <b>plan</b>.</p>
   <h3>The screen</h3>
   <ul>
-    <li><b>Left: the plan.</b> The intent at the top says what the change should achieve. Below it come the rules, the tasks and the comment threads. A thread about a task sits under that task.</li>
-    <li><b>Right: the diagram.</b> The toolbar picks the view (<i>Components</i>, <i>Types</i>, <i>Sequences</i>, <i>Glossary</i>) and the mode (<i>As-is</i>, <i>To-be</i>, <i>Diff</i>). <i>Focus</i> narrows the diagram to a few components. <i>View</i> holds the settings that hide or filter things; its number says how many are on. <i>Overlay</i> colours the boxes.</li>
+    <li><b>Left: the plan.</b> The intent at the top says what the change should achieve. Below it come the rules, the tasks and the comment threads. A thread about a task sits under that task. When the project has an architecture profile or findings, tabs above the plan switch to them. On a narrow window the plan sits below the diagram.</li>
+    <li><b>Right: the diagram.</b> The toolbar picks the view (<i>Components</i>, <i>Types</i>, <i>Sequences</i>, <i>Glossary</i>) and the mode (<i>As-is</i>, <i>To-be</i>, <i>Diff</i>). <i>Focus</i> narrows the diagram to a few components. <i>Display</i> holds the settings that hide or filter things, and the overlays that colour the boxes; its number says how many are on.</li>
     <li><b>Item pages.</b> Click a box, a line or a call to open its page on the left. The page shows the details and the edits you can make. Click <i>Plan</i> in the breadcrumb, or press <kbd>Esc</kbd>, to go back.</li>
-    <li><b>Header.</b> The pill shows what the agent did last. <i>Search</i> finds any component, type, task or action. <i>Share</i> copies or downloads the plan, the diagram as D2 and the target model. <i>⋯</i> opens files, exports from the code, resets the target, sets the theme and opens this help.</li>
+    <li><b>Header.</b> The pill shows what the agent did last. <i>Search</i> finds any component, type, task or action. <i>⋯</i> copies or downloads the plan, the diagram as D2 and the target model, opens files, exports from the code, resets the target, sets the theme and opens this help.</li>
   </ul>
   <h3>Start here</h3>
   <ol>
-    <li><b>Look around.</b> Pick a view. Type in <i>Focus</i> to zoom in on one part, or double-click a box. <i>Hide leaves</i> (in <i>View</i>) hides boxes with at most one incoming line and no outgoing ones, and then the boxes that only led to them. What is left are the connections that matter.</li>
+    <li><b>Look around.</b> Pick a view. Type in <i>Focus</i> to zoom in on one part, or double-click a box. <i>Hide leaves</i> (in <i>Display</i>) hides boxes with at most one incoming line and no outgoing ones, and then the boxes that only led to them. What is left are the connections that matter.</li>
     <li><b>Say what you want.</b> Write the intent at the top of the plan.</li>
-    <li><b>Edit the to-be model.</b> Click an item and change it on its page: move a type, rename it, forbid a dependency. Drag the blue dot from one box to another to connect them. Select a line and press <kbd>Delete</kbd> to remove it. To add a type or a package, or to read the model as text, open <i>Edit the model</i> at the end of the plan. <i>Diff</i> shows what you changed.</li>
+    <li><b>Edit the to-be model.</b> Click an item and change it on its page: move a type, rename it, forbid a dependency. Drag the blue dot from one box to another to connect them. Select a line and press <kbd>Delete</kbd> to remove it. To add a type or a package, or to read the model as text, use <i>Edit the model</i> at the end of the plan. <i>Diff</i> shows what you changed.</li>
     <li><b>Comment.</b> Write on an item's page. Shift-click several items to comment on them together, for example an import cycle. Type <kbd>@</kbd> to link a component, type or task. A comment on a selection keeps a small picture of it. Click the picture to get that view back.</li>
     <li><b>Lock in.</b> When a discussion has reached a decision, choose <i>Lock in</i> on its thread. Give the refactor a title and a short summary of what was agreed. It joins <i>Planned refactors</i>. Drag the cards to set the order. <i>Unlock</i> opens the discussion again.</li>
     <li><b>Hand over.</b> When you are happy with all planned refactors, choose <i>Send plan to the agent</i>. The agent does them all in one go, or first proposes how to split or combine the work. You can move refactors between the proposed batches, then approve. A banner at the top of the plan shows the progress. The plan also lists the tasks from your model edits in order. The agent reads it directly. <i>Check against the code</i>, at the end of the plan, shows how the result is verified.</li>
@@ -297,12 +320,12 @@ ul.breaks{margin:4px 0 8px;padding-left:18px;font-size:13px;max-height:260px;ove
   <p>In your coding agent, use the Archplan skill in the repository. The agent sees comments at the next prompt and can answer in the same thread. An orange <b>decision</b> thread waits for your choice: click an option. A <b>feedback</b> thread only needs reading.</p>
   <p>When the agent proposes a change to the target, it arrives as a <b>suggestion</b>. Its card lists each change. Untick the ones you do not want, then accept or reject. The card says how the plan would grow or shrink. <i>With suggestion</i> in the mode switch shows the change in the diagram, with new items dashed green. A change the agent makes directly shows in <i>Diff</i>, and Undo reverts it. After the agent changes the code, the model reloads and the plan shrinks.</p>
   <h3>Overlays</h3>
-  <p><i>Change frequency</i> colours each component by the number of commits that touched it in the last year. <i>Co-change</i> draws a purple dashed line between components that often change in the same commit. A thick line means there is no dependency between them: hidden coupling. <i>Fan-in</i> and <i>fan-out</i> colour components by how many others use them, or how many they use. The first two need git. Overlays work in the Components view.</p>
+  <p>Pick an overlay in <i>Display</i>. <i>Change frequency</i> colours each component by the number of commits that touched it in the last year. <i>Co-change</i> draws a purple dashed line between components that often change in the same commit. A thick line means there is no dependency between them: hidden coupling. <i>Fan-in</i> and <i>fan-out</i> colour components by how many others use them, or how many they use. The first two need git. Overlays work in the Components view.</p>
   <h3>Architecture</h3>
-  <p>When the project has an architecture profile, the header shows <i>Plan</i> and <i>Architecture</i>. The profile says what a unit is (for example a system or a Django app), which roles its files have (recognised by file name patterns), the rules between roles and the layers. archplan proposes a profile from the code. Edit it, then lock it in. After that, every export is checked against it. Click a rule to see where it breaks.</p>
+  <p>When the project has an architecture profile, the left column has an <i>Architecture</i> tab. The profile says what a unit is (for example a system or a Django app), which roles its files have (recognised by file name patterns), the rules between roles and the layers. archplan proposes a profile from the code. Edit it, then lock it in. After that, every export is checked against it. Click a rule to see where it breaks.</p>
   <p>The <i>Roles</i> view shows one unit with its files in lanes per role. A dashed box is a role the unit lacks. A red dashed line is a rule break. <i>Compare with</i> shows a second unit below it. Double-click a unit in the Components view to open it here. The <i>Conformance</i> overlay colours each unit by how well it follows the profile.</p>
   <h3>Findings</h3>
-  <p><i>Findings</i> in the header lists what the checks found in the code: rule breaks, cycles, upward dependencies, leaking terms, field clusters, likely synonyms and files that change together. The pill counts new findings. Click a finding to see it in the diagram. <i>Discuss</i> starts a discussion with the evidence attached. <i>Dismiss</i> asks for a reason. <i>Accept as is</i> adds it to the baseline. <span class="mono">archplan check</span> reports only findings outside the baseline. The <i>Ratchet</i> line shows project numbers that may only get better, such as the propagation cost; <span class="mono">archplan check</span> fails when one gets worse.</p>
+  <p>The <i>Findings</i> tab lists what the checks found in the code: rule breaks, cycles, upward dependencies, leaking terms, field clusters, likely synonyms and files that change together. The pill counts new findings. Click a finding to see it in the diagram. <i>Discuss</i> starts a discussion with the evidence attached. <i>Dismiss</i> asks for a reason. <i>Accept as is</i> adds it to the baseline. <span class="mono">archplan check</span> reports only findings outside the baseline. The <i>Ratchet</i> line shows project numbers that may only get better, such as the propagation cost; <span class="mono">archplan check</span> fails when one gets worse.</p>
   <h3 id="keys">Keyboard shortcuts</h3>
   <table>
     <tr><td><kbd>⌘K</kbd></td><td>Search components, types, tasks and actions</td></tr>
@@ -327,7 +350,7 @@ ul.breaks{margin:4px 0 8px;padding-left:18px;font-size:13px;max-height:260px;ove
 <div id="palette" hidden><div class="box"><input id="palIn" placeholder="Find a component, type, task or action" autocomplete="off"><div id="palList"></div></div></div>
 <div id="ac" hidden></div>
 <main>
-  <aside id="doc"><div id="panel"></div></aside>
+  <aside id="doc"><nav class="tabs" id="leftModes" hidden><button data-left="plan">Plan</button><button data-left="arch">Architecture</button><button data-left="find">Findings <span class="cnt" id="findN" hidden></span></button></nav><div id="panel"></div></aside>
   <div id="split" title="Drag to resize; double-click to reset"></div>
   <section id="stage">
     <div id="toolbar">
@@ -338,6 +361,7 @@ ul.breaks{margin:4px 0 8px;padding-left:18px;font-size:13px;max-height:260px;ove
         <button data-view="seq">Sequences</button>
         <button data-view="glossary">Glossary</button>
       </div>
+      <select id="viewSel" title="View"><option value="components">Components</option><option value="roles">Roles</option><option value="types">Types</option><option value="seq">Sequences</option><option value="glossary">Glossary</option></select>
       <div class="seg" id="modes">
         <button data-mode="asis">As-is</button>
         <button data-mode="tobe">To-be</button>
@@ -348,16 +372,16 @@ ul.breaks{margin:4px 0 8px;padding-left:18px;font-size:13px;max-height:260px;ove
       <select id="unitSel" style="display:none;max-width:240px" title="Unit"></select><select id="cmpSel" style="display:none;max-width:240px" title="Show a second unit below, to compare"></select><button class="btn" id="draftBtn" style="display:none" title="The agent proposes concepts, owners and definitions from the candidate terms">Draft glossaries…</button>
       <button class="btn" id="seqInfo" style="display:none" title="Edit this sequence: add calls and participants">Sequence page</button>
       <div class="focus" id="focusBox"><input id="focusIn" list="focusList" placeholder="⌖ Focus…"><datalist id="focusList"></datalist><span id="chips"></span></div>
-      <div class="menu-wrap"><button class="btn" id="viewBtn" title="What the diagram shows">View ▾</button>
-        <div class="menu left" id="viewMenu" hidden>
+      <div class="menu-wrap"><button class="btn" id="viewBtn" title="What the diagram shows, and overlays">Display ▾</button>
+        <div class="menu" id="viewMenu" hidden>
           <div class="mh">Show</div>
           <label class="opt" id="leafOpt" title="Hide leaves: boxes with at most one incoming line and no outgoing ones, repeated until none are left. Changed, selected and focused boxes stay."><input type="checkbox" class="tg" id="leafChk">Hide leaves<span class="mute" id="leafN"></span></label>
           <label class="opt" id="extOpt" title="Show third-party components"><input type="checkbox" class="tg" id="extChk">External libraries</label>
           <div id="seqFilterBox"><div class="mh">Only what a sequence touches</div><select id="seqFilter" title="Show only the components and types a sequence touches"></select></div>
           <div id="glossBox"><div class="mh">Glossary layout</div><select id="glossMode" title="Glossary layout"><option value="map">Map</option><option value="leaks">Map: leaks only</option><option value="table">Table</option></select></div>
-          <div class="row" style="margin-top:10px"><span class="spacer"></span><button class="linkb" id="viewReset">Reset all</button></div>
+          <div id="ovBox"><div class="mh">Overlay</div><div id="ovMenu"></div></div>
+          <div class="row" style="margin-top:8px"><span class="spacer"></span><button class="linkb" id="viewReset">Reset all</button></div>
         </div></div>
-      <div class="menu-wrap"><button class="btn" id="ovBtn" title="Colour the boxes">Overlay: none ▾</button><div class="menu left" id="ovMenu" hidden></div></div>
     </div>
     <div id="canvas">
       <div id="cy"></div>
@@ -372,12 +396,13 @@ ul.breaks{margin:4px 0 8px;padding-left:18px;font-size:13px;max-height:260px;ove
       <div id="edgeAct"></div>
       <div id="pop"></div>
       <div id="canvasBar">
-        <button class="tb" id="undoBtn" title="Undo (⌘Z)">↶ Undo</button>
-        <button class="tb" id="connectBtn" title="Drag between boxes to connect. Holding Shift does the same.">⤳ Connect</button>
-        <button class="tb" id="layoutBtn" title="Lay out the diagram again">⟲ Re-layout</button>
-        <button class="tb" id="fitBtn" title="Fit the diagram">⤢ Fit</button>
-        <button class="tb" id="zoomOut" title="Zoom out">−</button><span id="zoomPct">100%</span><button class="tb" id="zoomIn" title="Zoom in">+</button>
-        <button class="tb" id="legendBtn" title="Show or hide the legend">◫ Legend</button>
+        <button class="tb" id="undoBtn" title="Undo (⌘Z)">↶</button>
+        <button class="tb" id="connectBtn" title="Connect: drag between boxes. Holding Shift does the same.">⤳</button>
+        <button class="tb" id="layoutBtn" title="Lay out the diagram again">⟲</button>
+        <span class="tsep"></span>
+        <button class="tb" id="zoomOut" title="Zoom out (−)">−</button><button class="tb" id="fitBtn" title="Fit the diagram (0)"><span id="zoomPct">100%</span></button><button class="tb" id="zoomIn" title="Zoom in (+)">+</button>
+        <span class="tsep"></span>
+        <button class="tb" id="legendBtn" title="Show or hide the legend">Legend</button>
       </div>
       <div id="hint">Scroll or drag the background to move. Pinch or ⌘+scroll to zoom. Drag the blue dot on a box to another box to connect them. Select a line and press Delete to disconnect. In Sequences, drag from one lifeline to another to add a call, and drag a call up or down to reorder. The plan updates live.</div>
     </div>
@@ -2434,7 +2459,7 @@ const NAV = {
 };
 const navTarget = () => view === 'seq' ? NAV.seq : view === 'roles' ? NAV.roles : $('cy').style.visibility !== 'hidden' ? NAV.cy : null;
 const clampZ = z => Math.max(ZMIN, Math.min(ZMAX, z));
-function zoomReadout() { const t = navTarget(); $('zoomPct').textContent = t ? Math.round(t.get().z * 100) + '%' : ''; }
+function zoomReadout() { const t = navTarget(); $('zoomPct').textContent = t ? Math.round(t.get().z * 100) + '%' : 'Fit'; }
 // Zoom by a factor around a point in the canvas (default: its centre).
 function navZoom(f, at) {
   const t = navTarget(); if (!t) return;
@@ -2820,7 +2845,6 @@ const actions = {
   },
   'msg.add': () => { const l = val('i-label'); if (!l) return; edit(m => m.sequences[curSeq].messages.push({id: newMsgId(), from: val('i-from'), to: val('i-to'), label: l, async: false})); },
   'part.add': () => { const p = val('i-part'); edit(m => { const S = m.sequences[curSeq]; if (!S.participants.includes(p)) S.participants.push(p); }); },
-  'plan.raw': e => { planFmtRaw = e.dataset.v; openSecs.add('text'); renderSide(); },
   'model.fmt': e => { modelFmt = e.dataset.v; renderSide(); },
   'model.save': saveTarget,
   'model.openTarget': () => { openAs = 'target'; $('fileIn').click(); },
@@ -2873,13 +2897,6 @@ const actions = {
   'multi.clear': () => { multi = []; render(); },
   'multi.drop': e => { multi = multi.filter(a => a !== e.dataset.key); render(); },
   'comp.types': () => { focus.add(sel.id); view = 'types'; setFocus([...focus], true); },
-  'plan.copy': () => { const P = buildPlan(asIs, toBe, D); navigator.clipboard?.writeText(planFmtRaw === 'json' ? planJSON(P) : planMD(P)); toast('Copied the plan.'); },
-  'plan.download': () => {
-    const P = buildPlan(asIs, toBe, D), json = planFmtRaw === 'json';
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([json ? planJSON(P) : planMD(P)], {type: 'text/plain'}));
-    a.download = json ? 'plan.json' : 'plan.md'; a.click();
-  },
   'd2.copy': () => navigator.clipboard?.writeText(toD2()),
   'd2.download': () => {
     const a = document.createElement('a');
@@ -2954,13 +2971,18 @@ function plannedHTML() {
 const hhmm = at => { const d = new Date(at); return isNaN(d) ? '' : d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}); };
 const HO_ST = {sent: 'waiting on agent', proposed: 'agent proposes batches', approved: 'approved', 'in-progress': 'in progress'};
 function hoBannerHTML() {
-  const a = hoActive(), hist = [...(HO.history || []), ...(HO.current && !a ? [HO.current] : [])].filter((h, i, l) => l.findIndex(x => x.id === h.id) === i);
+  const a = hoActive();
   let s = '';
   if (a) {
     const n = a.refactors.length, done = a.refactors.filter(id => rfOf(id)?.refactor?.state === 'done').length;
     s += `<div class="hobanner" id="hoBanner"><span class="dot live"></span><span>Sent to the agent ${hhmm(a.created)} · ${a.mode === 'all' ? 'all in one go' : 'split into batches'} · ${done} of ${n} done · ${HO_ST[a.status] || esc(a.status)}</span><span class="spacer"></span><button class="btn" data-act="ho.cancel">Cancel</button></div>`;
     if (a.status === 'proposed') s += proposalHTML(a);
   }
+  return s;
+}
+function hoHistHTML() {
+  const a = hoActive(), hist = [...(HO.history || []), ...(HO.current && !a ? [HO.current] : [])].filter((h, i, l) => l.findIndex(x => x.id === h.id) === i);
+  let s = '';
   if (hist.length) s += `<p class="mute hohist">Earlier handovers: ${hist.slice(-3).reverse().map(h => `${esc(new Date(h.created).toLocaleDateString())} ${hhmm(h.created)}, ${esc(h.status)}, ${plural(h.refactors.length, 'refactor')}`).join('; ')}.</p>`;
   return s;
 }
@@ -3498,7 +3520,7 @@ function findCard(f) {
     : `<span class="spacer"></span>${(ps => ps ? `<button class="pill add" data-act="ref.open" data-id="${esc(ps.id)}" title="${esc(ps.title || 'A pending refactor proposal')}">Proposed fix</button>` : '')(sugFor(f.id))}${f.thread ? `<button class="linkb" data-act="find.thread" data-id="${esc(f.thread)}">In discussion${th && th.status !== 'open' ? ` (${esc(th.status)})` : ''}</button>` : `<button class="btn" data-act="find.discuss" data-id="${esc(f.id)}">Discuss</button>`}<button class="btn ghost" data-act="find.dis" data-id="${esc(f.id)}">Dismiss…</button><button class="btn ghost" data-act="find.accept" data-id="${esc(f.id)}" title="Add it to the baseline: archplan check stops reporting it">Accept as is</button>`;
   return `<div class="find${findOn === f.id ? ' on' : ''}${base ? ' base' : ''}" id="fi-${esc(f.id)}" style="${fGroup(f) === 'profile' && !base ? 'border-color:var(--rem-line,#fecaca)' : ''}">
     <div data-act="find.focus" data-id="${esc(f.id)}" title="Show it in the diagram" style="cursor:pointer">
-      <div class="row" style="margin:0;gap:8px"><span class="fk" style="color:${c2}"><i style="background:${c1}"></i>${esc(kindLabel(f))}</span><span class="spacer"></span>${f.label ? `<span class="pill agent" title="Agent assessment, not a verdict">Agent: ${esc(f.label)}</span>` : ''}${f.strength || f.basis ? `<span class="mute fsm">${esc([f.strength, f.basis].filter(Boolean).join(' · '))}</span>` : ''}${fWeightHTML(f)}</div>
+      <div class="row" style="margin:0;gap:4px 8px;flex-wrap:wrap"><span class="fk" style="color:${c2}"><i style="background:${c1}"></i>${esc(kindLabel(f))}</span><span class="spacer"></span>${f.label ? `<span class="pill agent" title="Agent assessment, not a verdict">Agent: ${esc(f.label)}</span>` : ''}${f.strength || f.basis ? `<span class="mute fsm">${esc([f.strength, f.basis].filter(Boolean).join(' · '))}</span>` : ''}${fWeightHTML(f)}</div>
       <div class="ft">${esc(f.title || f.id)}</div>${ev ? '' : f.detail ? `<div class="fsm" style="color:var(--mute)">${esc(f.detail)}</div>` : ''}
       ${ev}</div>${(ts => ts.length > 1 ? `<div class="fshow">Show in: ${ts.map((t, i) => `<button class="linkb" data-act="find.focusAt" data-id="${esc(f.id)}" data-i="${i}">${esc(t.label)}</button>`).join(' · ')}</div>` : '')(findTargets(f))}
     <div class="row fsm" style="margin:6px 0 0;gap:6px">${acts}</div></div>`;
@@ -3525,9 +3547,8 @@ function findPage() {
     || (findSort === 'kind' ? gi(a) - gi(b) || String(a.kind).localeCompare(String(b.kind)) : 0) || (fWeight(b) ?? 0) - (fWeight(a) ?? 0));
   const nA = FIND.counts?.accepted ?? base.filter(f => f.state === 'accepted').length, nD = FIND.counts?.dismissed ?? base.filter(f => f.state === 'dismissed').length;
   const chip = (g, l) => `<button class="pill${findGroup === g ? ' acc' : ''}" data-act="find.group" data-g="${g}"${g !== 'all' && !cnt(g) ? ' style="opacity:.55"' : ''}>${l} ${cnt(g)}</button>`;
-  return `<div class="doc-title">Findings</div>
-    <p class="mute" style="margin:4px 0 10px">What the checks found in the code. Discuss one with your agent, dismiss it with a reason, or accept it as is. Accepted and dismissed findings form the baseline: <span class="mono">archplan check</span> reports only new ones.</p>
-    <div class="row" style="gap:5px;flex-wrap:wrap;margin-bottom:6px">${chip('all', 'All')}${FGROUPS.map(([g, l]) => chip(g, l)).join('')}</div>
+  return `<p class="mute fsm" style="margin:0 0 10px">What the checks found in the code. Discuss a finding with your agent, dismiss it, or accept it as is. <span class="mono">archplan check</span> reports only new ones.</p>
+    <div class="row" style="gap:5px;flex-wrap:wrap;margin-bottom:6px">${chip('all', 'All')}${FGROUPS.filter(([g]) => findGroup === g || cnt(g)).map(([g, l]) => chip(g, l)).join('')}</div>
     <div class="row fsm" style="margin:0 0 10px"><span class="mute">Baseline: ${nA} accepted · ${nD} dismissed</span>${nA + nD ? `<button class="linkb" data-act="find.base">${findBase ? 'Hide them' : 'Show them'}</button>` : ''}</div>
     ${ratchetHTML()}
     <div class="row fsm" style="margin:-4px 0 10px;gap:10px"><span class="mute">Sort by</span><button class="linkb"${findSort === 'weight' ? ' style="font-weight:600"' : ''} data-act="find.sort" data-s="weight" title="How much a finding matters: spread, repetition, where it occurs, fan-in and churn">weight</button><button class="linkb"${findSort === 'kind' ? ' style="font-weight:600"' : ''} data-act="find.sort" data-s="kind">kind</button><span class="spacer"></span>${nMinor ? `<label class="mute" title="Minor: weight below ${MINOR}"><input type="checkbox" data-act="find.minor"${findMinor ? ' checked' : ''}> Hide minor (${nMinor})</label>` : ''}</div>
@@ -3983,40 +4004,43 @@ function planDoc() {
   const sec = (id, title, body) => `<div class="dsec" id="sec-${id}"><h4>${title}</h4>${body}</div>`;
   const decT = loose.filter(t => needs(t) === 'decision'), qT = loose.filter(t => needs(t) !== 'decision'), done = threads.filter(t => t.status === 'resolved');
   const nPlan = todo().length, nOpen = openThreads().length;
-  const st = collab ? `<div class="collab"><b class="on">● shared</b> with your agent through <code>archplan mcp</code> in <code>${esc(collab.root)}</code></div>`
-    : `<div class="collab">● local only. Run <code>archplan up</code> in a repository to share threads with your agent.</div>`;
+  const st = collab ? '' : `<div class="collab">● Local only. Run <code>archplan up</code> in a repository to share threads with your agent.</div>`;
+  const pills = [nPlan || nOpen ? `<button class="pill acc" data-act="sec.go" data-sec="${nOpen || !nPlan ? 'open' : 'planned'}">${nPlan ? `${nPlan} planned` : ''}${nPlan && nOpen ? ' · ' : ''}${nOpen ? `${nOpen} open` : ''}</button>` : '',
+    viol.length ? `<button class="pill rem" data-act="sec.go" data-sec="rules">${plural(viol.length, 'rule')} violated</button>` : '',
+    P.tasks.length && anyChange ? `<button class="pill" data-act="sec.go" data-sec="tasks">${plural(P.tasks.length, 'task')}</button>` : '',
+    dec ? `<span class="pill warn">${plural(dec, 'decision')}</span>` : '', pending().length ? `<span class="pill add">${plural(pending().length, 'suggestion')}</span>` : ''].join('');
+  const hasRules = rules.length || pol.default === 'deny' || E, hasPlanned = planned().length, fresh = !hasRules && !nOpen && !hasPlanned && !anyChange && !R.length && !AUTO.d?.open_request;
   return `${hoBannerHTML()}${composeLoose ? `<div class="callout" id="composeBox"><b>New comment on ${esc(anchorLabel(composeKey))}</b> <button class="x" data-act="compose.close" title="Close">×</button>${threadsOn(composeKey).map(t => threadHTML(t)).join('')}${composer(composeKey)}</div>` : ''}
     <div class="dsec" id="sec-intent" style="margin-top:0"><div class="doc-title${title ? '' : ' empty'}" id="docTitle">${esc(title || 'What should this change achieve?')}</div>
     <textarea id="i-intent" rows="3" placeholder="Write the intent: what should this change achieve? Your agent reads this first.">${esc(intent)}</textarea>
-    <div class="pills"><button class="pill acc" data-act="sec.go" data-sec="${nOpen || !nPlan ? 'open' : 'planned'}">${nPlan} planned · ${nOpen} open</button>${viol.length ? `<span class="pill rem">${plural(viol.length, 'rule')} violated</span>` : `<span class="pill">no rule violated</span>`}<span class="pill">${plural(P.tasks.length, 'task')}</span>${dec ? `<span class="pill warn">${plural(dec, 'decision')}</span>` : ''}${pending().length ? `<span class="pill add">${plural(pending().length, 'suggestion')}</span>` : ''}</div>${st}</div>
+    ${pills ? `<div class="pills">${pills}</div>` : ''}${st}</div>
     ${loneSug.map(sugCard).join('')}
     ${P.warnings.map(w => `<div class="warnbox">⚠ ${esc(w)}</div>`).join('')}
-    ${sec('rules', 'Rules', `${rules.map(([r, i]) => { const v = vio(r); return `<div class="rule-row${v.length ? ' bad' : ''}"><span>${esc(ruleText(toBe, r))}</span><span class="n">${v.length ? `${plural(v.reduce((n, e) => n + (e.weight || e.via.length || 1), 0), 'site')}` : ''}</span>${mode === 'asis' ? '' : `<button class="x" data-act="rule.del" data-i="${i}" title="Drop this rule">×</button>`}</div>`; }).join('')
+    ${fresh ? `<div class="dsec start"><h4>Start</h4><ol>
+      <li>Click a box or a line in the diagram to open it here.</li>
+      <li>Change the to-be model on its page, or drag the blue dot between boxes. Each change becomes a task.</li>
+      <li>Comment on any item. Your agent answers in the same thread.</li></ol></div>` : ''}
+    ${!hasRules ? '' : sec('rules', 'Rules', `${rules.map(([r, i]) => { const v = vio(r); return `<div class="rule-row${v.length ? ' bad' : ''}"><span>${esc(ruleText(toBe, r))}</span><span class="n">${v.length ? `${plural(v.reduce((n, e) => n + (e.weight || e.via.length || 1), 0), 'site')}` : ''}</span>${mode === 'asis' ? '' : `<button class="x" data-act="rule.del" data-i="${i}" title="Drop this rule">×</button>`}</div>`; }).join('')
       || '<p class="mute" style="margin:0">No rules yet. Select a dependency line and forbid it.</p>'}
       <p class="mute" style="font-size:13px;margin:6px 0 0">Default <b>${pol.default}</b>${pol.default === 'deny' ? `: only the ${nAllow} allow rules permit a dependency` : ''}.${E ? ` Enforced by <code>${esc(E.tool)}</code> (${esc(E.config)}).` : ''}</p>`)}
     ${R.length || AUTO.d?.open_request ? sec('suggestions', `Suggestions${R.length ? ` (${R.length})` : ''}`, `${AUTO.d?.open_request ? `<div class="sgx-busy"><span class="dot live"></span>The agent is drafting proposals… <button class="linkb" data-act="find.thread" data-id="${esc(AUTO.d.open_request)}">Open the thread</button></div>` : ''}${R.map(refCard).join('')}`) : ''}
-    ${sec('open', `Open discussions${nOpen ? ` (${nOpen})` : ''}`, [...decT, ...qT].map(t => threadHTML(t, true)).join('')
+    ${!nOpen ? '' : sec('open', `Open discussions (${nOpen})`, [...decT, ...qT].map(t => threadHTML(t, true)).join('')
       + (loose.length < nOpen ? `<p class="mute" style="font-size:13px;margin:6px 0 0">${plural(nOpen - loose.length, 'more discussion')} sit${nOpen - loose.length === 1 ? 's' : ''} under the changes below.</p>` : '')
       || '<p class="mute" style="margin:0">No open discussions. Comment on an item from its page.</p>')}
-    ${sec('planned', `Planned refactors${nPlan ? ` (${nPlan})` : ''}`, plannedHTML())}
-    ${sec('tasks', 'Changes to the model', anyChange ? P.tasks.map(t => taskCard(t, P, per[t.key] || [])).join('') : `<p class="mute" style="margin:0">No changes yet, so no tasks. Edit the diagram${BASE === SAMPLE ? ', or choose <b>Apply demo edits</b> in the ⋯ menu' : ''}.</p>`)}
-    ${fold('done', `Done (${done.length})`, done.map(t => threadHTML(t, true)).join('') || '<p class="mute">No resolved threads.</p>')}
-    ${fold('changes', `All differences (${D.items.length})`, changesHTML())}
-    ${fold('check', 'Check against the code', verifyHTML())}
-    ${fold('text', 'Plan as text', planText(P))}
-    <div class="dsec" id="sec-edit"><h4>Edit the model</h4><ul class="plain"><li><button class="linkb" data-act="page.model">Types, packages, policy and the model as text</button></li>${Object.keys(toBe.sequences).length ? '<li><button class="linkb" data-act="page.seq">Sequences: add calls and participants</button></li>' : ''}<li><button class="linkb" data-act="page.glossary">Glossary: concepts and terms</button></li></ul></div>`;
-}
-let planFmtRaw = 'md';
-function planText(P) {
-  const f = v => `<button class="${planFmtRaw === v ? 'on' : ''}" data-act="plan.raw" data-v="${v}">${{md: 'Markdown', json: 'JSON'}[v]}</button>`;
-  return `<div class="row"><div class="seg">${f('md')}${f('json')}</div><div class="spacer"></div><button class="btn" data-act="plan.copy">Copy</button><button class="btn" data-act="plan.download">Download</button></div>
-    ${openSecs.has('text') ? `<pre class="raw mono">${esc(planFmtRaw === 'json' ? planJSON(P) : planMD(P))}</pre>` : ''}`;
+    ${!hasPlanned ? '' : sec('planned', `Planned refactors${nPlan ? ` (${nPlan})` : ''}`, plannedHTML())}
+    ${!anyChange ? '' : sec('tasks', `Changes to the model (${P.tasks.length})`, P.tasks.map(t => taskCard(t, P, per[t.key] || [])).join(''))}
+    <div class="folds">
+    ${done.length || hoHistHTML() ? fold('done', `Done (${done.length})`, hoHistHTML() + done.map(t => threadHTML(t, true)).join('')) : ''}
+    ${D.items.length ? fold('changes', `All differences (${D.items.length})`, changesHTML()) : ''}
+    ${anyChange ? fold('check', 'Check against the code', verifyHTML()) : ''}
+    </div>
+    <div class="dsec editm" id="sec-edit"><span class="mute">Edit the model:</span> <button class="linkb" data-act="page.model">types and policy</button>${Object.keys(toBe.sequences).length ? ' · <button class="linkb" data-act="page.seq">sequences</button>' : ''} · <button class="linkb" data-act="page.glossary">glossary</button></div>`;
 }
 function toPlan() { if (sel || multi.length || page !== homePage()) { sel = null; multi = []; page = homePage(); if (view === 'seq') renderSeq(); else applySel(); renderSide(); } }
 function gotoSec(id) {
   if (leftMode !== 'plan') { leftMode = 'plan'; localStorage.setItem('archplan.left', 'plan'); }
   toPlan();
-  const el = $('sec-' + id); if (!el) return;
+  const el = $('sec-' + id); if (!el) return toast('Nothing there yet.');
   const d = el.querySelector('details'); if (d && !d.open) d.open = true;
   el.scrollIntoView({block: 'start', behavior: 'smooth'});
 }
@@ -4033,14 +4057,16 @@ function showTask(key, compose) {
 }
 function renderSide() {
   if (!D) return;
-  // keep what the user is typing across live updates
-  const keep = [...$('panel').querySelectorAll('textarea[id], input[id]')].map(x => [x.id, x.value, x === document.activeElement, x.selectionStart]);
+  // Keep what the user is typing across live updates: the value only when the
+  // user changed it, so a rendered value (the sample intent before the project
+  // loads) does not outlive new data; the focus and caret always.
+  const keep = [...$('panel').querySelectorAll('textarea[id], input[id]')].map(x => [x.id, x.value !== x.defaultValue && x.value, x === document.activeElement, x.selectionStart]);
   const top = $('panel').scrollTop, was = $('panel').dataset.page;
   const cur = multi.length || sel ? 'item:' + (multi.join('|') || anchorOf(sel)) : page;
   $('panel').innerHTML = multi.length || sel ? itemPage() : page === 'arch' && ARCH ? archPage() : page === 'find' && FIND ? findPage() : page === 'model' ? modelPage() : page === 'seq' ? seqPage() : page === 'glossary' ? glossPage() : planDoc();
   $('panel').dataset.page = cur;
   if (cur === was) $('panel').scrollTop = top; else $('panel').scrollTop = 0;
-  for (const [id, v, foc, pos] of keep) { const x = $(id); if (!x || (x.value && x.value !== v)) continue; x.value = v; if (foc) { x.focus(); try { x.setSelectionRange(pos, pos); } catch {} } }
+  for (const [id, v, foc, pos] of keep) { const x = $(id); if (!x || (v === false ? !foc : x.value && x.value !== v)) continue; if (v !== false) x.value = v; if (foc) { x.focus(); try { x.setSelectionRange(pos, pos); } catch {} } }
   renderHeader();
 }
 
@@ -4610,8 +4636,6 @@ function renderOverlayUI() {
   const why = o => o === 'conformance' ? (archUnits().length ? '' : 'Needs an architecture profile.') : !ovNeedsGit(o) || HOT.state === 'ok' ? '' : HOT.state === 'err' ? HOT.why : 'Reading the git history…';
   $('ovMenu').innerHTML = OVERLAYS.map(([k, l]) => { const w = why(k); return `<button class="mi ${overlay === k ? 'on' : 'off'}" data-ov="${k}"${w ? ' disabled' : ''}><span>${l}${w ? `<span class="why">${esc(w)}</span>` : ''}</span></button>`; }).join('')
     + (view !== 'components' ? '<div class="sep"></div><div class="mute" style="padding:4px 9px;font-size:13px">Overlays show in the Components view.</div>' : '');
-  $('ovBtn').textContent = overlay === 'none' ? 'Overlay ▾' : `Overlay: ${OVERLAYS.find(o => o[0] === overlay)?.[1].toLowerCase()} ▾`;
-  $('ovBtn').classList.toggle('on', overlay !== 'none');
   const el = $('ovLegend');
   el.hidden = !ovOn() || $('cy').style.visibility === 'hidden';
   if (el.hidden) return;
@@ -4669,12 +4693,11 @@ const shareItems = () => {
     {label: 'Download the target model', run: saveTarget}];
 };
 const curTheme = () => localStorage.getItem('archplan.theme') || 'auto';
-const moreItems = () => [
+const moreItems = () => [{head: 'Project'},
   {label: 'Open model file…', run: () => { openAs = 'base'; $('fileIn').click(); }},
   {label: 'Open target file…', run: () => { openAs = 'target'; $('fileIn').click(); }},
   {label: 'Export from code', run: exportFromCode, off: !collab ? 'Needs a project opened with archplan up.' : !collab.can_export && 'Set "export" in .archplan/config.json first.'},
   {label: 'Reset target', run: resetTarget},
-  {label: 'Edit the model', run: () => actions['page.model']()},
   ...(BASE === SAMPLE ? [{label: 'Apply demo edits', run: applyDemo}] : []),
   '-', {head: 'Theme'},
   ...[['auto', 'Follow the system'], ['dark', 'Dark'], ['light', 'Light']].map(([k, l]) => ({label: l, on: curTheme() === k, run: () => { localStorage.setItem('archplan.theme', k); applyTheme(); }})),
@@ -4696,13 +4719,11 @@ function fitMenu(m) {
   if (r.right > innerWidth - 8) { m.style.left = 'auto'; m.style.right = '0'; }
   if (m.getBoundingClientRect().left < 8) { m.style.right = 'auto'; m.style.left = (8 - m.parentNode.getBoundingClientRect().left) + 'px'; }
 }
-function closeMenus() { ['shareMenu', 'moreMenu', 'viewMenu', 'ovMenu', 'suggestMenu'].forEach(m => $(m).hidden = true); }
+function closeMenus() { ['moreMenu', 'viewMenu', 'suggestMenu'].forEach(m => $(m).hidden = true); }
 document.addEventListener('click', e => { if (!e.target.closest('.menu-wrap')) closeMenus(); });
-for (const m of ['shareMenu', 'moreMenu']) $(m).addEventListener('click', e => { const b = e.target.closest('[data-mi]'); if (!b || b.disabled) return; closeMenus(); menuItems[m][+b.dataset.mi].run(); });
-$('shareBtn').addEventListener('click', () => openMenu('shareMenu', shareItems()));
-$('moreBtn').addEventListener('click', () => openMenu('moreMenu', moreItems()));
+for (const m of ['moreMenu']) $(m).addEventListener('click', e => { const b = e.target.closest('[data-mi]'); if (!b || b.disabled) return; closeMenus(); menuItems[m][+b.dataset.mi].run(); });
+$('moreBtn').addEventListener('click', () => openMenu('moreMenu', [...shareItems(), '-', ...moreItems()]));
 $('viewBtn').addEventListener('click', () => { const was = !$('viewMenu').hidden; closeMenus(); $('viewMenu').hidden = was; if (!was) fitMenu($('viewMenu')); });
-$('ovBtn').addEventListener('click', () => { const was = !$('ovMenu').hidden; closeMenus(); renderOverlayUI(); $('ovMenu').hidden = was; if (!was) fitMenu($('ovMenu')); });
 $('sugPill').addEventListener('click', () => { const s = pending()[0]; if (s) gotoSug(s.id); });
 $('searchBtn').addEventListener('click', () => palOpen());
 $('seqInfo').addEventListener('click', () => actions['page.seq']());
@@ -4754,12 +4775,11 @@ $('palette').addEventListener('click', e => { if (e.target.id === 'palette') pal
 // ---------- header, toolbar and canvas bar ----------
 function renderHeader() {
   const g = collab?.git;
-  $('repo').textContent = g?.head ? `${g.branch || 'detached'} · ${g.head.slice(0, 7)}` : `${META.repo}@${META.commit}`;
-  $('repo').title = `The as-is model was exported at ${META.repo}@${META.commit}.`;
+  $('proj').title = `${g?.head ? `On ${g.branch || 'a detached HEAD'} at ${g.head.slice(0, 7)}. ` : ''}The as-is model was exported at ${META.repo}@${META.commit}.`;
   const n = pending().length;
   $('sugPill').hidden = !n;
   $('suggestWrap').hidden = !AUTO.ok;
-  $('suggestBtn').innerHTML = AUTO.d?.open_request ? '<span class="dot live"></span> The agent is drafting proposals…' : `✦ Suggest refactors${AUTO.d?.auto ? ' · auto' : ''} ▾`;
+  $('suggestBtn').innerHTML = AUTO.d?.open_request ? '<span class="dot live"></span><span class="wide"> The agent is drafting proposals…</span>' : `✦<span class="wide"> Suggest refactors${AUTO.d?.auto ? ' · auto' : ''}</span> ▾`;
   $('sendBtn').hidden = !todo().length || !!hoActive();
   $('rolesBtn').hidden = !ARCH; $('leftModes').hidden = !ARCH && !FIND;
   const lm = leftMode === 'arch' && ARCH || leftMode === 'find' && FIND ? leftMode : 'plan', nN = FIND ? findNew() : 0;
@@ -4770,7 +4790,7 @@ function renderHeader() {
   if (mode === 'sugg' && !n) mode = 'diff';
   document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
 }
-let showLegend = localStorage.getItem('archplan.legend') !== '0';
+let showLegend = (localStorage.getItem('archplan.legend') ?? (innerWidth >= 1200 ? '1' : '0')) !== '0';
 function renderCanvasBar() {
   const graph = $('cy').style.visibility !== 'hidden', nav = !!navTarget();
   ['layoutBtn', 'connectBtn'].forEach(id => $(id).disabled = !graph);
@@ -4780,8 +4800,8 @@ function renderCanvasBar() {
   $('legend').style.display = showLegend && $('gloss').style.display !== 'block' ? '' : 'none';
 }
 function renderViewBtn() {
-  const n = [hideLeaves, showExternal, !!seqFilter, glossMode !== 'map'].filter(Boolean).length;
-  $('viewBtn').textContent = n ? `View · ${n} ▾` : 'View ▾';
+  const n = [hideLeaves, showExternal, !!seqFilter, glossMode !== 'map', overlay !== 'none' && view === 'components'].filter(Boolean).length;
+  $('viewBtn').textContent = n ? `Display · ${n} ▾` : 'Display ▾';
   $('viewBtn').classList.toggle('on', !!n);
 }
 $('fitBtn').addEventListener('click', navFit);
@@ -4806,7 +4826,8 @@ function render(forceLayout) {
   $('modes').style.display = view === 'roles' ? 'none' : '';
   $('unitSel').style.display = $('cmpSel').style.display = view === 'roles' ? '' : 'none';
   $('draftBtn').style.display = view === 'glossary' && VOC.ok && (hasVocab(asIs) || hasVocab(toBe)) ? '' : 'none';
-  $('ovBtn').parentNode.style.display = view === 'roles' ? 'none' : '';
+  $('ovBox').style.display = view === 'components' ? '' : 'none';
+  $('viewSel').value = view; $('viewSel').querySelector('[value=roles]').hidden = !ARCH;
   $('leafOpt').style.display = view === 'glossary' || view === 'seq' ? 'none' : '';
   $('extOpt').style.display = view === 'components' ? '' : 'none';
   $('glossBox').style.display = view === 'glossary' ? '' : 'none';
@@ -4830,6 +4851,7 @@ function render(forceLayout) {
 }
 
 $('views').addEventListener('click', e => { const b = e.target.closest('[data-view]'); if (b) { view = b.dataset.view; sel = null; render(); } });
+$('viewSel').addEventListener('change', e => { view = e.target.value; sel = null; render(); });
 $('modes').addEventListener('click', e => { const b = e.target.closest('[data-mode]'); if (b) { mode = b.dataset.mode; if (mode === 'sugg') SUG.active ||= pending()[0]?.id; render(); } });
 $('seqSel').addEventListener('change', e => { curSeq = e.target.value; sel = null; render(); });
 $('undoBtn').addEventListener('click', () => { if (undoStack.length) { toBe = undoStack.pop(); verifyStage = 0; render(); } });
