@@ -4057,14 +4057,16 @@ function showTask(key, compose) {
 }
 function renderSide() {
   if (!D) return;
-  // keep what the user is typing across live updates
-  const keep = [...$('panel').querySelectorAll('textarea[id], input[id]')].map(x => [x.id, x.value, x === document.activeElement, x.selectionStart]);
+  // Keep what the user is typing across live updates: the value only when the
+  // user changed it, so a rendered value (the sample intent before the project
+  // loads) does not outlive new data; the focus and caret always.
+  const keep = [...$('panel').querySelectorAll('textarea[id], input[id]')].map(x => [x.id, x.value !== x.defaultValue && x.value, x === document.activeElement, x.selectionStart]);
   const top = $('panel').scrollTop, was = $('panel').dataset.page;
   const cur = multi.length || sel ? 'item:' + (multi.join('|') || anchorOf(sel)) : page;
   $('panel').innerHTML = multi.length || sel ? itemPage() : page === 'arch' && ARCH ? archPage() : page === 'find' && FIND ? findPage() : page === 'model' ? modelPage() : page === 'seq' ? seqPage() : page === 'glossary' ? glossPage() : planDoc();
   $('panel').dataset.page = cur;
   if (cur === was) $('panel').scrollTop = top; else $('panel').scrollTop = 0;
-  for (const [id, v, foc, pos] of keep) { const x = $(id); if (!x || (x.value && x.value !== v)) continue; x.value = v; if (foc) { x.focus(); try { x.setSelectionRange(pos, pos); } catch {} } }
+  for (const [id, v, foc, pos] of keep) { const x = $(id); if (!x || (v === false ? !foc : x.value && x.value !== v)) continue; if (v !== false) x.value = v; if (foc) { x.focus(); try { x.setSelectionRange(pos, pos); } catch {} } }
   renderHeader();
 }
 
