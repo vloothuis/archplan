@@ -133,7 +133,8 @@ pre.raw{white-space:pre-wrap;background:var(--bg);border:1px solid var(--line);b
 .msg .mk{font-size:11px;padding:0 5px;border-radius:8px;background:var(--soft);color:var(--mute);margin-right:6px}.msg .mk.decision{background:var(--warn-line);color:var(--warn-ink);font-weight:600}
 .msg.decision{border-left:3px solid #f59e0b;padding-left:7px}.choices{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
 .thread.needs-decision{border-color:#f59e0b;box-shadow:0 0 0 1px var(--warn-line)}.wait.fb{background:var(--chip);color:var(--chip-ink)}.msg .body p{margin:2px 0}
-.wait{font-size:12px;border-radius:4px;padding:0 5px}.wait.human{background:var(--warn);color:var(--warn-ink)}.wait.agent{background:var(--agent-bg);color:var(--agent-ink)}
+.wait{font-size:12px;border-radius:4px;padding:0 5px}.wait.human{background:var(--warn);color:var(--warn-ink)}.wait.agent{background:var(--agent-bg);color:var(--agent-ink)}.wait.off{background:var(--warn);color:var(--warn-ink)}
+.aghint{font-size:12.5px;color:var(--warn-ink);background:var(--warn);border-radius:6px;padding:4px 8px;margin:4px 0}.sgx-busy.off{color:var(--warn-ink);background:var(--warn)}
 .cbtn{border:0;background:none;cursor:pointer;font-size:13px;opacity:.35;padding:0 4px}.cbtn:hover,.cbtn.has{opacity:1}
 .collab{font-size:13px;color:var(--mute);margin-top:4px}.collab b.on{color:var(--add)}
 .callout{background:var(--sel);border:1px solid var(--sel-line);border-radius:8px;padding:10px;margin-bottom:12px;color:var(--sel-ink)}
@@ -576,6 +577,27 @@ const groupMembers = key => key.startsWith('group:') ? key.slice(6).split('|') :
 const groupsWith = key => threads.filter(t => groupMembers(t.anchor).includes(key));
 const openOn = key => threads.some(t => (t.anchor === key || groupMembers(t.anchor).includes(key)) && t.status === 'open');
 const whoNext = t => t.status !== 'open' ? 'nobody' : t.messages[t.messages.length - 1].author === 'agent' ? 'human' : 'agent';
+// What happens to a message that waits on the agent, from the agents the
+// server sees: none connected, connected but not read, read, working. null
+// when the server does not report agents.
+let AG = null;
+function agentState(t) {
+  const a = AG; if (!a || !t) return null;
+  if (!a.connected) return {off: true, label: 'no agent connected', line: 'No agent is connected.',
+    hint: 'No agent is connected to this project. Start Claude Code in this repository and ask it to answer the archplan threads (or type /archplan).'};
+  const seen = a.seen && Object.hasOwn(a.seen, t.id) ? a.seen[t.id] : 0, read = seen >= t.messages.length;
+  const busy = a.busy || (ACT.d?.at && Date.now() - Date.parse(ACT.d.at) < 120000 && ACT.d.tool !== 'wait_for_comments');
+  if (read) return busy ? {label: 'agent working', line: 'The agent is working on it…'}
+    : {label: 'agent received it', line: 'The agent received it but is idle.', hint: 'The agent received your message but has not answered. If this stays, ask it in Claude Code to continue.'};
+  if (a.listening) return {label: 'agent listening', line: 'The agent is picking it up…'};
+  return busy ? {label: 'agent busy', line: 'The agent is busy with other work.', hint: 'The agent is busy with other work. It sees this message at its next archplan call.'}
+    : {off: true, label: 'agent has not seen it', line: 'The agent is idle and has not seen it.', hint: 'An agent is connected but idle. Send it a message in Claude Code, for example "answer the archplan threads".'};
+}
+// The busy line for a request thread (refactor proposals): state and a link.
+function agentLine(tid, act) {
+  const st = agentState(threads.find(x => x.id === tid)) || {line: 'The agent is drafting proposals…'};
+  return `<div class="sgx-busy${st.off ? ' off' : ''}"${st.hint ? ` title="${esc(st.hint)}"` : ''}><span class="dot ${st.off ? 'warn' : 'live'}"></span>${esc(st.line === 'The agent is working on it…' ? 'The agent is drafting proposals…' : st.line)} <button class="linkb" ${act} data-v="${esc(tid)}" data-id="${esc(tid)}">Open the thread</button></div>`;
+}
 // What the human owes an open thread whose last word is the agent's: a decision
 // (the agent is blocked on a choice) or only a read (feedback, a report).
 const needs = t => whoNext(t) !== 'human' ? '' : t.messages[t.messages.length - 1].kind === 'decision' ? 'decision' : 'feedback';
@@ -662,6 +684,7 @@ async function pollThreads() {
       if (d.suggestions_version !== known.sugVer) { known.sugVer = d.suggestions_version; loadSuggestions(); if (AUTO.ok) loadAuto(); }
       if ((d.suggest_version ?? d.suggest_etag) !== known.autoVer) { known.autoVer = d.suggest_version ?? d.suggest_etag; if (AUTO.ok !== false) loadAuto(); }
       if (d.activity_etag !== known.actEtag) { known.actEtag = d.activity_etag; loadActivity(); }
+      if (d.agents && d.agents.key !== AG?.key) { AG = d.agents; renderAgent(); if (D) { renderSide(); renderHeader(); if (!$('suggestMenu').hidden) drawSuggestMenu(); } }
       if (d.handover_version !== known.hoVer) { known.hoVer = d.handover_version; loadHandover(); }
       if ((d.architecture_version ?? d.architecture_etag) !== known.archVer) { known.archVer = d.architecture_version ?? d.architecture_etag; loadArch(); }
       if ((d.vocabulary_version ?? d.vocabulary_etag) !== known.vocVer) { known.vocVer = d.vocabulary_version ?? d.vocabulary_etag; VOC.cand = {}; if (VOC.ok) renderSide(); else probeVocab(); }
@@ -2538,9 +2561,10 @@ function threadHTML(t, withLink, inCard) {
     ? `<div class="choices">${m.options.map(o => `<button class="btn" data-act="thread.choose" data-id="${t.id}" data-opt="${esc(o)}">${esc(o)}</button>`).join('')}</div>` : '';
   const msgs = t.messages.map((m, i) => `<div class="msg${m.kind === 'decision' ? ' decision' : ''}"><span class="who ${m.author === 'agent' ? 'agent' : 'human'}">${m.author === 'agent' ? 'agent' : 'you'}</span>${tag(m)}<span class="when">${esc((m.at || '').replace('T', ' ').slice(0, 16))}</span><div class="body">${md(m.text)}</div>${choices(m, i)}</div>`).join('');
   return `<div class="thread ${t.status}${nd ? ' needs-' + nd : ''}" id="th-${esc(t.id)}"><div class="th-h">${withLink ? `<a data-act="thread.goto" data-key="${esc(t.anchor)}">${esc(t.label || t.anchor)}</a>` : ''}<div class="spacer"></div>
-      ${t.status === 'planned' ? `<span class="wait plan">${stack().includes(t) ? `planned refactor ${stack().indexOf(t) + 1}` : 'refactor done'}</span>` : nd === 'decision' ? '<span class="wait human">decide</span>' : nd === 'feedback' ? '<span class="wait fb">read</span>' : w === 'agent' ? '<span class="wait agent">waiting on agent</span>' : '<span class="wait">resolved</span>'}</div>
+      ${t.status === 'planned' ? `<span class="wait plan">${stack().includes(t) ? `planned refactor ${stack().indexOf(t) + 1}` : 'refactor done'}</span>` : nd === 'decision' ? '<span class="wait human">decide</span>' : nd === 'feedback' ? '<span class="wait fb">read</span>' : w === 'agent' ? `<span class="wait ${agentState(t)?.off ? 'off' : 'agent'}">${esc(agentState(t)?.label || 'waiting on agent')}</span>` : '<span class="wait">resolved</span>'}</div>
     ${t.anchor?.startsWith('finding:') ? findBox(t) : ''}${t.snapshot ? snapHTML(t) : ''}
     ${msgs}
+    ${w === 'agent' && agentState(t)?.hint ? `<div class="aghint">${esc(agentState(t).hint)}</div>` : ''}
     ${t.status === 'open' ? pending().filter(s => s.thread === t.id).map(s => isRef(s) ? `<div class="row fsm"><span class="pill add">proposed refactor</span><button class="linkb" data-act="ref.open" data-id="${esc(s.id)}">${esc(s.title || 'Open the proposal')}</button></div>` : sugCard(s)).join('') : ''}
     ${t.status === 'resolved' ? `<div class="row"><button class="btn" data-act="thread.reopen" data-id="${t.id}">Reopen</button></div>`
     : `<textarea id="r-${t.id}" rows="1" placeholder="Reply, or type @ to link a component, type or task"></textarea>
@@ -3769,7 +3793,7 @@ function drawSuggestMenu() {
   if (AUTO.scope !== 'all' && !scopeComps(AUTO.scope).length) AUTO.scope = 'all';
   const seg = (k, v, l, off) => `<button class="${(k === 'count' ? AUTO.count : AUTO.scope) === v ? 'on' : ''}" data-sa="${k}" data-v="${esc(String(v))}"${off ? ' disabled' : ''}>${esc(l)}</button>`;
   $('suggestMenu').innerHTML = `<div class="mh">Suggest refactors</div>
-    ${d.open_request ? `<div class="sgx-busy"><span class="dot live"></span>The agent is drafting proposals… <button class="linkb" data-sa="thread" data-v="${esc(d.open_request)}">Open the thread</button></div>` : ''}
+    ${d.open_request ? agentLine(d.open_request, 'data-sa="thread"') : ''}
     <div class="sgx-row"><span class="mute">How many</span><div class="seg">${[3, 5, 10].map(n => seg('count', n, String(n))).join('')}</div></div>
     <div class="sgx-row"><span class="mute">Where</span><div class="seg">${seg('scope', 'all', 'Whole model')}${seg('scope', 'focus', `Focused${nF ? ' (' + nF + ')' : ''}`, !nF)}${seg('scope', 'sel', `Selected${nS ? ' (' + nS + ')' : ''}`, !nS)}</div></div>
     <div class="sgx-row" style="align-items:flex-start"><span class="mute">About</span><div class="chips" style="margin:0">${SKINDS.map(([k, l]) => `<button class="pill${AUTO.kinds.has(k) ? ' acc' : ''}" data-sa="kind" data-v="${k}">${l}</button>`).join('')}</div></div>
@@ -4023,7 +4047,7 @@ function planDoc() {
     ${!hasRules ? '' : sec('rules', 'Rules', `${rules.map(([r, i]) => { const v = vio(r); return `<div class="rule-row${v.length ? ' bad' : ''}"><span>${esc(ruleText(toBe, r))}</span><span class="n">${v.length ? `${plural(v.reduce((n, e) => n + (e.weight || e.via.length || 1), 0), 'site')}` : ''}</span>${mode === 'asis' ? '' : `<button class="x" data-act="rule.del" data-i="${i}" title="Drop this rule">×</button>`}</div>`; }).join('')
       || '<p class="mute" style="margin:0">No rules yet. Select a dependency line and forbid it.</p>'}
       <p class="mute" style="font-size:13px;margin:6px 0 0">Default <b>${pol.default}</b>${pol.default === 'deny' ? `: only the ${nAllow} allow rules permit a dependency` : ''}.${E ? ` Enforced by <code>${esc(E.tool)}</code> (${esc(E.config)}).` : ''}</p>`)}
-    ${R.length || AUTO.d?.open_request ? sec('suggestions', `Suggestions${R.length ? ` (${R.length})` : ''}`, `${AUTO.d?.open_request ? `<div class="sgx-busy"><span class="dot live"></span>The agent is drafting proposals… <button class="linkb" data-act="find.thread" data-id="${esc(AUTO.d.open_request)}">Open the thread</button></div>` : ''}${R.map(refCard).join('')}`) : ''}
+    ${R.length || AUTO.d?.open_request ? sec('suggestions', `Suggestions${R.length ? ` (${R.length})` : ''}`, `${AUTO.d?.open_request ? agentLine(AUTO.d.open_request, 'data-act="find.thread"') : ''}${R.map(refCard).join('')}`) : ''}
     ${!nOpen ? '' : sec('open', `Open discussions (${nOpen})`, [...decT, ...qT].map(t => threadHTML(t, true)).join('')
       + (loose.length < nOpen ? `<p class="mute" style="font-size:13px;margin:6px 0 0">${plural(nOpen - loose.length, 'more discussion')} sit${nOpen - loose.length === 1 ? 's' : ''} under the changes below.</p>` : '')
       || '<p class="mute" style="margin:0">No open discussions. Comment on an item from its page.</p>')}
@@ -4568,6 +4592,11 @@ function relTime(at) {
 }
 function renderAgent() {
   const p = $('agentPill'), d = ACT.d;
+  if (AG && !AG.connected && threads.some(t => whoNext(t) === 'agent')) {
+    p.hidden = false; p.innerHTML = '<span class="dot warn"></span>No agent connected';
+    p.title = 'Messages wait on the agent, but none is connected. Start Claude Code in this repository and type /archplan.';
+    return;
+  }
   if (!d?.at) { p.hidden = true; return; }
   const live = Date.now() - Date.parse(d.at) < 120000;
   p.hidden = false;
@@ -4779,7 +4808,9 @@ function renderHeader() {
   const n = pending().length;
   $('sugPill').hidden = !n;
   $('suggestWrap').hidden = !AUTO.ok;
-  $('suggestBtn').innerHTML = AUTO.d?.open_request ? '<span class="dot live"></span><span class="wide"> The agent is drafting proposals…</span>' : `✦<span class="wide"> Suggest refactors${AUTO.d?.auto ? ' · auto' : ''}</span> ▾`;
+  const rq = AUTO.d?.open_request && agentState(threads.find(x => x.id === AUTO.d.open_request));
+  $('suggestBtn').innerHTML = rq?.off ? `<span class="dot warn"></span><span class="wide"> ${esc(rq.label[0].toUpperCase() + rq.label.slice(1))}</span>`
+    : AUTO.d?.open_request ? '<span class="dot live"></span><span class="wide"> The agent is drafting proposals…</span>' : `✦<span class="wide"> Suggest refactors${AUTO.d?.auto ? ' · auto' : ''}</span> ▾`;
   $('sendBtn').hidden = !todo().length || !!hoActive();
   $('rolesBtn').hidden = !ARCH; $('leftModes').hidden = !ARCH && !FIND;
   const lm = leftMode === 'arch' && ARCH || leftMode === 'find' && FIND ? leftMode : 'plan', nN = FIND ? findNew() : 0;
