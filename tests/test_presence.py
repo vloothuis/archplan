@@ -154,6 +154,30 @@ class HookPresenceTest(unittest.TestCase):
         a.close()
 
 
+class WatchTest(unittest.TestCase):
+    def test_monitor_reports_what_it_sent(self):
+        import threading
+        from archplan.watch import watch
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        p = project.init(Path(tmp.name))
+        s = Store(p.dir)
+        th = s.create("comp:x", "x", "first", "human")
+        got, lines = {}, []
+
+        class Done(Exception):
+            pass
+
+        def saw(d):
+            got.update(d)
+            raise Done
+        threading.Timer(0.1, lambda: s.reply(th["id"], "second", "human")).start()
+        with self.assertRaises(Done):
+            watch(p, 0.02, emit=lines.append, saw=saw)
+        self.assertEqual(got, {th["id"]: 2})
+        self.assertIn("second", lines[0])
+
+
 class ServeTest(unittest.TestCase):
     def test_mcp_loop_records_what_it_showed(self):
         from archplan import mcp

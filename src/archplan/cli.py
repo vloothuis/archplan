@@ -307,7 +307,12 @@ def cmd_watch(a):
                 if a.dir:
                     raise
                 time.sleep(5)  # wait quietly until `archplan init` runs here
-        watch(p, a.interval)
+        from .presence import Presence
+        here = Presence(p)  # the monitor runs while the session does: an agent is connected
+        try:
+            watch(p, a.interval, saw=here.saw)
+        finally:
+            here.close()
     except KeyboardInterrupt:
         pass
 

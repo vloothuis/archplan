@@ -81,7 +81,8 @@ calling `wait_for_comments`.
    {
      "hooks": {
        "SessionStart": [{"hooks": [{"type": "command", "command": "$HOME/.local/share/archplan/bin/archplan hook", "timeout": 10}]}],
-       "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "$HOME/.local/share/archplan/bin/archplan hook", "timeout": 10}]}]
+       "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "$HOME/.local/share/archplan/bin/archplan hook", "timeout": 10}]}],
+       "Stop": [{"hooks": [{"type": "command", "command": "$HOME/.local/share/archplan/bin/archplan hook", "timeout": 10}]}]
      }
    }
    ```
@@ -131,6 +132,7 @@ archplan up        # starts the editor in the background and prints its URL
 |---|---|
 | Edit the target: move types, add components, forbid dependencies, rename terms | Sees the plan with `get_plan`, and each item with `get_item` |
 | Comment on an item, or shift-click several items and comment on the group | Is told at once: the plugin's monitor sends each comment, and a hook lists waiting threads at every prompt |
+| See what happens to your message: no agent connected, not seen yet, received, or working | Reports this without extra work: its MCP server and monitor mark the session as connected and record which messages they passed on; hooks mark when a turn starts and stops |
 | Read replies: orange **decision** threads need your choice (click an option); **feedback** threads only need reading | Replies with `reply`, marks a reply as a decision only when it is blocked on you |
 | Preview a suggestion and accept all, some or none of its changes | Proposes a refactor of the target with `edit_target`; learns the outcome from the monitor |
 | Review the architecture profile: units, file roles and the rules between them | Proposes a profile with `update_profile`; checks code against it with `get_architecture` |
@@ -161,11 +163,12 @@ Everything is stored in `.archplan/` in the repository:
 | `vocabulary.json` | terms you told archplan to ignore as glossary candidates |
 | `vocab-cache.json` | the cached word counts per file |
 | `activity.json` | what the agent did last, shown in the editor |
+| `agents/` | which agent sessions are connected, which messages they received, and whether they are working |
 | `hotspots.json` | the cached git history analysis |
 | `suggest-state.json` | when archplan last asked Claude for refactor proposals |
 
 Commit `.archplan/` to share the target, plan and threads with your team.
-`server.json`, `activity.json`, `hotspots.json`, `vocab-cache.json`,
+`server.json`, `activity.json`, `agents/`, `hotspots.json`, `vocab-cache.json`,
 `suggest-state.json` and the logs are ignored.
 
 In a message, `@[Label](anchor)` mentions a model item, for example

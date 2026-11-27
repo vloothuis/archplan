@@ -588,10 +588,10 @@ function agentState(t) {
   const seen = a.seen && Object.hasOwn(a.seen, t.id) ? a.seen[t.id] : 0, read = seen >= t.messages.length;
   const busy = a.busy || (ACT.d?.at && Date.now() - Date.parse(ACT.d.at) < 120000 && ACT.d.tool !== 'wait_for_comments');
   if (read) return busy ? {label: 'agent working', line: 'The agent is working on it…'}
-    : {label: 'agent read it', line: 'The agent read it but stopped.', hint: 'The agent read your message, but its turn ended without an answer. Ask it in Claude Code to continue.'};
+    : {label: 'agent received it', line: 'The agent received it but is idle.', hint: 'The agent received your message but has not answered. If this stays, ask it in Claude Code to continue.'};
   if (a.listening) return {label: 'agent listening', line: 'The agent is picking it up…'};
   return busy ? {label: 'agent busy', line: 'The agent is busy with other work.', hint: 'The agent is busy with other work. It sees this message at its next archplan call.'}
-    : {off: true, label: 'agent has not read it', line: 'The agent is idle and has not read it.', hint: 'An agent is connected but idle. Send it a message in Claude Code, for example "answer the archplan threads".'};
+    : {off: true, label: 'agent has not seen it', line: 'The agent is idle and has not seen it.', hint: 'An agent is connected but idle. Send it a message in Claude Code, for example "answer the archplan threads".'};
 }
 // The busy line for a request thread (refactor proposals): state and a link.
 function agentLine(tid, act) {

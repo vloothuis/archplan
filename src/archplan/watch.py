@@ -28,7 +28,8 @@ def tasks(p: Project):
     return {t.get("key") or t.get("title"): t.get("title", "") for t in plan.get("tasks", [])}
 
 
-def watch(p: Project, interval: float = 2, emit=print) -> None:
+def watch(p: Project, interval: float = 2, emit=print, saw=None) -> None:
+    """saw, when given, is told each thread id and message count the agent was sent."""
     store = Store(p.dir)
     seen = {t["id"]: (len(t["messages"]), t["status"]) for t in store.read()["threads"]}
     last_tasks = tasks(p)
@@ -50,6 +51,8 @@ def watch(p: Project, interval: float = 2, emit=print) -> None:
                 if not quiet:
                     text = " ".join(mentions(last["text"]).split())
                     out(f"comment {t['id']} on {t['anchor'][:120]}: {text[:300]}")
+                    if saw:
+                        saw({t["id"]: n})
             elif old and st != old[1] and n == old[0] and st != "planned":
                 # status alone: the human (the agent resolves with a reply)
                 out(f"{'reopened' if st == 'open' else st} {t['id']} on {t['anchor'][:120]}")
